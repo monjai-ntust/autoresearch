@@ -1,23 +1,17 @@
 [project]
-name = "autoresearch"
+name = "low-resource-kg-artifact"
 version = "0.1.0"
-description = "Autonomous pretraining research swarm"
+description = "Research artifact for low-resource joint entity and relation extraction"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "kernels>=0.11.7",
-    "matplotlib>=3.10.8",
-    "numpy>=2.2.6",
-    "pandas>=2.3.3",
+    "peft>=0.13.0",
     "pyarrow>=21.0.0",
+    "pytorch-crf>=0.7.2",
     "requests>=2.32.0",
-    "rustbpe>=0.1.0",
-    "tiktoken>=0.11.0",
+    "safetensors>=0.4.5",
     "torch==2.9.1",
-    # Stage 2 (SciERC + BERT KG extraction)
     "transformers>=4.46.0",
-    "datasets>=3.0.0",
-    "seqeval>=1.2.2",
 ]
 
 [tool.uv.sources]

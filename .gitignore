@@ -12,12 +12,29 @@ worktrees/
 results/
 queue/
 
+# Model checkpoints and adapter weights
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Downloaded or generated datasets (tracked evidence files remain tracked)
+data/scierc/
+data/conll04/
+data/ade/
+data/arxiv_real/
+data/scier_dataset/
+data/cuad/
+data/accord_zh_translate/
+data/dapt_zh_laws/
+data/code_accord/relations/
+data/code_accord/entities/*.csv
+!data/code_accord/entities/train.csv
+
 # Agent prompt files (generated per-session by launchers)
 CLAUDE.md
 AGENTS.md
 
 # Experimental code/artifacts
 dev/
-
-# Results file
-results.tsv

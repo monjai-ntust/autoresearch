@@ -1,5 +1,7 @@
 # autoresearch — Knowledge Graph Adversarial Training
 
+> **Historical provenance only.** This prompt records the autonomous procedure used during the original experiments. It is not a supported publication runner: several Stage 1 files it names were removed after provenance review, and its host-specific/destructive keep-or-discard instructions must not be executed on a current checkout. Use `README.md` for supported artifact commands.
+
 > Adapted from [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 > Last updated: 2026-04-09T23:00+08:00
 

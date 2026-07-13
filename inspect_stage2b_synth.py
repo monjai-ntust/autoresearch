@@ -22,38 +22,43 @@ from models.decoder_d import FrozenQwenDecoder
 SEED = 42
 N_TRIPLES = 16
 
-random.seed(SEED)
+def main():
+    random.seed(SEED)
 
-tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
-train_loader, _, _ = build_dataloaders(tokenizer, batch_size=16, max_length=128)
+    tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
+    train_loader, _, _ = build_dataloaders(tokenizer, batch_size=16, max_length=128)
 
-# Pool all gold relations across first few batches
-pool = []
-for batch in train_loader:
-    for sent_idx, rels in enumerate(batch["gold_relations"]):
-        words = batch["words"][sent_idx]
-        for (h_span, t_span, rel_id) in rels:
-            if rel_id == NO_REL_ID:
-                continue
-            hs, he = h_span
-            ts, te = t_span
-            pool.append((
-                " ".join(words[hs:he + 1]),
-                ID2REL[rel_id],
-                " ".join(words[ts:te + 1]),
-            ))
-    if len(pool) > 500:
-        break
+    # Pool all gold relations across first few batches
+    pool = []
+    for batch in train_loader:
+        for sent_idx, rels in enumerate(batch["gold_relations"]):
+            words = batch["words"][sent_idx]
+            for (h_span, t_span, rel_id) in rels:
+                if rel_id == NO_REL_ID:
+                    continue
+                hs, he = h_span
+                ts, te = t_span
+                pool.append((
+                    " ".join(words[hs:he + 1]),
+                    ID2REL[rel_id],
+                    " ".join(words[ts:te + 1]),
+                ))
+        if len(pool) > 500:
+            break
 
-print(f"Pool size: {len(pool)} gold triples")
-sample = random.sample(pool, N_TRIPLES)
+    print(f"Pool size: {len(pool)} gold triples")
+    sample = random.sample(pool, N_TRIPLES)
 
-decoder = FrozenQwenDecoder("Qwen/Qwen2.5-0.5B-Instruct", device="cuda")
-synth = decoder.generate_batch(sample, max_new_tokens=40, temperature=0.8, top_p=0.9)
+    decoder = FrozenQwenDecoder("Qwen/Qwen2.5-0.5B-Instruct", device="cuda")
+    synth = decoder.generate_batch(sample, max_new_tokens=40, temperature=0.8, top_p=0.9)
 
-print("\n" + "=" * 80)
-print("Stage 2b synth sentence audit")
-print("=" * 80)
-for (h, r, t), s in zip(sample, synth):
-    print(f"\nTriple:  ({h!r}, {r}, {t!r})")
-    print(f"  Synth: {s!r}")
+    print("\n" + "=" * 80)
+    print("Stage 2b synth sentence audit")
+    print("=" * 80)
+    for (h, r, t), s in zip(sample, synth):
+        print(f"\nTriple:  ({h!r}, {r}, {t!r})")
+        print(f"  Synth: {s!r}")
+
+
+if __name__ == "__main__":
+    main()

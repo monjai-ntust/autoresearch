@@ -1,92 +1,170 @@
-# autoresearch
+# Low-resource joint entity and relation extraction artifact
 
-![teaser](progress.png)
+This repository contains the research implementation for a low-resource knowledge-graph construction pipeline. It trains a joint named-entity recognition (NER) and relation extraction (RE) encoder, extracts confidence-bearing triples, optionally verifies or corrects them with an Ollama-hosted LLM, and builds a provenance-bearing graph.
 
-*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
+The recommended artifact surface is:
 
-The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model. The training code here is a simplified single-GPU implementation of [nanochat](https://github.com/karpathy/nanochat). The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the `program.md` Markdown files that provide context to the AI agents and set up your autonomous research org. The default `program.md` in this repo is intentionally kept as a bare bones baseline, though it's obvious how one would iterate on it over time to find the "research org code" that achieves the fastest research progress, how you'd add more agents to the mix, etc. A bit more context on this project is here in this [tweet](https://x.com/karpathy/status/2029701092347630069) and [this tweet](https://x.com/karpathy/status/2031135152349524125).
+```text
+train_span.py
+    -> inference_kg.py
+    -> verify_triples_llm.py
+    -> build_kg.py
+```
 
-## How it works
+The repository also retains scripts for reported baselines, ablations, closed-loop attempts, cross-dataset transfer, and negative results. Those historical paths are evidence, not all recommended starting points.
 
-The repo is deliberately kept small and only really has three files that matter:
+## Repository status
 
-- **`prepare.py`** — fixed constants, one-time data prep (downloads training data, trains a BPE tokenizer), and runtime utilities (dataloader, evaluation). Not modified.
-- **`train.py`** — the single file the agent edits. Contains the full GPT model, optimizer (Muon + AdamW), and training loop. Everything is fair game: architecture, hyperparameters, optimizer, batch size, etc. **This file is edited and iterated on by the agent**.
-- **`program.md`** — baseline instructions for one agent. Point your agent here and let it go. **This file is edited and iterated on by the human**.
+- Python 3.10 is the selected and minimum supported Python version.
+- The committed lockfile describes the current source environment; it is not an exact manifest of every historical run.
+- Historical raw logs and model checkpoints are not included.
+- SciERC, CoNLL04, ADE, and arXiv acquisition scripts are included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not included.
+- Missing verifier Precision, Recall, and F1 evaluation is Phase B work and is not claimed as complete here.
 
-By design, training runs for a **fixed 5-minute time budget** (wall clock, excluding startup/compilation), regardless of the details of your compute. The metric is **val_bpb** (validation bits per byte) — lower is better, and vocab-size-independent so architectural changes are fairly compared.
+## Installation
 
-If you are new to neural networks, this ["Dummy's Guide"](https://x.com/hooeem/status/2030720614752039185) looks pretty good for a lot more context.
-
-## Quick start
-
-**Requirements:** A single NVIDIA GPU (tested on H100), Python 3.10+, [uv](https://docs.astral.sh/uv/).
+Install [uv](https://docs.astral.sh/uv/), then create the locked environment:
 
 ```bash
-
-# 1. Install uv project manager (if you don't already have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Install dependencies
 uv sync
-
-# 3. Download data and train tokenizer (one-time, ~2 min)
-uv run prepare.py
-
-# 4. Manually run a single training experiment (~5 min)
-uv run train.py
 ```
 
-If the above commands all work ok, your setup is working and you can go into autonomous research mode.
+PyTorch is resolved from the CUDA 12.8 wheel index. CPU execution is possible for small checks, but reported training runs require a suitable CUDA GPU and substantially more time and memory.
 
-## Running the agent
+Model backbones are loaded through Hugging Face Transformers and may require network access on first use. The verifier and generation scripts additionally require `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the requested local model (historically `qwen3:32b`). `--ollama-url` is configurable, so on-premise execution is a deployment choice rather than a code-enforced invariant.
 
-Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
+## Data
 
-```
-Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
-```
+Run acquisition scripts from the repository root:
 
-The `program.md` file is essentially a super lightweight "skill".
-
-## Project structure
-
-```
-prepare.py      — constants, data prep + runtime utilities (do not modify)
-train.py        — model, optimizer, training loop (agent modifies this)
-program.md      — agent instructions
-pyproject.toml  — dependencies
+```bash
+uv run python data/download_scierc.py
+uv run python data/download_conll04.py
+uv run python data/download_ade.py
+uv run python data/download_arxiv_real.py
 ```
 
-## Design choices
+Expected default locations are:
 
-- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
-- **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
-- **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
+| Dataset key | Default location | Included? |
+|---|---|---|
+| `scierc` | `data/scierc/` | No; downloader included |
+| `conll04` | `data/conll04/` | No; downloader included |
+| `ade` | `data/ade/` | No; downloader included |
+| arXiv critic corpus | `data/arxiv_real/cs_validation.jsonl` | No; downloader included |
+| `accord` | `data/code_accord/` | Incomplete: only `entities/train.csv` is tracked |
+| `scier` | `data/scier_dataset/SciER/PLM/` | No; acquire separately |
+| `cuad` | loader-specific repository/home path | No; acquire separately |
 
-## Platform support
+The downloaders identify upstream sources but do not grant redistribution rights. Review each dataset's license and terms before acquisition or publication. Do not commit downloaded corpora or generated labels blindly.
 
-This code currently requires that you have a single NVIDIA GPU. In principle it is quite possible to support CPU, MPS and other platforms but this would also bloat the code. I'm not 100% sure that I want to take this on personally right now. People can reference (or have their agents reference) the full/parent nanochat repository that has wider platform support and shows the various solutions (e.g. a Flash Attention 3 kernels fallback implementation, generic device support, autodetection, etc.), feel free to create forks or discussions for other platforms and I'm happy to link to them here in the README in some new notable forks section or etc.
+## Train the primary encoder
 
-Seeing as there seems to be a lot of interest in tinkering with autoresearch on much smaller compute platforms than an H100, a few extra words. If you're going to try running autoresearch on smaller computers (Macbooks etc.), I'd recommend one of the forks below. On top of this, here are some recommendations for how to tune the defaults for much smaller models for aspiring forks:
+The primary runner supports `scierc`, `scier`, `conll04`, `ade`, `accord`, and `cuad`. This minimal SciERC command trains the gold-only span model and saves its best checkpoint:
 
-1. To get half-decent results I'd use a dataset with a lot less entropy, e.g. this [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean). These are GPT-4 generated short stories. Because the data is a lot narrower in scope, you will see reasonable results with a lot smaller models (if you try to sample from them after training).
-2. You might experiment with decreasing `vocab_size`, e.g. from 8192 down to 4096, 2048, 1024, or even - simply byte-level tokenizer with 256 possibly bytes after utf-8 encoding.
-3. In `prepare.py`, you'll want to lower `MAX_SEQ_LEN` a lot, depending on the computer even down to 256 etc. As you lower `MAX_SEQ_LEN`, you may want to experiment with increasing `DEVICE_BATCH_SIZE` in `train.py` slightly to compensate. The number of tokens per fwd/bwd pass is the product of these two.
-4. Also in `prepare.py`, you'll want to decrease `EVAL_TOKENS` so that your validation loss is evaluated on a lot less data.
-5. In `train.py`, the primary single knob that controls model complexity is the `DEPTH` (default 8, here). A lot of variables are just functions of this, so e.g. lower it down to e.g. 4.
-6. You'll want to most likely use `WINDOW_PATTERN` of just "L", because "SSSL" uses alternating banded attention pattern that may be very inefficient for you. Try it.
-7. You'll want to lower `TOTAL_BATCH_SIZE` a lot, but keep it powers of 2, e.g. down to `2**14` (~16K) or so even, hard to tell.
+```bash
+uv run python train_span.py \
+  --dataset scierc \
+  --max-steps 1500 \
+  --save-best-to checkpoints/scierc_span_best.pt
+```
 
-I think these would be the reasonable hyperparameters to play with. Ask your favorite coding agent for help and copy paste them this guide, as well as the full source code.
+Inspect the complete experimental interface without starting training:
 
-## Notable forks
+```bash
+uv run python train_span.py --help
+```
 
-- [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (MacOS)
-- [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx) (MacOS)
-- [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (Windows)
-- [andyluo7/autoresearch](https://github.com/andyluo7/autoresearch) (AMD)
+The CLI retains reported controls for synthetic/CAST/CycleGT data, relation replay, checkpoint initialization, evidence-graph fusion, contrastive and focal losses, BIO enrichment, class weighting, marker representations, and zh-Hant experiments. Defaults and matching behavior are intentionally preserved for provenance.
 
-## License
+## Extract, verify, and build a graph
 
-MIT
+First extract triples from a compatible checkpoint:
+
+```bash
+uv run python inference_kg.py \
+  --checkpoint checkpoints/scierc_span_best.pt \
+  --dataset scierc \
+  --split test \
+  --out-jsonl results/scierc_inference.jsonl
+```
+
+Optionally verify and correct the predicted triples with Ollama:
+
+```bash
+uv run python verify_triples_llm.py \
+  --input results/scierc_inference.jsonl \
+  --output results/scierc_verified.jsonl \
+  --ollama-url http://localhost:11434 \
+  --ollama-model qwen3:32b \
+  --mode correct
+```
+
+Build the graph, optionally applying the retained neuro-symbolic rules:
+
+```bash
+uv run python build_kg.py \
+  --input results/scierc_verified.jsonl \
+  --output results/scierc_kg.json \
+  --filter-mode verified \
+  --use-rules
+```
+
+`verify_triples_llm.py` uses deterministic decoding (`temperature=0`, thinking disabled), per-request timeout/retry controls, and append-style JSONL output. It still requires a separately designed, leakage-safe labeled evaluation before verifier performance can be reported.
+
+## Evaluation semantics
+
+`eval/triple_f1.py` provides the shared evaluation functions used by retained training paths:
+
+- NER spans require exact boundary and entity-type agreement.
+- Gold-span RE evaluates relation labels over gold entity spans.
+- End-to-end triple matching requires exact head span, tail span, and relation label; for historical compatibility, it does not include entity type in the triple key.
+- `train_span.py` selects checkpoints using `triple_f1` by default and can use `ner_f1` for NER-oriented pretraining.
+
+The historical `eval_graph_rag.py` script is a diagnostic, not a leakage-free downstream benchmark: it derives questions and reference answers from the same gold-bearing source. `diagnose_evidence_paths.py` reports structural evidence-path coverage and likewise should not be interpreted as task accuracy.
+
+## Retained experimental families
+
+The following paths remain because they implement or explain reported experiments:
+
+| Family | Main paths |
+|---|---|
+| Initial and cross-dataset baselines | `train_stage2.py`, `train_multi.py`, `eval_checkpoint.py` |
+| Pseudo-label and CAST | `generate_pseudo_labels*.py`, `train_stage2_curriculum.py`, `train_stage2_multiround.py` |
+| Real-data closed-loop attempts | `train_stage2b.py`, `train_stage2c.py`, `train_stage2d.py`, `train_stage2e.py`, `train_gan.py`, `train_gumbel.py` |
+| Cooperative masking/pretraining | `train_pretrain_cooperative.py`, `generate_entity_masks.py` |
+| CycleGT and augmentation | `generate_cycle_data.py`, `generate_paraphrase_dataset.py`, `generate_synth_dataset.py`, `generate_accord_llm_aug.py`, `generate_entigraph.py` |
+| zh-Hant transfer | `zh_translate_project.py`, `dapt_zh.py`, zh-Hant options in `train_span.py` |
+
+`results.tsv` and `results_stage2.tsv` are retained experiment ledgers rather than newly generated benchmark summaries. Many historical scripts expect checkpoints, generated JSONL, raw data, external models, or DGX/POSIX paths that are not present in a clean checkout.
+
+`program.md` is retained as the exact project-modified autonomous experiment-controller prompt. It is historical provenance, not a safe supported runner: it includes obsolete assumptions, environment-specific paths, and destructive keep/discard instructions. `run_a19_cosine_probe.sh` is similarly an exact nonportable DGX command record. `bench_gpu.py` is a BERT forward/backward smoke check, not evidence for the paper's resource or verifier timing claims.
+
+## Offline regression tests
+
+Run the publication-critical pure-function tests without downloading a model or dataset:
+
+```bash
+uv run --locked python -m unittest discover -s tests -v
+```
+
+The suite covers BIO decoding and Precision/Recall/F1 arithmetic, ontology-rule filtering, graph entity normalization/clustering/filter modes, bounded evidence paths, and simple/corrective LLM verdict parsing. It does not substitute for checkpoint, dataset, GPU, or Ollama evaluation.
+
+## Outputs and reproducibility
+
+Use `results/` for generated metrics, inference JSONL, verified JSONL, graph JSON, and diagnostics; use `checkpoints/` for model weights. Both locations are local outputs and should not be committed unless a specific small artifact is necessary, redistributable, and documented.
+
+For a reproducible run, record at minimum:
+
+- source commit and command;
+- dataset version, license, and split/hash;
+- random seed and model identifier/revision;
+- Python, PyTorch, CUDA, GPU, and dependency-lock versions;
+- Ollama/model version and verifier settings when used;
+- produced checkpoint/result hashes and exclusions.
+
+The historical DGX notes describe a PyTorch 2.11/CUDA 13.0 environment, while the current lock targets a different PyTorch/CUDA combination. Do not represent either as the exact environment of every reported row without a per-run manifest.
+
+## License boundary
+
+The inherited repository declared the source code MIT, but this checkout does not yet include a standalone `LICENSE` file. Publication owners must verify the intended code license and add the corresponding license text before release. Third-party datasets, model weights, and generated data remain subject to their own licenses and terms.

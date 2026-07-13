@@ -26,8 +26,9 @@ import random
 import time
 from pathlib import Path
 
-os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+if __name__ == "__main__":
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 import torch.nn as nn

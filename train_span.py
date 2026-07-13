@@ -130,7 +130,7 @@ def parse_args():
                    help="IoU-based weight for hard negative spans. "
                         "0 = disabled. When >0, negative spans overlapping gold "
                         "entities get loss weighted by (1 + iou_neg_weight * IoU). "
-                        "SpERT.MT (2023) shows +2.88% RE on SciERC with IoU scaling.")
+                        "SpERT.MT (2023) shows +2.88%% RE on SciERC with IoU scaling.")
     p.add_argument("--label-smoothing", type=float, default=0.1,
                    help="Label smoothing for NER focal loss. 0 = disabled. "
                         "0.1 recommended for A21. Prevents overconfident predictions "
