@@ -1,0 +1,170 @@
+{
+  "$schema": "../schemas/phase_b/section5-evidence-register.schema.json",
+  "register_revision": "SECTION5-EVIDENCE-1.0",
+  "protocol_id": "B04-PATH-A-1.3",
+  "workflow_id": "PATH-A-WORKFLOW-1.3",
+  "authority": "secondary_only",
+  "canonical_publication_eligible": false,
+  "ledgers": [
+    {
+      "path": "results.tsv",
+      "normalized_lf_bytes": 27279,
+      "normalized_lf_sha256": "f862fa3b63fce17187990337909016176dd9a8527988b5c0da4bd33bb25ccba5",
+      "allowed_newline_styles": ["lf", "crlf"],
+      "line_count": 94,
+      "ends_with_newline": true,
+      "has_header": false,
+      "nominal_field_count": 5,
+      "structural_status": "known_structural_defects_retained",
+      "expected_structure": {
+        "blank_lines": [57, 61],
+        "field_count_histogram": {"1": 2, "5": 90, "9": 2},
+        "concatenated_record_lines": [58, 62]
+      }
+    },
+    {
+      "path": "results_stage2.tsv",
+      "normalized_lf_bytes": 3946,
+      "normalized_lf_sha256": "cc28999d61f6daf323a92645a119ac58a7d0916f5768920403545c71b2a17eb6",
+      "allowed_newline_styles": ["lf", "crlf"],
+      "line_count": 9,
+      "ends_with_newline": true,
+      "has_header": true,
+      "nominal_field_count": 8,
+      "structural_status": "tabular_header_and_eight_early_scierc_rows",
+      "expected_structure": {
+        "blank_lines": [],
+        "field_count_histogram": {"8": 9},
+        "concatenated_record_lines": []
+      }
+    }
+  ],
+  "claim_families": [
+    {
+      "claim_id": "S5-1-ENCODER-RECIPE",
+      "draft_scope": "Section 5.1 Table 1 encoder and full-recipe rows",
+      "support_status": "partial_secondary",
+      "canonical_eligible": false,
+      "ledger_references": [
+        {
+          "path": "results.tsv",
+          "line": 63,
+          "contains_all": ["DeBERTa-large ACCORD 8-seed validation", "0.3797", "p=0.0036", "DeBERTa-base 0.3639"]
+        }
+      ],
+      "absence_queries": ["0.4097", "A20+A21+A12"],
+      "limitations": ["DISC-001", "DISC-002", "DISC-003", "DISC-016", "DISC-018"],
+      "canonical_next_action": "Regenerate every comparison on the approved leakage-safe split and matcher; retain historical means only as provenance signals."
+    },
+    {
+      "claim_id": "S5-1-AUGMENTATION",
+      "draft_scope": "Section 5.1 claimed 38-variant augmentation family",
+      "support_status": "conflicting_secondary",
+      "canonical_eligible": false,
+      "ledger_references": [
+        {
+          "path": "results.tsv",
+          "line": 58,
+          "contains_all": ["EntiGraph 5-pairs", "4-seed verification", "confirmed negative"]
+        },
+        {
+          "path": "results.tsv",
+          "line": 73,
+          "contains_all": ["Schema-aware Qwen LLM augmentation 8-seed validation", "0.3887", "not statistically clear"]
+        },
+        {
+          "path": "results.tsv",
+          "line": 76,
+          "contains_all": ["combined schema+targeted Qwen augmentation", "mean=0.3707", "not validated"]
+        }
+      ],
+      "absence_queries": [],
+      "limitations": ["DISC-004", "DISC-016", "DISC-018"],
+      "canonical_next_action": "Recover a non-overlapping row-level intervention manifest or reduce the claim to auditable families, then rerun only justified comparators canonically."
+    },
+    {
+      "claim_id": "S5-1-CROSS-DATASET",
+      "draft_scope": "Section 5.1 SciERC, CoNLL04, and ADE multi-seed comparison",
+      "support_status": "not_recorded_in_frozen_ledgers",
+      "canonical_eligible": false,
+      "ledger_references": [
+        {
+          "path": "results_stage2.tsv",
+          "line": 9,
+          "contains_all": ["stage2-006", "BIO-constrained greedy decoding", "Triple F1 0.346"]
+        }
+      ],
+      "absence_queries": ["CoNLL04", "ADE 0.816"],
+      "limitations": ["DISC-009"],
+      "canonical_next_action": "Import separately hashed final multi-seed evidence or rerun matched public-dataset comparisons; do not infer final rows from early SciERC development entries."
+    },
+    {
+      "claim_id": "S5-2-GRAPH-RAG",
+      "draft_scope": "Section 5.2 Table 2 Graph RAG diagnostic",
+      "support_status": "diagnostic_only_secondary",
+      "canonical_eligible": false,
+      "ledger_references": [
+        {
+          "path": "results.tsv",
+          "line": 64,
+          "contains_all": ["Verified KG Graph RAG", "1 keep, 32 correct, 7 discard", "hybrid=20%"]
+        },
+        {
+          "path": "results.tsv",
+          "line": 65,
+          "contains_all": ["Confidence-only", "hybrid=30%", "Gold-KG ceiling"]
+        },
+        {
+          "path": "results.tsv",
+          "line": 66,
+          "contains_all": ["ACCORD-template Graph RAG sanity check", "Gold KG", "hybrid=50%"]
+        }
+      ],
+      "absence_queries": [],
+      "limitations": ["DISC-005", "DISC-007", "DISC-008", "DISC-011", "DISC-016"],
+      "canonical_next_action": "Keep these rows diagnostic-only; any confirmatory comparison requires a leakage-safe frozen question set, matched evidence access, adequate sample size, and uncertainty."
+    },
+    {
+      "claim_id": "S5-3-VERIFIER",
+      "draft_scope": "Section 5.3 Table 3 and missing CODE-ACCORD verifier effect",
+      "support_status": "incompatible_or_missing_secondary",
+      "canonical_eligible": false,
+      "ledger_references": [
+        {
+          "path": "results.tsv",
+          "line": 64,
+          "contains_all": ["40 verified", "1 keep, 32 correct, 7 discard"]
+        }
+      ],
+      "absence_queries": ["LLM = Yes", "0.436"],
+      "limitations": ["DISC-005", "DISC-006", "DISC-016", "DISC-018"],
+      "canonical_next_action": "Measure raw, confidence, simple, and corrective conditions on one frozen CODE-ACCORD candidate universe with applied rewrites, strict gold, confusion counts, Precision, Recall, F1, and Accuracy."
+    },
+    {
+      "claim_id": "S5-4-INDUSTRY-RESOURCE-UI",
+      "draft_scope": "Section 5.4 resource and review-workflow claims",
+      "support_status": "partial_secondary",
+      "canonical_eligible": false,
+      "ledger_references": [
+        {
+          "path": "results.tsv",
+          "line": 64,
+          "contains_all": ["40 verified in 77s"]
+        }
+      ],
+      "absence_queries": [],
+      "limitations": ["DISC-010", "DISC-011"],
+      "canonical_next_action": "Retain only the 40-in-77-second observation as directly ledger-backed; separately measure resources and scope or release the review interface before stronger claims."
+    },
+    {
+      "claim_id": "S5-5-ZH-HANT",
+      "draft_scope": "Section 5.5 Table 4 Traditional-Chinese track",
+      "support_status": "not_recorded_in_frozen_ledgers",
+      "canonical_eligible": false,
+      "ledger_references": [],
+      "absence_queries": ["C-TW.3a", "0.5995", "0.6046"],
+      "limitations": ["DISC-012", "DISC-013", "DISC-014", "DISC-015"],
+      "canonical_next_action": "Import separately hashed zh-Hant evidence only if its data, implementation, split, and release constraints are resolved; otherwise keep the track outside the standalone artifact."
+    }
+  ]
+}

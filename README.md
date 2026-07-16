@@ -8,9 +8,10 @@ The canonical publication-facing Phase B surface is:
 python -B -m phase_b_pipeline
 ```
 
-The current B-05 core slice implements checkout/environment `doctor`, immutable
-CODE-ACCORD `fetch`, strict `prepare`, and offline `CODE-STRICT-1` `score`
-stages. Official v1.0.0 preparation intentionally hard-stops with a complete
+The current B-05 core slice implements checkout/environment `doctor`, frozen
+Section 5 ledger `reconcile`, immutable CODE-ACCORD `fetch`, strict `prepare`,
+and offline `CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
+intentionally hard-stops with a complete
 audit because nine relation-marker arguments do not map to unique typed BIO
 spans; no row is silently repaired or omitted. See
 [`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for exact commands, input
@@ -34,6 +35,16 @@ result records remain immutable and every rerun receives a new identity. Any
 newly added measurement must reuse the canonical framework. Similar trend
 direction is a useful discrepancy check, not an acceptance criterion and never
 a reason to rewrite measurements.
+
+The `reconcile` stage makes that boundary machine-checkable. After `doctor`, it
+verifies the portable LF-normalized identities and known physical structure of
+`results.tsv` and `results_stage2.tsv`, checks stable line/absence anchors for
+seven Section 5 claim families, and writes
+`audit/section5-evidence-reconciliation.json`. It records each checkout's raw
+hash and newline form, preserves the two blank and two concatenated physical
+rows in `results.tsv` as historical defects, and reports zero claim families as
+canonical-ready. It neither repairs the ledgers nor authorizes an official run.
+
 The design-only [`Phase C migration plan`](docs/phase_c_migration.md) records
 what can be reused, what must change, the assumptions that remain frozen, and
 the evidence conditions that require that plan to be revised. It does not

@@ -16,6 +16,8 @@ from .constants import (
     MATCHER_ID,
     MATRIX_REVISION,
     PROTOCOL_ID,
+    SECTION5_CLAIM_IDS,
+    SECTION5_EVIDENCE_REVISION,
     TRAINING_SEEDS,
     WORKFLOW_ID,
 )
@@ -54,6 +56,8 @@ class PipelineConfig:
     value: dict[str, Any]
     matrix_path: Path
     matrix: dict[str, Any]
+    section5_evidence_path: Path
+    section5_evidence: dict[str, Any]
 
     @property
     def paths(self) -> dict[str, str]:
@@ -235,7 +239,47 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     matrix_path = resolve_tracked_path(source_root, matrix_raw)
     matrix = _object(load_json(matrix_path), "experiment matrix")
     _validate_matrix(matrix)
-    return PipelineConfig(path=path, value=value, matrix_path=matrix_path, matrix=matrix)
+
+    evidence_raw = _required(value, "section5_evidence_register", "config")
+    if not isinstance(evidence_raw, str):
+        raise DataContractError(
+            "config.section5_evidence_register must be a tracked relative path"
+        )
+    evidence_path = resolve_tracked_path(source_root, evidence_raw)
+    evidence = _object(load_json(evidence_path), "Section 5 evidence register")
+    _validate_section5_evidence_identity(evidence)
+    return PipelineConfig(
+        path=path,
+        value=value,
+        matrix_path=matrix_path,
+        matrix=matrix,
+        section5_evidence_path=evidence_path,
+        section5_evidence=evidence,
+    )
+
+
+def _validate_section5_evidence_identity(evidence: dict[str, Any]) -> None:
+    expected = {
+        "register_revision": SECTION5_EVIDENCE_REVISION,
+        "protocol_id": PROTOCOL_ID,
+        "workflow_id": WORKFLOW_ID,
+        "authority": "secondary_only",
+        "canonical_publication_eligible": False,
+    }
+    for field, expected_value in expected.items():
+        if evidence.get(field) != expected_value:
+            raise DataContractError(
+                f"Section 5 evidence register {field} must be {expected_value!r}"
+            )
+    claims = evidence.get("claim_families")
+    if not isinstance(claims, list):
+        raise DataContractError("Section 5 evidence register claim_families must be an array")
+    ids = [claim.get("claim_id") for claim in claims if isinstance(claim, dict)]
+    if ids != list(SECTION5_CLAIM_IDS):
+        raise DataContractError(
+            "Section 5 evidence register claim families must be ordered exactly as "
+            f"{list(SECTION5_CLAIM_IDS)}"
+        )
 
 
 def _validate_matrix(matrix: dict[str, Any]) -> None:

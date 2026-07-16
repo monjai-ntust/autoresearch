@@ -6,6 +6,7 @@
   "matcher_id": "CODE-STRICT-1",
   "implementation_status": "b05_core_development",
   "experiment_matrix": "configs/phase_b_experiment_matrix.json",
+  "section5_evidence_register": "configs/phase_b_section5_evidence.json",
   "dataset": {
     "dataset_id": "CODE-ACCORD-v1.0.0",
     "zenodo_record": "10210022",
@@ -189,6 +190,7 @@
     "pyproject.toml",
     "docs/phase_b_workflow.md",
     "docs/phase_c_migration.md",
+    "configs/phase_b_section5_evidence.json",
     "schemas/phase_b/config.schema.json",
     "schemas/phase_b/experiment-matrix.schema.json",
     "schemas/phase_b/records.schema.json",
@@ -201,6 +203,8 @@
     "schemas/phase_b/data-preparation-manifest.schema.json",
     "schemas/phase_b/gold-alignment-audit.schema.json",
     "schemas/phase_b/prepared-sentence.schema.json",
+    "schemas/phase_b/section5-evidence-register.schema.json",
+    "schemas/phase_b/section5-evidence-reconciliation.schema.json",
     "phase_b_pipeline/__init__.py",
     "phase_b_pipeline/__main__.py",
     "phase_b_pipeline/acquisition.py",
@@ -213,8 +217,11 @@
     "phase_b_pipeline/paths.py",
     "phase_b_pipeline/preparation.py",
     "phase_b_pipeline/records.py",
+    "phase_b_pipeline/reconciliation.py",
     "phase_b_pipeline/scoring.py",
     "phase_b_pipeline/split.py",
-    "phase_b_pipeline/statistics.py"
+    "phase_b_pipeline/statistics.py",
+    "results.tsv",
+    "results_stage2.tsv"
   ]
 }

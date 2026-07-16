@@ -6,7 +6,7 @@ parent repository or `research-logs`.
 
 ## Current implementation boundary
 
-The B-05 core slice implements one public module entry point with four stages
+The B-05 core slice implements one public module entry point with five stages
 and focused contract tests:
 
 - `doctor` validates the direct source checkout, exact Python/uv requirements,
@@ -17,6 +17,10 @@ and focused contract tests:
   partial-file resume, then requires exactly 101,265,616 bytes and MD5
   `57e2efa465f41e2f582db62810fb50f5` before promotion. It also records SHA-256
   and license provenance in `manifests/02-input-acquisition-manifest.json`.
+- `reconcile` verifies the two frozen historical result ledgers and their known
+  physical structure, checks stable evidence/absence anchors for seven draft
+  Section 5 claim families, and emits a secondary-only audit without repairing
+  or promoting any historical result.
 - `prepare` safely extracts only the six required annotation CSVs, verifies
   their exact byte/SHA-256 identities, parses all rows, audits the one approved
   UUID repair, and attempts typed directed `CODE-STRICT-1` reconstruction plus
@@ -81,7 +85,34 @@ The checkout manifest always reports that publication execution is not yet
 admitted because B-07 approval has not occurred. A passing B-05 doctor is not
 permission to run the gated training or final-test verifier work.
 
-## 3. Fetch the immutable CODE-ACCORD prerequisite
+## 3. Reconcile the frozen Section 5 ledgers
+
+This stage is read-only with respect to the ledgers and does not require the
+CODE-ACCORD download:
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  reconcile \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-example
+```
+
+The register at `configs/phase_b_section5_evidence.json` binds both ledgers by
+UTF-8 content normalized to LF, so clean Linux and Windows checkouts reconcile
+the same historical text. The audit separately records the raw checkout hash,
+byte count, and newline style. It validates and retains the two blank physical
+lines and two concatenated two-record lines in `results.tsv`; normalization is
+never used to rewrite the source files.
+
+The output is `audit/section5-evidence-reconciliation.json`. Its authority is
+always `secondary_only`, its canonical-ready count is zero, and publication
+execution remains unadmitted. The command exits 2 on identity, structure,
+anchor, or overwrite drift. Missing final-recipe, cross-dataset, verifier, and
+zh-Hant evidence must be supplied through separately hashed provenance or
+regenerated under the canonical framework; it is not inferred from these
+ledgers.
+
+## 4. Fetch the immutable CODE-ACCORD prerequisite
 
 The fetch stage requires the passing checkout manifest created by `doctor` in
 the same run:
@@ -99,7 +130,7 @@ the server sends a complete response. Neither a partial nor a complete archive
 is accepted until its size and upstream MD5 match. The archive remains beneath
 `output/<run-id>/inputs/cache/` and is not committed.
 
-## 4. Audit and prepare CODE-ACCORD
+## 5. Audit and prepare CODE-ACCORD
 
 ```bash
 uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
@@ -123,7 +154,7 @@ split/data manifests, test gold, distributions, attribution, and two
 independently generated trees whose inventories and tree hashes must be
 identical before atomic promotion.
 
-## 5. Supply immutable offline-scoring inputs
+## 6. Supply immutable offline-scoring inputs
 
 Until preparation is unblocked and inference/verifier stages are implemented,
 place the following externally produced, schema-valid files at their configured
@@ -158,7 +189,7 @@ The scorer recomputes every mean and selects the largest; an exact tie must use
 the higher threshold. It rejects an unproven selected value or any assertion
 that test labels were used.
 
-## 6. Reproduce offline strict scoring
+## 7. Reproduce offline strict scoring
 
 ```bash
 uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
@@ -203,7 +234,7 @@ The `-B` flag is mandatory for canonical commands: it prevents Python from
 creating `__pycache__` files in the tracked source area. `doctor` checks this
 before declaring the environment compliant.
 
-## 7. Reproducibility interpretation
+## 8. Reproducibility interpretation
 
 This core slice supports immutable CODE-ACCORD acquisition, exhaustive
 preparation auditing, and deterministic offline result replay once valid frozen

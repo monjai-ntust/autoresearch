@@ -75,7 +75,7 @@ historical measurements to preserve a preferred result.
 | `phase_b_pipeline/scoring.py`, `metrics.py`, and `statistics.py` | Reuse | Permit scoring only after strict gold and all candidates share the same approved data/split identities. Metric definitions do not change merely to retain a historical trend. |
 | `data/code_accord.py` and historical evaluation helpers | Secondary support only | Do not use their fuzzy surface lookup or type-agnostic key for canonical gold. If reused operationally, place a versioned adapter behind canonical records and prove parity on eligible fixtures. |
 | Historical `train_span.py`, inference, verifier, and graph scripts | Migrate selectively | Reuse model behavior only through thin canonical adapters that enforce output paths, frozen splits, typed identities, seed/config capture, restart manifests, and no final-test tuning. |
-| `results.tsv`, `results_stage2.tsv`, historical logs, and command records | Immutable provenance | Preserve original bytes/hashes when archived. Corrections or portable reruns produce separately identified artifacts; they never overwrite the historical ledger. |
+| `results.tsv`, `results_stage2.tsv`, historical logs, and command records | Immutable provenance | Preserve original bytes/hashes when archived. The frozen standalone audit establishes that `results.tsv` has two blank physical lines and two concatenated two-record lines, while `results_stage2.tsv` contains only eight early SciERC rows. Neither ledger contains the final full-recipe, final cross-dataset, SciERC verifier-table, or zh-Hant evidence. Corrections, external evidence imports, and portable reruns require separate identities and never overwrite the historical ledgers. |
 
 ## Proposed migration workflow
 
@@ -100,10 +100,14 @@ one run directory.
    the official 173-sentence test boundary, and record the disposition of every
    incompatible row. Recheck exact sizes, disjointness, order independence,
    leakage guards, distributions, and raw/strict counts.
-6. **Migrate claim-bearing adapters.** Route only required historical
-   training/inference behavior through canonical records. Add parity fixtures
-   before retiring or demoting any old command, and keep provenance-only paths
-   visibly separate in the README.
+6. **Gate and migrate claim-bearing adapters.** First run the standalone
+   Section 5 reconciliation and classify each claim's complete evidence bundle.
+   A ledger line may route investigation but cannot fill an absent final result.
+   Any evidence recovered outside the source clone must be imported beneath a
+   run with source path, hash, semantics, and discrepancy constraints recorded.
+   Then route only required historical training/inference behavior through
+   canonical records. Add parity fixtures before retiring or demoting any old
+   command, and keep provenance-only paths visibly separate in the README.
 7. **Rebuild checkpoints and intermediates.** Pin model revisions,
    dependencies, hardware/runtime metadata, seeds, restart state, selection
    rules, and hashes. For seed 42, require the approved independent rebuild
@@ -178,3 +182,4 @@ needed, and approval status. Do not silently update protocol/config identities.
 |---|---|---|
 | 2026-07-17 | C-MIGRATION-1.0 | Established the design-only migration from the approved integrity hard stop to the proposed raw/typed-strict dual view; classified canonical and historical reuse boundaries and froze revision triggers. No Phase C materialization or result execution was authorized. |
 | 2026-07-17 | C-MIGRATION-1.1 | Clarified that historical commands are secondary interfaces and their draft Section 5 data/ledgers are secondary evidence that must be reconciled first; newly added measurements remain bound to the canonical framework. Migration steps and scientific gates are unchanged. |
+| 2026-07-17 | C-MIGRATION-1.2 | Bound the standalone ledgers to a deterministic reconciliation audit and recorded their structural defects and coverage gaps. Migration step 6 now requires separately hashed evidence bundles for final results absent from the ledgers before claim-bearing adapters can be selected. The current canonical preparation hard stop and execution authority are unchanged. |

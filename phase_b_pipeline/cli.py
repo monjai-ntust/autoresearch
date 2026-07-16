@@ -13,6 +13,7 @@ from .doctor import run_doctor
 from .io import DataContractError
 from .paths import PathContractError, RunLayout, discover_source_root
 from .preparation import prepare_run
+from .reconciliation import reconcile_section5_evidence
 from .scoring import ScoreInputs, score_run
 
 
@@ -24,8 +25,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m phase_b_pipeline",
         description=(
             "Canonical standalone Phase B workflow. This B-05 slice implements "
-            "doctor, immutable CODE-ACCORD fetch/preparation, and offline "
-            "CODE-STRICT-1 scoring."
+            "doctor, secondary Section 5 evidence reconciliation, immutable "
+            "CODE-ACCORD fetch/preparation, and offline CODE-STRICT-1 scoring."
         ),
     )
     parser.add_argument(
@@ -43,6 +44,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     fetch.add_argument("--config", default=DEFAULT_CONFIG)
     fetch.add_argument("--run-id", required=True)
+
+    reconcile = subparsers.add_parser(
+        "reconcile",
+        help="Audit frozen Section 5 ledgers without promoting them to canonical evidence",
+    )
+    reconcile.add_argument("--config", default=DEFAULT_CONFIG)
+    reconcile.add_argument("--run-id", required=True)
 
     prepare = subparsers.add_parser(
         "prepare", help="Audit then reconstruct leakage-safe CODE-ACCORD and CODE-SPLIT-1"
@@ -80,6 +88,21 @@ def main(argv: list[str] | None = None) -> int:
                         "run_id": args.run_id,
                         "status": "fetched",
                         "archive_sha256": manifest["archive"]["sha256"],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if args.stage == "reconcile":
+            audit = reconcile_section5_evidence(layout, config)
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": audit["status"],
+                        "claim_family_count": audit["summary"]["claim_family_count"],
+                        "canonical_ready_claim_family_count": 0,
                     },
                     sort_keys=True,
                 )

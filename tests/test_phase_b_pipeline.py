@@ -148,6 +148,7 @@ class ConfigContractTests(unittest.TestCase):
         for relative in (
             "configs/phase_b_path_a.json",
             "configs/phase_b_experiment_matrix.json",
+            "configs/phase_b_section5_evidence.json",
             "schemas/phase_b/config.schema.json",
             "schemas/phase_b/experiment-matrix.schema.json",
             "schemas/phase_b/records.schema.json",
@@ -160,6 +161,8 @@ class ConfigContractTests(unittest.TestCase):
             "schemas/phase_b/data-preparation-manifest.schema.json",
             "schemas/phase_b/gold-alignment-audit.schema.json",
             "schemas/phase_b/prepared-sentence.schema.json",
+            "schemas/phase_b/section5-evidence-register.schema.json",
+            "schemas/phase_b/section5-evidence-reconciliation.schema.json",
         ):
             with self.subTest(path=relative):
                 with (SOURCE_ROOT / relative).open(encoding="utf-8") as handle:
