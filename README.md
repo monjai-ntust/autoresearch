@@ -23,6 +23,18 @@ closed-loop attempts, cross-dataset transfer, and negative results. Those paths
 are provenance evidence; they are not publication commands for approved Path A
 until their claim-bearing behavior is migrated behind the canonical runner.
 
+This creates an explicit two-tier authority boundary. Canonical Path A data,
+manifests, typed matching, splits, checkpoints, and scores are authoritative for
+the main evaluation. The retained historical commands and ledgers are secondary
+support material. They may be adapted for portability or migrated behind
+canonical adapters, but original result records remain immutable and every
+rerun receives a new identity. Similar trend direction is a useful discrepancy
+check, not an acceptance criterion and never a reason to rewrite measurements.
+The design-only [`Phase C migration plan`](docs/phase_c_migration.md) records
+what can be reused, what must change, the assumptions that remain frozen, and
+the evidence conditions that require that plan to be revised. It does not
+override the current preparation hard stop or authorize the proposed migration.
+
 ## Repository status
 
 - Python 3.10 is the selected and minimum supported Python version.
@@ -166,6 +178,13 @@ The historical `eval_graph_rag.py` script is a diagnostic, not a leakage-free do
 ## Retained evaluation and historical reproduction steps
 
 These paths are retained because they produce a draft-reported comparison, a counted negative-result family, or a user-approved diagnostic. Historical commands require the datasets, checkpoints, model caches, and services named below; those artifacts are not bundled. Start with small limits and a separate output path before attempting a recorded full run.
+
+Revisions to these secondary paths must preserve the original command/result
+record and create new run/configuration/hash lineage. They are validated by
+their declared semantics and reproducibility checks, not by whether a rerun
+recreates a preferred trend. A material reversal or non-comparable metric is a
+finding to retain and investigate; it must not be tuned away or promoted into
+canonical Path A evidence without an approved migration.
 
 ### Hardware and evaluation diagnostics
 

@@ -40,6 +40,12 @@ historical standalone scripts remain provenance paths and are not publication
 commands for Path A. Expensive training and final-test Qwen execution remain
 blocked until the approved B-07 go/no-go checkpoint.
 
+The design-only [`Phase C migration plan`](phase_c_migration.md) describes the
+proposed raw-provenance/typed-strict dual view and the code/data paths that could
+be reused if a later protocol amendment is approved. It is not an executable
+stage of this workflow; workflow 1.3 and its official-data hard stop remain
+authoritative.
+
 ## 1. Prepare the standalone checkout
 
 Clone the source repository directly, check out the release commit, and run from

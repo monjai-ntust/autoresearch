@@ -188,6 +188,7 @@
     "uv.lock",
     "pyproject.toml",
     "docs/phase_b_workflow.md",
+    "docs/phase_c_migration.md",
     "schemas/phase_b/config.schema.json",
     "schemas/phase_b/experiment-matrix.schema.json",
     "schemas/phase_b/records.schema.json",
