@@ -4,7 +4,7 @@ Graph RAG Evaluation: Compare LLM QA with and without KG augmentation.
 Generates relation-based questions from SciERC gold data, then evaluates
 three retrieval modes:
   1. LLM-only: direct question → LLM answer
-  2. Text retrieval: question → BM25 retrieve sentences → LLM answer
+  2. Text retrieval: question → unique-token-overlap sentences → LLM answer
   3. KG-augmented: question → KG subgraph retrieval → LLM answer
 
 All inference uses on-premise Qwen3:32b (Ollama). No data leaves local.
@@ -193,7 +193,7 @@ def retrieve_from_kg(kg, query_entity, hops=1, include_sources=False):
 
 
 def retrieve_sentences(records, query_words, top_k=3):
-    """Simple BM25-style text retrieval: word overlap scoring."""
+    """Rank sentences by the count of overlapping unique whitespace tokens."""
     query_set = set(query_words.lower().split())
     scored = []
     for rec in records:

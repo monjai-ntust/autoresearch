@@ -12,6 +12,9 @@ worktrees/
 results/
 queue/
 
+# Phase B standalone workflow output root
+/output/
+
 # Model checkpoints and adapter weights
 checkpoints/
 *.pt
