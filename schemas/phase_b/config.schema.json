@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:path-a-config:1.0",
+  "title": "Phase B Path A configuration",
+  "type": "object",
+  "required": [
+    "config_revision",
+    "protocol_id",
+    "workflow_id",
+    "matcher_id",
+    "experiment_matrix",
+    "dataset",
+    "split",
+    "evaluation_split_id",
+    "training_seeds",
+    "training",
+    "threshold_selection",
+    "statistics",
+    "verifier",
+    "environment",
+    "runtime_paths",
+    "tracked_artifacts"
+  ],
+  "properties": {
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "matcher_id": {"const": "CODE-STRICT-1"},
+    "training_seeds": {
+      "const": [42, 43, 44, 45, 46, 47, 48, 49]
+    },
+    "evaluation_split_id": {"const": "CODE-SPLIT-1:test"},
+    "runtime_paths": {
+      "type": "object",
+      "required": [
+        "gold",
+        "candidates",
+        "simple_verdicts",
+        "corrective_verdicts",
+        "threshold_selection"
+      ],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z_]+$": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "additionalProperties": true
+}

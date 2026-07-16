@@ -2,16 +2,23 @@
 
 This repository contains the research implementation for a low-resource knowledge-graph construction pipeline. It trains a joint named-entity recognition (NER) and relation extraction (RE) encoder, extracts confidence-bearing triples, optionally verifies or corrects them with an Ollama-hosted LLM, and builds a provenance-bearing graph.
 
-The recommended artifact surface is:
+The canonical publication-facing Phase B surface is:
 
 ```text
-train_span.py
-    -> inference_kg.py
-    -> verify_triples_llm.py
-    -> build_kg.py
+python -B -m phase_b_pipeline
 ```
 
-The repository also retains scripts for reported baselines, ablations, closed-loop attempts, cross-dataset transfer, and negative results. Those historical paths are evidence, not all recommended starting points.
+The current B-05 core slice implements checkout/environment `doctor` and offline
+`CODE-STRICT-1` `score` stages. See
+[`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for exact commands, input
+schemas, output layout, reproducibility boundaries, and the still-gated stages.
+Every workflow-created file is confined to ignored `output/<run-id>/`.
+
+The repository also retains the historical `train_span.py -> inference_kg.py ->
+verify_triples_llm.py -> build_kg.py` chain, reported baselines, ablations,
+closed-loop attempts, cross-dataset transfer, and negative results. Those paths
+are provenance evidence; they are not publication commands for approved Path A
+until their claim-bearing behavior is migrated behind the canonical runner.
 
 ## Repository status
 
@@ -19,11 +26,15 @@ The repository also retains scripts for reported baselines, ablations, closed-lo
 - The committed lockfile describes the current source environment; it is not an exact manifest of every historical run.
 - Historical raw logs and model checkpoints are not included.
 - SciERC, CoNLL04, ADE, and arXiv acquisition scripts are included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not included.
-- Missing verifier Precision, Recall, and F1 evaluation is Phase B work and is not claimed as complete here.
+- Missing verifier Precision, Recall, and F1 evaluation remains incomplete. The
+  canonical offline scorer is implemented, but publication results require the
+  frozen external-machine inputs and later approved execution stages.
 
 ## Installation
 
-Install [uv](https://docs.astral.sh/uv/), then create the locked environment:
+Install [uv](https://docs.astral.sh/uv/). For the canonical Phase B workflow,
+use the exact command and versions in `docs/phase_b_workflow.md`. The shorter
+command below is retained for historical-script development:
 
 ```bash
 uv sync
@@ -33,7 +44,7 @@ The tracked support files are part of the reproducibility contract:
 
 | Path | Role |
 |---|---|
-| `.python-version` | Selects Python 3.10 for compatible environment managers. |
+| `.python-version` | Selects Python 3.10; the Path A config separately pins patch version 3.10.20. |
 | `pyproject.toml` | Declares the package metadata and direct dependencies used by `uv sync`. |
 | `uv.lock` | Locks the resolved environment used for validation of this checkout. |
 | `.gitignore` | Excludes local datasets, checkpoints, caches, and generated outputs; it intentionally does not add a log rule. |
@@ -42,9 +53,11 @@ PyTorch is resolved from the CUDA 12.8 wheel index. CPU execution is possible fo
 
 Model backbones are loaded through Hugging Face Transformers and may require network access on first use. The verifier and generation scripts additionally require `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the requested local model (historically `qwen3:32b`). `--ollama-url` is configurable, so on-premise execution is a deployment choice rather than a code-enforced invariant.
 
-## Data
+## Historical data acquisition paths
 
-Run acquisition scripts from the repository root:
+The following downloaders support retained non-Path-A experiments. They write to
+historical dataset locations and are not the canonical CODE-ACCORD acquisition
+stage:
 
 ```bash
 uv run python data/download_scierc.py
@@ -67,9 +80,12 @@ Expected default locations are:
 
 The downloaders identify upstream sources but do not grant redistribution rights. Review each dataset's license and terms before acquisition or publication. Do not commit downloaded corpora or generated labels blindly.
 
-## Train the primary encoder
+## Historical direct encoder runner
 
-The primary runner supports `scierc`, `scier`, `conll04`, `ade`, `accord`, and `cuad`. This minimal SciERC command trains the gold-only span model and saves its best checkpoint:
+`train_span.py` supports `scierc`, `scier`, `conll04`, `ade`, `accord`, and
+`cuad`. This minimal SciERC command preserves its historical interface. It is
+not the frozen Path A recipe and its output path is outside the canonical
+`output/<run-id>/` contract:
 
 ```bash
 uv run python train_span.py \
@@ -86,9 +102,11 @@ uv run python train_span.py --help
 
 The CLI retains reported controls for externally supplied synthetic/CAST/CycleGT data, checkpoint initialization, evidence-graph fusion, contrastive and focal losses, BIO enrichment, class weighting, marker representations, and zh-Hant experiments. Defaults and matching behavior are intentionally preserved for provenance.
 
-## Extract, verify, and build a graph
+## Historical direct extract/verify/build chain
 
-First extract triples from a compatible checkpoint:
+The commands below preserve the pre-Phase-B interface and output schemas. They
+must not be used to generate Path A publication results. First extract triples
+from a compatible checkpoint:
 
 ```bash
 uv run python inference_kg.py \
@@ -119,7 +137,10 @@ uv run python build_kg.py \
   --use-rules
 ```
 
-`verify_triples_llm.py` uses deterministic decoding (`temperature=0`, thinking disabled), per-request timeout/retry controls, and append-style JSONL output. It still requires a separately designed, leakage-safe labeled evaluation before verifier performance can be reported.
+`verify_triples_llm.py` requests `temperature=0` with thinking disabled and has
+timeout/retry controls, but it does not implement the approved B-06 JSON-schema,
+model-digest, cache, telemetry, seed, or prompt-hash contract. Temperature zero
+alone is not proof of deterministic replay.
 
 ## Evaluation semantics
 
@@ -129,6 +150,10 @@ uv run python build_kg.py \
 - Gold-span RE evaluates relation labels over gold entity spans.
 - End-to-end triple matching requires exact head span, tail span, and relation label; for historical compatibility, it does not include entity type in the triple key.
 - `train_span.py` selects checkpoints using `triple_f1` by default and can use `ner_f1` for NER-oriented pretraining.
+
+The canonical `phase_b_pipeline` does not reuse that type-agnostic historical
+key. Its approved `CODE-STRICT-1` matcher requires example ID, typed head span,
+directed relation, and typed tail span to match exactly.
 
 The historical `eval_graph_rag.py` script is a diagnostic, not a leakage-free downstream benchmark: it derives questions and reference answers from the same gold-bearing source. `diagnose_evidence_paths.py` reports structural evidence-path coverage and likewise should not be interpreted as task accuracy.
 
@@ -322,14 +347,26 @@ For the reported full treatment, first run `--prep-data data/dapt_zh_laws`, then
 Run the publication-critical pure-function tests without downloading a model or dataset:
 
 ```bash
-uv run --locked python -m unittest discover -s tests -v
+uv run --frozen --python 3.10.20 python -B -m unittest discover -s tests -v
 ```
 
-The suite covers BIO decoding and Precision/Recall/F1 arithmetic, ontology-rule filtering, graph entity normalization/clustering/filter modes, bounded evidence paths, and simple/corrective LLM verdict parsing. It does not substitute for checkpoint, dataset, GPU, or Ollama evaluation.
+The suite covers BIO decoding and historical helpers plus canonical output-path
+containment, configuration/matrix invariants, typed directed matching, stable
+candidate identities, deterministic `CODE-SPLIT-1`, leakage rejection,
+zero-denominator behavior, correction/error handling, exact Wilcoxon/Holm and
+paired-t calculations, paired hierarchical bootstrap replay, and manually
+derived four-condition scoring. It does not substitute for checkpoint, dataset,
+GPU, or Ollama evaluation.
 
 ## Outputs and reproducibility
 
-Use `results/` for generated metrics, inference JSONL, verified JSONL, graph JSON, and diagnostics; use `checkpoints/` for model weights. Both locations are local outputs and should not be committed unless a specific small artifact is necessary, redistributable, and documented.
+Canonical Path A stages may write only beneath `output/<run-id>/`, including
+downloads, caches, checkpoints, predictions, verifier records, metrics, tables,
+manifests, and logs. The historical commands above still name `results/` and
+`checkpoints/` solely to preserve their recorded interfaces; those locations
+must not be used by the publication workflow. Existing confirmed generated
+ledgers are archived to the parent repository only during the approved,
+hash-verified finalization step.
 
 For a reproducible run, record at minimum:
 

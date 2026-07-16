@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:score-manifest:1.0",
+  "title": "Phase B offline score manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "workflow_id",
+    "matcher_id",
+    "run_id",
+    "inputs",
+    "outputs"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase-b-score-manifest-1.0"},
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "matcher_id": {"const": "CODE-STRICT-1"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "inputs": {
+      "type": "object",
+      "minProperties": 5,
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "outputs": {
+      "type": "object",
+      "minProperties": 3,
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    }
+  },
+  "additionalProperties": false
+}

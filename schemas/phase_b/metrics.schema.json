@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:metrics:1.0",
+  "title": "Phase B offline metric output",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "workflow_id",
+    "matcher_id",
+    "evaluation_split_id",
+    "selected_confidence_threshold",
+    "observed_training_seeds",
+    "required_training_seeds",
+    "publication_seed_coverage_complete",
+    "publication_data_coverage_complete",
+    "n_gold_examples",
+    "n_raw_candidates",
+    "conditions",
+    "uncertainty_status"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase-b-metrics-1.0"},
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "matcher_id": {"const": "CODE-STRICT-1"},
+    "conditions": {
+      "type": "object",
+      "required": ["VER-RAW", "VER-CONFIDENCE", "VER-SIMPLE", "VER-CORRECTIVE"]
+    }
+  },
+  "additionalProperties": true
+}

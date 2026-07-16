@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:outcomes:1.0",
+  "title": "Phase B paired candidate and sentence outcomes",
+  "$defs": {
+    "condition": {
+      "enum": ["VER-RAW", "VER-CONFIDENCE", "VER-SIMPLE", "VER-CORRECTIVE"]
+    },
+    "strictKey": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "string"},
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 0},
+        {"enum": ["Object", "Property", "Quality", "Value"]},
+        {
+          "enum": [
+            "selection",
+            "necessity",
+            "part-of",
+            "not-part-of",
+            "equal",
+            "greater",
+            "greater-equal",
+            "less",
+            "less-equal"
+          ]
+        },
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 0},
+        {"enum": ["Object", "Property", "Quality", "Value"]}
+      ],
+      "minItems": 8,
+      "maxItems": 8
+    },
+    "candidateOutcome": {
+      "type": "object",
+      "required": [
+        "protocol_id",
+        "matcher_id",
+        "condition_id",
+        "training_seed",
+        "example_id",
+        "source_document_id",
+        "candidate_id",
+        "original_strict_key",
+        "gold_original_valid",
+        "candidate_predicted_valid",
+        "action",
+        "correction_validation_status",
+        "final_emitted_key",
+        "error_category"
+      ],
+      "properties": {
+        "protocol_id": {"const": "B04-PATH-A-1.3"},
+        "matcher_id": {"const": "CODE-STRICT-1"},
+        "condition_id": {"$ref": "#/$defs/condition"},
+        "training_seed": {"enum": [42, 43, 44, 45, 46, 47, 48, 49]},
+        "example_id": {"type": "string", "minLength": 1},
+        "source_document_id": {"type": "string", "minLength": 1},
+        "candidate_id": {"type": "string", "pattern": "^cand-[0-9a-f]{64}$"},
+        "original_strict_key": {"$ref": "#/$defs/strictKey"},
+        "gold_original_valid": {"type": "boolean"},
+        "candidate_predicted_valid": {"type": "boolean"},
+        "action": {"type": ["string", "null"]},
+        "correction_validation_status": {"type": "string"},
+        "final_emitted_key": {
+          "oneOf": [{"$ref": "#/$defs/strictKey"}, {"type": "null"}]
+        },
+        "error_category": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "sentenceOutcome": {
+      "type": "object",
+      "required": [
+        "protocol_id",
+        "matcher_id",
+        "condition_id",
+        "training_seed",
+        "example_id",
+        "source_document_id",
+        "gold_strict_keys",
+        "emitted_strict_keys",
+        "duplicate_emissions_collapsed",
+        "counts"
+      ],
+      "properties": {
+        "protocol_id": {"const": "B04-PATH-A-1.3"},
+        "matcher_id": {"const": "CODE-STRICT-1"},
+        "condition_id": {"$ref": "#/$defs/condition"},
+        "training_seed": {"enum": [42, 43, 44, 45, 46, 47, 48, 49]},
+        "example_id": {"type": "string", "minLength": 1},
+        "source_document_id": {"type": "string", "minLength": 1},
+        "gold_strict_keys": {"type": "array", "items": {"$ref": "#/$defs/strictKey"}},
+        "emitted_strict_keys": {"type": "array", "items": {"$ref": "#/$defs/strictKey"}},
+        "duplicate_emissions_collapsed": {"type": "integer", "minimum": 0},
+        "counts": {
+          "type": "object",
+          "required": ["tp", "fp", "fn"],
+          "properties": {
+            "tp": {"type": "integer", "minimum": 0},
+            "fp": {"type": "integer", "minimum": 0},
+            "fn": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/candidateOutcome"},
+    {"$ref": "#/$defs/sentenceOutcome"}
+  ]
+}

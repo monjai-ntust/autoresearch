@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:checkout-manifest:1.0",
+  "title": "Phase B checkout doctor manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "workflow_id",
+    "matcher_id",
+    "run_id",
+    "status",
+    "publication_execution_admitted",
+    "publication_execution_gate",
+    "source",
+    "environment",
+    "tracked_artifact_sha256",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase-b-checkout-manifest-1.0"},
+    "status": {"enum": ["pass", "blocked"]},
+    "publication_execution_admitted": {"const": false}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "../schemas/phase_b/experiment-matrix.schema.json",
+  "matrix_revision": "PATH-A-MATRIX-1.0",
+  "protocol_id": "B04-PATH-A-1.3",
+  "workflow_id": "PATH-A-WORKFLOW-1.3",
+  "matcher_id": "CODE-STRICT-1",
+  "dataset_id": "CODE-ACCORD-v1.0.0",
+  "split_id": "CODE-SPLIT-1:test",
+  "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49],
+  "unit_of_analysis": {
+    "candidate": "one raw encoder candidate",
+    "end_to_end": "one final directed typed triple set per seed and sentence"
+  },
+  "positive_class": "original candidate exactly matches one CODE-STRICT-1 gold triple",
+  "conditions": [
+    {
+      "condition_id": "VER-RAW",
+      "status": "PRIMARY_REFERENCE",
+      "baseline_id": null,
+      "verifier_mode": "none",
+      "candidate_decision": "positive_for_every_raw_candidate",
+      "end_to_end_emission": "emit_every_original_candidate",
+      "claim_ids": ["A-CLAIM-019"],
+      "publication_targets": ["V1", "V2", "F-V1"]
+    },
+    {
+      "condition_id": "VER-CONFIDENCE",
+      "status": "PRIMARY",
+      "baseline_id": "VER-RAW",
+      "verifier_mode": "none",
+      "candidate_decision": "positive_when_development_selected_confidence_threshold_passes",
+      "end_to_end_emission": "emit_original_when_threshold_passes",
+      "claim_ids": ["A-CLAIM-019"],
+      "publication_targets": ["V1", "V2", "F-V1", "O1"]
+    },
+    {
+      "condition_id": "VER-SIMPLE",
+      "status": "PRIMARY",
+      "baseline_id": "VER-RAW",
+      "verifier_mode": "simple",
+      "candidate_decision": "positive_only_for_keep",
+      "end_to_end_emission": "emit_original_only_for_keep",
+      "claim_ids": ["A-CLAIM-019", "DISC-006"],
+      "publication_targets": ["V1", "V2", "V3", "F-V1", "O1"]
+    },
+    {
+      "condition_id": "VER-CORRECTIVE",
+      "status": "PRIMARY",
+      "baseline_id": "VER-RAW",
+      "verifier_mode": "corrective",
+      "candidate_decision": "positive_only_for_keep; correct_judges_original_invalid",
+      "end_to_end_emission": "emit_original_for_keep_or_one_valid_source_grounded_correction_for_correct",
+      "claim_ids": ["A-CLAIM-019"],
+      "publication_targets": ["V1", "V2", "V3", "F-V1", "O1"]
+    }
+  ]
+}
