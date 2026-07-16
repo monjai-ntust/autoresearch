@@ -8,8 +8,11 @@ The canonical publication-facing Phase B surface is:
 python -B -m phase_b_pipeline
 ```
 
-The current B-05 core slice implements checkout/environment `doctor` and offline
-`CODE-STRICT-1` `score` stages. See
+The current B-05 core slice implements checkout/environment `doctor`, immutable
+CODE-ACCORD `fetch`, strict `prepare`, and offline `CODE-STRICT-1` `score`
+stages. Official v1.0.0 preparation intentionally hard-stops with a complete
+audit because nine relation-marker arguments do not map to unique typed BIO
+spans; no row is silently repaired or omitted. See
 [`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for exact commands, input
 schemas, output layout, reproducibility boundaries, and the still-gated stages.
 Every workflow-created file is confined to ignored `output/<run-id>/`.
@@ -25,7 +28,10 @@ until their claim-bearing behavior is migrated behind the canonical runner.
 - Python 3.10 is the selected and minimum supported Python version.
 - The committed lockfile describes the current source environment; it is not an exact manifest of every historical run.
 - Historical raw logs and model checkpoints are not included.
-- SciERC, CoNLL04, ADE, and arXiv acquisition scripts are included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not included.
+- The canonical CODE-ACCORD downloader is included, but the archive is not.
+  SciERC, CoNLL04, ADE, and arXiv historical acquisition scripts are also
+  included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not
+  committed.
 - Missing verifier Precision, Recall, and F1 evaluation remains incomplete. The
   canonical offline scorer is implemented, but publication results require the
   frozen external-machine inputs and later approved execution stages.
@@ -350,8 +356,10 @@ Run the publication-critical pure-function tests without downloading a model or 
 uv run --frozen --python 3.10.20 python -B -m unittest discover -s tests -v
 ```
 
-The suite covers BIO decoding and historical helpers plus canonical output-path
-containment, configuration/matrix invariants, typed directed matching, stable
+The suite covers immutable resumable acquisition, safe selective ZIP extraction,
+strict CSV/BIO decoding, exhaustive gold-alignment hard stops, deterministic
+dataset materialization fixtures, and historical helpers plus canonical
+output-path containment, configuration/matrix invariants, typed directed matching, stable
 candidate identities, deterministic `CODE-SPLIT-1`, leakage rejection,
 zero-denominator behavior, correction/error handling, exact Wilcoxon/Holm and
 paired-t calculations, paired hierarchical bootstrap replay, and manually

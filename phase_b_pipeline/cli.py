@@ -7,10 +7,12 @@ import json
 import sys
 from pathlib import Path
 
+from .acquisition import fetch_run
 from .config import load_pipeline_config
 from .doctor import run_doctor
 from .io import DataContractError
 from .paths import PathContractError, RunLayout, discover_source_root
+from .preparation import prepare_run
 from .scoring import ScoreInputs, score_run
 
 
@@ -22,7 +24,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="python -m phase_b_pipeline",
         description=(
             "Canonical standalone Phase B workflow. This B-05 slice implements "
-            "doctor and offline CODE-STRICT-1 scoring."
+            "doctor, immutable CODE-ACCORD fetch/preparation, and offline "
+            "CODE-STRICT-1 scoring."
         ),
     )
     parser.add_argument(
@@ -34,6 +37,18 @@ def _parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", help="Validate checkout/environment and create a run")
     doctor.add_argument("--config", default=DEFAULT_CONFIG)
     doctor.add_argument("--run-id", required=True)
+
+    fetch = subparsers.add_parser(
+        "fetch", help="Download and verify the immutable CODE-ACCORD archive"
+    )
+    fetch.add_argument("--config", default=DEFAULT_CONFIG)
+    fetch.add_argument("--run-id", required=True)
+
+    prepare = subparsers.add_parser(
+        "prepare", help="Audit then reconstruct leakage-safe CODE-ACCORD and CODE-SPLIT-1"
+    )
+    prepare.add_argument("--config", default=DEFAULT_CONFIG)
+    prepare.add_argument("--run-id", required=True)
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
     score.add_argument("--config", default=DEFAULT_CONFIG)
@@ -56,6 +71,37 @@ def main(argv: list[str] | None = None) -> int:
             manifest, passed = run_doctor(layout, config)
             print(json.dumps({"run_id": args.run_id, "status": manifest["status"]}, sort_keys=True))
             return 0 if passed else 2
+
+        if args.stage == "fetch":
+            manifest = fetch_run(layout, config)
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": "fetched",
+                        "archive_sha256": manifest["archive"]["sha256"],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if args.stage == "prepare":
+            manifest = prepare_run(layout, config)
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": "prepared",
+                        "dataset_tree_sha256": manifest["dataset_tree_sha256"],
+                        "byte_identical": manifest[
+                            "byte_identical_independent_materializations"
+                        ],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
 
         configured = config.paths
         inputs = ScoreInputs(

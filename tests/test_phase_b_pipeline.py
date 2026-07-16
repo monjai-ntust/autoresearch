@@ -156,10 +156,23 @@ class ConfigContractTests(unittest.TestCase):
             "schemas/phase_b/metrics.schema.json",
             "schemas/phase_b/checkout-manifest.schema.json",
             "schemas/phase_b/score-manifest.schema.json",
+            "schemas/phase_b/input-acquisition-manifest.schema.json",
+            "schemas/phase_b/data-preparation-manifest.schema.json",
+            "schemas/phase_b/gold-alignment-audit.schema.json",
+            "schemas/phase_b/prepared-sentence.schema.json",
         ):
             with self.subTest(path=relative):
                 with (SOURCE_ROOT / relative).open(encoding="utf-8") as handle:
                     self.assertIsInstance(json.load(handle), dict)
+
+    def test_closed_dataset_schema_declares_every_required_property(self):
+        with (SOURCE_ROOT / "schemas/phase_b/config.schema.json").open(
+            encoding="utf-8"
+        ) as handle:
+            schema = json.load(handle)
+        dataset = schema["properties"]["dataset"]
+        self.assertFalse(dataset["additionalProperties"])
+        self.assertLessEqual(set(dataset["required"]), set(dataset["properties"]))
 
 
 class StrictMatcherTests(unittest.TestCase):

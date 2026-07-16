@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from .constants import (
+    CODE_ACCORD_ANNOTATION_FILES,
+    CODE_ACCORD_ARCHIVE,
+    CODE_ACCORD_COUNTS,
+    CODE_ACCORD_RELATION_SPLIT_AUDIT,
+    CODE_ACCORD_REPAIRED_UUID,
     CONDITION_IDS,
     MATCHER_ID,
     MATRIX_REVISION,
@@ -76,6 +81,23 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
             raise DataContractError(
                 f"config {field} mismatch: expected {expected!r}, got {actual!r}"
             )
+
+    dataset = _object(_required(value, "dataset", "config"), "config.dataset")
+    expected_dataset = {
+        "dataset_id": CODE_ACCORD_ARCHIVE["dataset_id"],
+        "zenodo_record": CODE_ACCORD_ARCHIVE["zenodo_record"],
+        "archive_name": CODE_ACCORD_ARCHIVE["name"],
+        "archive_url": CODE_ACCORD_ARCHIVE["url"],
+        "archive_bytes": CODE_ACCORD_ARCHIVE["bytes"],
+        "archive_md5": CODE_ACCORD_ARCHIVE["md5"],
+        "license": CODE_ACCORD_ARCHIVE["license"],
+        "annotation_files": CODE_ACCORD_ANNOTATION_FILES,
+        "expected_counts": CODE_ACCORD_COUNTS,
+        "relation_split_audit": CODE_ACCORD_RELATION_SPLIT_AUDIT,
+        "repaired_uuid": CODE_ACCORD_REPAIRED_UUID,
+    }
+    if dataset != expected_dataset:
+        raise DataContractError("config.dataset differs from the immutable CODE-ACCORD contract")
 
     seeds = _required(value, "training_seeds", "config")
     if seeds != list(TRAINING_SEEDS):

@@ -6,25 +6,37 @@ parent repository or `research-logs`.
 
 ## Current implementation boundary
 
-The B-05 core slice implements one public module entry point with two tested
-stages:
+The B-05 core slice implements one public module entry point with four stages
+and focused contract tests:
 
 - `doctor` validates the direct source checkout, exact Python/uv requirements,
   Git cleanliness, root-anchored output ignore behavior, configuration/matrix
   identities, and tracked artifact hashes. It creates only
   `output/<run-id>/...` and records `manifests/00-checkout-manifest.json`.
+- `fetch` downloads the immutable Zenodo CODE-ACCORD v1.0.0 archive with safe
+  partial-file resume, then requires exactly 101,265,616 bytes and MD5
+  `57e2efa465f41e2f582db62810fb50f5` before promotion. It also records SHA-256
+  and license provenance in `manifests/02-input-acquisition-manifest.json`.
+- `prepare` safely extracts only the six required annotation CSVs, verifies
+  their exact byte/SHA-256 identities, parses all rows, audits the one approved
+  UUID repair, and attempts typed directed `CODE-STRICT-1` reconstruction plus
+  byte-identical `CODE-SPLIT-1` materialization.
 - `score` validates frozen gold, candidate, simple-verdict, corrective-verdict,
   and development-threshold records; applies typed directed matcher
   `CODE-STRICT-1`; and writes candidate outcomes, sentence outcomes, confusion
   counts, and micro metrics beneath the same run.
 
-The generic `CODE-SPLIT-1` iterative multilabel assignment primitive is also
-implemented and tested for exact size, disjointness, repeatability, and input
-order independence. Acquisition and full CODE-ACCORD parsing/materialization,
-deterministic checkpoint rebuilding, inference, threshold selection, live
-verifier calls, publication rendering, and parent-side archival are not
-implemented by this slice. The historical standalone scripts remain provenance
-paths and are not publication
+The generic `CODE-SPLIT-1` iterative multilabel assignment primitive is tested
+for exact size, disjointness, repeatability, and input-order independence.
+Official-data preparation currently stops before producing a dataset: nine of
+6,658 positive-relation marker arguments cannot resolve to one authoritative
+typed BIO span. In accordance with the approved protocol, `prepare` inventories
+all nine in `audit/gold-alignment-audit.json` and does not exclude, project,
+expand, or manually type them. A material protocol amendment is required before
+that stage may produce strict gold or a split. Deterministic checkpoint
+rebuilding, inference, threshold selection, live verifier calls, publication
+rendering, and parent-side archival are also not implemented by this slice. The
+historical standalone scripts remain provenance paths and are not publication
 commands for Path A. Expensive training and final-test Qwen execution remain
 blocked until the approved B-07 go/no-go checkpoint.
 
@@ -63,11 +75,54 @@ The checkout manifest always reports that publication execution is not yet
 admitted because B-07 approval has not occurred. A passing B-05 doctor is not
 permission to run the gated training or final-test verifier work.
 
-## 3. Supply immutable offline-scoring inputs
+## 3. Fetch the immutable CODE-ACCORD prerequisite
 
-Until the acquisition/inference/verifier stages are implemented, place the
-following externally produced, schema-valid files at their configured paths
-inside the selected run:
+The fetch stage requires the passing checkout manifest created by `doctor` in
+the same run:
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  fetch \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-example
+```
+
+Network failures retain a run-local `.partial` file. Repeating `fetch` with the
+same run ID resumes when the server honors byte ranges; it restarts safely when
+the server sends a complete response. Neither a partial nor a complete archive
+is accepted until its size and upstream MD5 match. The archive remains beneath
+`output/<run-id>/inputs/cache/` and is not committed.
+
+## 4. Audit and prepare CODE-ACCORD
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  prepare \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-example
+```
+
+Under protocol `B04-PATH-A-1.3`, the official v1.0.0 data deterministically
+exits 2 after retaining `audit/gold-alignment-audit.json`. The known immutable
+audit contains 6,644 exact marker-to-BIO alignments, five markers contained in
+one typed span, and nine unresolved arguments across nine rows/eight sentences;
+all nine rows belong to the official entity-training partition. Three markers
+overlap multiple typed spans, three partially overlap one span, and three
+overlap none. This is a scientific hard stop, not a transient execution error.
+Do not edit the downloaded CSVs or treat the audit as permission to omit rows.
+
+When an approved protocol revision resolves this incompatibility, the same
+stage is designed to emit deterministic `data-prepared/`, the repair ledger,
+split/data manifests, test gold, distributions, attribution, and two
+independently generated trees whose inventories and tree hashes must be
+identical before atomic promotion.
+
+## 5. Supply immutable offline-scoring inputs
+
+Until preparation is unblocked and inference/verifier stages are implemented,
+place the following externally produced, schema-valid files at their configured
+paths inside a separate development run only. Such files are not publication
+inputs unless their provenance and hashes satisfy the frozen protocol:
 
 ```text
 output/path-a-example/
@@ -97,7 +152,7 @@ The scorer recomputes every mean and selects the largest; an exact tie must use
 the higher threshold. It rejects an unproven selected value or any assertion
 that test labels were used.
 
-## 4. Reproduce offline strict scoring
+## 6. Reproduce offline strict scoring
 
 ```bash
 uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
@@ -142,12 +197,14 @@ The `-B` flag is mandatory for canonical commands: it prevents Python from
 creating `__pycache__` files in the tracked source area. `doctor` checks this
 before declaring the environment compliant.
 
-## 5. Reproducibility interpretation
+## 7. Reproducibility interpretation
 
-This core slice supports deterministic offline result replay once frozen inputs
-exist. It does not yet establish exact same-seed checkpoint rebuilding. The
-final workflow must additionally fetch and verify CODE-ACCORD and DeBERTa,
-reconstruct `CODE-SPLIT-1` byte-identically, serialize full restart state,
+This core slice supports immutable CODE-ACCORD acquisition, exhaustive
+preparation auditing, and deterministic offline result replay once valid frozen
+inputs exist. It does not yet establish an approved prepared corpus or exact
+same-seed checkpoint rebuilding. The final workflow must resolve the official
+annotation incompatibility, fetch and verify DeBERTa, reconstruct
+`CODE-SPLIT-1` byte-identically, serialize full restart state,
 duplicate seed-42 training/inference under the pinned accelerator profile,
 rebuild seeds 43-49, freeze development/test inference, materialize and hash the
 approved prompts, pass the development verifier pilot, score uncertainty/tests,

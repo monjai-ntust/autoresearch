@@ -22,6 +22,16 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def md5_file(path: Path) -> str:
+    """Return the upstream-required MD5 identity for a public archive."""
+
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def canonical_json_bytes(value: Any) -> bytes:
     return (
         json.dumps(
@@ -94,3 +104,11 @@ def atomic_write_json(path: Path, value: Any) -> None:
 def atomic_write_jsonl(path: Path, values: Iterable[dict[str, Any]]) -> None:
     payload = b"".join(canonical_json_bytes(value) for value in values)
     _atomic_replace(path, payload)
+
+
+def atomic_write_bytes(path: Path, payload: bytes) -> None:
+    _atomic_replace(path, payload)
+
+
+def atomic_write_text(path: Path, value: str) -> None:
+    atomic_write_bytes(path, value.encode("utf-8"))

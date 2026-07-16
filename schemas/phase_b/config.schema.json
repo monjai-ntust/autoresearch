@@ -29,6 +29,72 @@
       "const": [42, 43, 44, 45, 46, 47, 48, 49]
     },
     "evaluation_split_id": {"const": "CODE-SPLIT-1:test"},
+    "dataset": {
+      "type": "object",
+      "required": [
+        "dataset_id",
+        "zenodo_record",
+        "archive_name",
+        "archive_url",
+        "archive_bytes",
+        "archive_md5",
+        "license",
+        "annotation_files",
+        "expected_counts",
+        "relation_split_audit",
+        "repaired_uuid"
+      ],
+      "properties": {
+        "dataset_id": {"const": "CODE-ACCORD-v1.0.0"},
+        "zenodo_record": {"const": "10210022"},
+        "archive_name": {"const": "CODE-ACCORD-v1.0.0.zip"},
+        "archive_url": {"const": "https://zenodo.org/api/records/10210022/files/Accord-Project/CODE-ACCORD-v1.0.0.zip/content"},
+        "archive_bytes": {"const": 101265616},
+        "archive_md5": {"const": "57e2efa465f41e2f582db62810fb50f5"},
+        "license": {"const": "CC-BY-4.0"},
+        "annotation_files": {
+          "type": "object",
+          "minProperties": 6,
+          "maxProperties": 6,
+          "additionalProperties": {
+            "type": "object",
+            "required": ["bytes", "sha256"],
+            "properties": {
+              "bytes": {"type": "integer", "minimum": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "expected_counts": {
+          "const": {
+            "sentences": 862,
+            "entity_train_sentences": 689,
+            "entity_test_sentences": 173,
+            "entity_spans": 4297,
+            "relation_rows": 4329,
+            "positive_relation_rows": 3329,
+            "none_relation_rows": 1000,
+            "relation_covered_sentences": 857,
+            "entity_only_sentences": 5
+          }
+        },
+        "relation_split_audit": {
+          "const": {
+            "train_rows": 3463,
+            "test_rows": 866,
+            "train_unique_sentence_ids": 824,
+            "test_unique_sentence_ids": 507,
+            "train_test_sentence_id_overlap": 473,
+            "entity_test_ids_in_relation_train": 162,
+            "entity_test_ids_in_relation_test": 96,
+            "entity_train_ids_in_relation_test": 411
+          }
+        },
+        "repaired_uuid": {"const": "8feaf7f2-dfd8-43ae-ab8d-791ee1ffd86c"}
+      },
+      "additionalProperties": false
+    },
     "runtime_paths": {
       "type": "object",
       "required": [
