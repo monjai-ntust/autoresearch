@@ -172,4 +172,3 @@ needed, and approval status. Do not silently update protocol/config identities.
 | Date | Revision | Evidence and effect |
 |---|---|---|
 | 2026-07-17 | C-MIGRATION-1.0 | Established the design-only migration from the approved integrity hard stop to the proposed raw/typed-strict dual view; classified canonical and historical reuse boundaries and froze revision triggers. No Phase C materialization or result execution was authorized. |
-
