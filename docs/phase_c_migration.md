@@ -119,8 +119,13 @@ one run directory.
 ## Secondary historical material policy
 
 The README's retained evaluation and historical reproduction section is
-secondary provenance support. Its commands may be adapted for current paths,
-dependencies, diagnostics, or canonical adapters, provided that:
+secondary provenance support. Its commands are secondary execution/provenance
+interfaces, and the draft Section 5 data and ledgers they preserve are secondary
+evidence. Existing Section 5 evidence is reconciled before adding replacement or
+supplementary data, but only newly generated data that passes the canonical
+framework may become authoritative for the main evaluation. Historical commands
+may be adapted for current paths, dependencies, diagnostics, or canonical
+adapters, provided that:
 
 - the original command/result record remains preserved with its hash and
   provenance;
@@ -172,3 +177,4 @@ needed, and approval status. Do not silently update protocol/config identities.
 | Date | Revision | Evidence and effect |
 |---|---|---|
 | 2026-07-17 | C-MIGRATION-1.0 | Established the design-only migration from the approved integrity hard stop to the proposed raw/typed-strict dual view; classified canonical and historical reuse boundaries and froze revision triggers. No Phase C materialization or result execution was authorized. |
+| 2026-07-17 | C-MIGRATION-1.1 | Clarified that historical commands are secondary interfaces and their draft Section 5 data/ledgers are secondary evidence that must be reconciled first; newly added measurements remain bound to the canonical framework. Migration steps and scientific gates are unchanged. |

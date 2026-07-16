@@ -25,11 +25,15 @@ until their claim-bearing behavior is migrated behind the canonical runner.
 
 This creates an explicit two-tier authority boundary. Canonical Path A data,
 manifests, typed matching, splits, checkpoints, and scores are authoritative for
-the main evaluation. The retained historical commands and ledgers are secondary
-support material. They may be adapted for portability or migrated behind
-canonical adapters, but original result records remain immutable and every
-rerun receives a new identity. Similar trend direction is a useful discrepancy
-check, not an acceptance criterion and never a reason to rewrite measurements.
+the main evaluation. Historical commands are secondary execution/provenance
+interfaces, and the draft Section 5 data and ledgers they preserve are secondary
+evidence. Those existing results remain priority reconciliation targets, but
+they do not override canonical data or metric contracts. Historical paths may
+be adapted for portability or migrated behind canonical adapters, but original
+result records remain immutable and every rerun receives a new identity. Any
+newly added measurement must reuse the canonical framework. Similar trend
+direction is a useful discrepancy check, not an acceptance criterion and never
+a reason to rewrite measurements.
 The design-only [`Phase C migration plan`](docs/phase_c_migration.md) records
 what can be reused, what must change, the assumptions that remain frozen, and
 the evidence conditions that require that plan to be revised. It does not
@@ -180,11 +184,13 @@ The historical `eval_graph_rag.py` script is a diagnostic, not a leakage-free do
 These paths are retained because they produce a draft-reported comparison, a counted negative-result family, or a user-approved diagnostic. Historical commands require the datasets, checkpoints, model caches, and services named below; those artifacts are not bundled. Start with small limits and a separate output path before attempting a recorded full run.
 
 Revisions to these secondary paths must preserve the original command/result
-record and create new run/configuration/hash lineage. They are validated by
-their declared semantics and reproducibility checks, not by whether a rerun
-recreates a preferred trend. A material reversal or non-comparable metric is a
-finding to retain and investigate; it must not be tuned away or promoted into
-canonical Path A evidence without an approved migration.
+record and create new run/configuration/hash lineage. The corresponding Section
+5 data and ledgers remain secondary evidence even when they are the first items
+reconciled against the draft. They are validated by their declared semantics and
+reproducibility checks, not by whether a rerun recreates a preferred trend. A
+material reversal or non-comparable metric is a finding to retain and
+investigate; it must not be tuned away or promoted into canonical Path A
+evidence without an approved migration.
 
 ### Hardware and evaluation diagnostics
 
