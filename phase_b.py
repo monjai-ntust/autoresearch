@@ -7,16 +7,16 @@ import json
 import sys
 from pathlib import Path
 
-from .acquisition import fetch_run
-from .config import load_pipeline_config
-from .doctor import run_doctor
-from .io import DataContractError
-from .paths import PathContractError, RunLayout, discover_source_root
-from .pilot import PilotInputs, run_verifier_pilot
-from .preparation import prepare_run
-from .reconciliation import reconcile_section5_evidence
-from .scoring import ScoreInputs, score_run
-from .verifier import run_verifier
+from acquisition import fetch_run
+from config import load_pipeline_config
+from doctor import run_doctor
+from phase_b_io import DataContractError
+from paths import PathContractError, RunLayout, discover_source_root
+from pilot import PilotInputs, run_verifier_pilot
+from preparation import prepare_run
+from reconciliation import reconcile_section5_evidence
+from scoring import ScoreInputs, score_run
+from verifier import run_verifier
 
 
 DEFAULT_CONFIG = "configs/phase_b_path_a.json"
@@ -24,7 +24,7 @@ DEFAULT_CONFIG = "configs/phase_b_path_a.json"
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m phase_b_pipeline",
+        prog="python phase_b.py",
         description=(
             "Canonical standalone Phase B workflow. This B-05/B-06/B-07 development "
             "slice implements "
@@ -358,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except (DataContractError, PathContractError, OSError, ValueError) as exc:
-        print(f"phase_b_pipeline: error: {exc}", file=sys.stderr)
+        print(f"phase_b: error: {exc}", file=sys.stderr)
         return 2
 
 

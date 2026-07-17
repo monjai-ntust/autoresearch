@@ -5,7 +5,7 @@ This repository contains the research implementation for a low-resource knowledg
 The canonical publication-facing Phase B surface is:
 
 ```text
-python -B -m phase_b_pipeline
+python -B phase_b.py
 ```
 
 The current B-05/B-06 and development-only B-07 slice implements
@@ -26,7 +26,7 @@ closed-loop attempts, cross-dataset transfer, and negative results. Those paths
 are provenance evidence; they are not publication commands for approved Path A
 until their claim-bearing behavior is migrated behind the canonical runner.
 
-`phase_b_pipeline` is a protocol and orchestration layer, not a second encoder
+`phase_b.py` and its root-module collaborators are a protocol and orchestration layer, not a second encoder
 implementation. It owns the contracts that the historical root scripts do not
 provide: immutable identities, one experiment matrix, typed matching, split
 isolation, output containment, replay, and machine-readable manifests. Model
@@ -213,7 +213,7 @@ ledger into verdict records without another model call. See
 - End-to-end triple matching requires exact head span, tail span, and relation label; for historical compatibility, it does not include entity type in the triple key.
 - `train_span.py` selects checkpoints using `triple_f1` by default and can use `ner_f1` for NER-oriented pretraining.
 
-The canonical `phase_b_pipeline` does not reuse that type-agnostic historical
+The canonical `phase_b.py` does not reuse that type-agnostic historical
 key. Its approved `CODE-STRICT-1` matcher requires example ID, typed head span,
 directed relation, and typed tail span to match exactly.
 

@@ -11,11 +11,11 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from phase_b_pipeline.acquisition import ArchiveContract, download_verified_archive
-from phase_b_pipeline.constants import CODE_ACCORD_COUNTS, CODE_ACCORD_REPAIRED_UUID
-from phase_b_pipeline.io import DataContractError, sha256_file
-from phase_b_pipeline.paths import discover_source_root
-from phase_b_pipeline.preparation import (
+from acquisition import ArchiveContract, download_verified_archive
+from constants import CODE_ACCORD_COUNTS, CODE_ACCORD_REPAIRED_UUID
+from phase_b_io import DataContractError, sha256_file
+from paths import discover_source_root
+from preparation import (
     DatasetContract,
     EntityRecord,
     GoldAlignmentError,

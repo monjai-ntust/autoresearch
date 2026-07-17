@@ -9,25 +9,25 @@ import unittest
 import uuid
 from pathlib import Path
 
-from phase_b_pipeline.config import load_pipeline_config
-from phase_b_pipeline.constants import CONDITION_IDS, PROTOCOL_ID
-from phase_b_pipeline.io import DataContractError, atomic_write_json, atomic_write_jsonl
-from phase_b_pipeline.metrics import binary_metrics, triple_metrics
-from phase_b_pipeline.paths import (
+from config import load_pipeline_config
+from constants import CONDITION_IDS, PROTOCOL_ID
+from phase_b_io import DataContractError, atomic_write_json, atomic_write_jsonl
+from metrics import binary_metrics, triple_metrics
+from paths import (
     PathContractError,
     RunLayout,
     discover_source_root,
     resolve_tracked_path,
 )
-from phase_b_pipeline.records import (
+from records import (
     Candidate,
     EntitySpan,
     StrictTriple,
     Verdict,
     candidate_id_for,
 )
-from phase_b_pipeline.scoring import ScoreInputs, _load_verdicts, score_run
-from phase_b_pipeline.split import (
+from scoring import ScoreInputs, _load_verdicts, score_run
+from split import (
     SplitItem,
     build_official_code_split,
     iterative_multilabel_split,
@@ -35,13 +35,13 @@ from phase_b_pipeline.split import (
     require_disjoint_partitions,
     split_manifest,
 )
-from phase_b_pipeline.statistics import (
+from phase_b_statistics import (
     exact_wilcoxon_signed_rank,
     holm_adjust,
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from phase_b_pipeline.verifier import verifier_identity
+from verifier import verifier_identity
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))

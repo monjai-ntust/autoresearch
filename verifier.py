@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from .config import PipelineConfig
-from .constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES
-from .io import (
+from config import PipelineConfig
+from constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES
+from phase_b_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -30,8 +30,8 @@ from .io import (
     load_json,
     sha256_file,
 )
-from .paths import RunLayout, resolve_tracked_path
-from .records import Candidate, EntitySpan, StrictTriple, Verdict
+from paths import RunLayout, resolve_tracked_path
+from records import Candidate, EntitySpan, StrictTriple, Verdict
 
 
 REASON_CODES = {

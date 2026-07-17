@@ -19,8 +19,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
-from .config import PipelineConfig
-from .constants import (
+from config import PipelineConfig
+from constants import (
     CODE_ACCORD_ANNOTATION_FILES,
     CODE_ACCORD_COUNTS,
     CODE_ACCORD_RELATION_SPLIT_AUDIT,
@@ -30,7 +30,7 @@ from .constants import (
     RELATION_TYPES,
     TREE_HASH_REVISION,
 )
-from .io import (
+from phase_b_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -40,8 +40,8 @@ from .io import (
     md5_file,
     sha256_file,
 )
-from .paths import RunLayout
-from .split import SplitItem, build_official_code_split, official_split_manifest
+from paths import RunLayout
+from split import SplitItem, build_official_code_split, official_split_manifest
 
 
 ENTITY_HEADER = ("example_id", "content", "processed_content", "label", "metadata")

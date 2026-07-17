@@ -8,7 +8,7 @@ publication path remains Phase B Path A, protocol `B04-PATH-A-1.3`, workflow
 `PATH-A-WORKFLOW-1.3`, invoked through:
 
 ```text
-python -B -m phase_b_pipeline
+python -B phase_b.py
 ```
 
 Official CODE-ACCORD v1.0.0 preparation must continue to retain the exhaustive
@@ -65,15 +65,15 @@ historical measurements to preserve a preferred result.
 
 | Current code or data path | Phase C disposition | Required adjustment or constraint |
 |---|---|---|
-| `phase_b_pipeline/acquisition.py` | Reuse | Preserve resumable download, safe selective extraction, and exact immutable checks. Any upstream-byte change creates a new dataset identity and requires plan revision. |
-| `phase_b_pipeline/config.py`, `constants.py`, `io.py`, and `paths.py` | Reuse | Add versioned dual-view identities and manifests without weakening path containment or output-root rules. |
-| CSV/BIO parsing and entity partition checks in `phase_b_pipeline/preparation.py` | Reuse | Keep `entities/all.csv` authoritative and preserve all source row numbers and marker text. |
-| UUID repair and marker-alignment audit in `phase_b_pipeline/preparation.py` | Reuse | The exhaustive audit remains a prerequisite. Eligibility must be derived from its recorded exact/contained/unresolved status, never from a second fuzzy matcher. |
+| `acquisition.py` | Reuse | Preserve resumable download, safe selective extraction, and exact immutable checks. Any upstream-byte change creates a new dataset identity and requires plan revision. |
+| `config.py`, `constants.py`, `phase_b_io.py`, and `paths.py` | Reuse | Add versioned dual-view identities and manifests without weakening path containment or output-root rules. |
+| CSV/BIO parsing and entity partition checks in `preparation.py` | Reuse | Keep `entities/all.csv` authoritative and preserve all source row numbers and marker text. |
+| UUID repair and marker-alignment audit in `preparation.py` | Reuse | The exhaustive audit remains a prerequisite. Eligibility must be derived from its recorded exact/contained/unresolved status, never from a second fuzzy matcher. |
 | Current preparation hard stop | Adjust only after approval | Replace the post-audit stop with an approved dual-view gate that writes raw provenance and strict eligibility records before any split. Until approval, the stop remains mandatory. |
 | Duplicate preservation/collapse logic | Reuse with explicit views | Preserve both source rows in raw provenance; collapse the one identical typed key only in set-based strict gold and record the contributing rows. |
-| `phase_b_pipeline/split.py` | Reuse after input change | Regenerate, never transplant, the assignment from strict-view label presence. Bind its seed, input inventory, output membership, and tree hash to the new protocol. |
-| `phase_b_pipeline/scoring.py`, `metrics.py`, and `statistics.py` | Reuse | Permit scoring only after strict gold and all candidates share the same approved data/split identities. Metric definitions do not change merely to retain a historical trend. |
-| `phase_b_pipeline/verifier.py`, `phase_b_pipeline/pilot.py`, `prompts/phase_b/`, and verifier schemas | Reuse | Preserve the frozen prompt-bundle/model/decoding identities, exact-token correction mapping, warm-up exclusion, three-attempt policy, cache semantics, separation of dry-run/live/replay, and development-only four-run determinism audit. Preserve the distinct full development candidate index, pre-call pilot subset manifest, authoritative split/gold hashes, clean checkout and live-run evidence bundles, retry logs, and strict-gold correction transitions. A protocol revision requires new prompt/schema hashes rather than in-place drift; synthetic pilot evidence never unlocks execution. |
+| `split.py` | Reuse after input change | Regenerate, never transplant, the assignment from strict-view label presence. Bind its seed, input inventory, output membership, and tree hash to the new protocol. |
+| `scoring.py`, `metrics.py`, and `phase_b_statistics.py` | Reuse | Permit scoring only after strict gold and all candidates share the same approved data/split identities. Metric definitions do not change merely to retain a historical trend. |
+| `verifier.py`, `pilot.py`, `prompts/phase_b/`, and verifier schemas | Reuse | Preserve the frozen prompt-bundle/model/decoding identities, exact-token correction mapping, warm-up exclusion, three-attempt policy, cache semantics, separation of dry-run/live/replay, and development-only four-run determinism audit. Preserve the distinct full development candidate index, pre-call pilot subset manifest, authoritative split/gold hashes, clean checkout and live-run evidence bundles, retry logs, and strict-gold correction transitions. A protocol revision requires new prompt/schema hashes rather than in-place drift; synthetic pilot evidence never unlocks execution. |
 | `data/code_accord.py` and historical evaluation helpers | Secondary support only | Do not use their fuzzy surface lookup or type-agnostic key for canonical gold. If reused operationally, place a versioned adapter behind canonical records and prove parity on eligible fixtures. |
 | Historical `train_span.py`, inference, and graph scripts | Migrate selectively | Reuse model behavior only through thin canonical adapters that enforce output paths, frozen splits, typed identities, seed/config capture, restart manifests, and no final-test tuning. |
 | Historical `verify_triples_llm.py` | Immutable verifier provenance | Its SciERC ontology, free-form line parser, and unrestricted output interface are incompatible with `CODE-VERIFIER-1`. Preserve the historical command/result lineage; do not wrap it as the canonical caller. Reuse would be limited to independently parity-tested transport mechanics, not its prompt, parser, or records. |

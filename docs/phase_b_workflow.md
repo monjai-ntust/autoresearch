@@ -81,7 +81,7 @@ alphanumeric character, and otherwise uses only letters, digits, `.`, `_`, and
 `-`.
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   doctor \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -102,7 +102,7 @@ This stage is read-only with respect to the ledgers and does not require the
 CODE-ACCORD download:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   reconcile \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -129,7 +129,7 @@ The fetch stage requires the passing checkout manifest created by `doctor` in
 the same run:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   fetch \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -144,7 +144,7 @@ is accepted until its size and upstream MD5 match. The archive remains beneath
 ## 5. Audit and prepare CODE-ACCORD
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   prepare \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -174,7 +174,7 @@ manifest, append-only run log, and stage manifest without contacting Ollama or
 writing a verdict:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example \
@@ -188,7 +188,7 @@ materialized request exactly. Replay performs no HTTP request and emits the
 schema-valid verdict file consumed by `score`:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-simple-replay \
@@ -210,7 +210,7 @@ the Ollama tag manifest, Qwen3/32.8B/Q4_K_M details, and CLI modelfile reference
 then retains the warm-up separately and excludes its latency from observations:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-simple-live \
@@ -247,7 +247,7 @@ Use four distinct clean run IDs to execute two live calls per mode. Each call
 must receive the same predeclared selection manifest as an explicit input:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-pilot-simple-1 \
@@ -273,7 +273,7 @@ and verdict evidence against the source manifests; a response ledger alone is
 not pilot evidence.
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   pilot-verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-development-pilot \
@@ -358,7 +358,7 @@ noncanonical identities rather than accepting an unrelated model run.
 ## 9. Reproduce offline strict scoring
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+uv run --frozen --python 3.10.20 python -B phase_b.py \
   score \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example

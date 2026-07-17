@@ -32,22 +32,22 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 101 differing paths: 59
+With this document included, the comparison contains 100 differing paths: 58
 current-only paths, 33 baseline-only paths, and 9 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 116.
+paths and the current tree has 115.
 
 ## Current architecture and rewrite boundary
 
-The publication-facing command is `python -B -m phase_b_pipeline`. The package
-is a protocol and orchestration layer, not a replacement encoder. It centralizes
-contracts that the historical top-level scripts do not share: immutable input
-and model identities, a frozen experiment matrix, strict typed matching,
-leakage-safe splits, deterministic records, replay, output containment, and
-machine-readable manifests.
+The publication-facing command is `python -B phase_b.py`. The canonical root
+modules are a protocol and orchestration layer, not a replacement encoder. They
+centralize contracts that the historical top-level scripts do not share:
+immutable input and model identities, a frozen experiment matrix, strict typed
+matching, leakage-safe splits, deterministic records, replay, output
+containment, and machine-readable manifests.
 
-Keeping this layer separate from the historical top-level scripts is the best
-current boundary for three reasons:
+Keeping canonical semantics distinct from the historical scripts while placing
+the active modules at the root is the current boundary for three reasons:
 
 1. The root training, inference, verification, graph, and ablation paths are
    evidence-bearing implementations. Reworking them in place before behavioral
@@ -64,18 +64,18 @@ current boundary for three reasons:
 This is not yet a complete end-to-end replacement. Canonical training and
 candidate extraction adapters still require parity evidence, and official data
 preparation correctly stops on nine unresolved typed alignment cases. The
-separate package is therefore the right structure, while treating its current
-coverage as complete would not be.
+root-module layout is an intermediate reviewable surface, not a claim that the
+historical model paths have been superseded.
 
 The similarly named paths below are not one-to-one rewrites:
 
 | Baseline/current boundary | Current interpretation and reason |
 | --- | --- |
-| `prepare.py` vs `phase_b_pipeline/preparation.py` | The baseline script prepared FineWeb bytes-per-byte training data. The canonical module validates and materializes official CODE-ACCORD records. The old script is removed as unrelated upstream code; the new module does not inherit its behavior. |
+| `prepare.py` vs `preparation.py` | The baseline script prepared FineWeb bytes-per-byte training data. The canonical module validates and materializes official CODE-ACCORD records. The old script is removed as unrelated upstream code; the new module does not inherit its behavior. |
 | `data/code_accord.py` vs canonical preparation | The unchanged loader preserves the historical fuzzy, type-agnostic experiment path. Canonical preparation uses strict typed alignment and hard-stop auditing because fuzzy recovery is unsuitable for publication scoring. |
-| `verify_triples_llm.py` vs `phase_b_pipeline/verifier.py` | The unchanged root verifier preserves the SciERC free-form response path. The canonical verifier uses frozen CODE prompts, structured response schemas, model identity, caching, replay, retry policy, and telemetry. |
-| `eval/triple_f1.py` vs `phase_b_pipeline/scoring.py` | The historical helper preserves type-agnostic exact triple scoring used by retained experiments. Canonical scoring applies directed, entity-typed `CODE-STRICT-1` matching across the frozen four-condition matrix. |
-| Root training/model modules vs `phase_b_pipeline` | Model behavior remains in the retained modules. The canonical package owns surrounding contracts; thin parity-tested adapters are the intended integration mechanism. |
+| `verify_triples_llm.py` vs `verifier.py` | The unchanged root verifier preserves the SciERC free-form response path. The canonical verifier uses frozen CODE prompts, structured response schemas, model identity, caching, replay, retry policy, and telemetry. |
+| `eval/triple_f1.py` vs `scoring.py` | The historical helper preserves type-agnostic exact triple scoring used by retained experiments. Canonical scoring applies directed, entity-typed `CODE-STRICT-1` matching across the frozen four-condition matrix. |
+| Root training/model modules vs canonical root modules | Model behavior remains in the retained modules. The canonical modules own surrounding contracts; thin parity-tested adapters are the intended integration mechanism. |
 | Historical result/checkpoint locations vs `output/<run-id>/` | Historical ledgers remain evidence pending verified archival. Every canonical runtime artifact is confined to the ignored run directory so a standalone clone has one reproducible output boundary. |
 
 ## Modified baseline paths
@@ -148,30 +148,29 @@ is a set relationship between the two trees, not provenance metadata.
 | `configs/phase_b_section5_evidence.json` | Registers the two historical ledgers and seven claim families as immutable secondary evidence so reconciliation cannot silently promote them to canonical results. |
 | `docs/phase_b_workflow.md` | Gives standalone commands, stage gates, output layout, environment assumptions, and reproducibility limitations for the canonical runner. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
+| `docs/phase_b_root_module_mapping.md` | Maps every former package module to its root host, records the two standard-library collision renames, and states the package-removal parity gates. |
 | `docs/source-change-inventory.md` | Maintains this exhaustive, reasoned comparison with the fixed baseline and prevents future source edits from losing their deletion/reuse/rewrite rationale. |
 
-### Canonical pipeline package
+### Canonical root-module workflow
 
 | Path | Current role and reason |
 | --- | --- |
-| `phase_b_pipeline/__init__.py` | Defines the canonical package identity without importing execution-heavy modules. |
-| `phase_b_pipeline/__main__.py` | Makes `python -m phase_b_pipeline` the portable standalone entry point. |
-| `phase_b_pipeline/acquisition.py` | Downloads the approved immutable archive resumably, verifies size/hash/licensing metadata, and selectively extracts it with path-safety checks. |
-| `phase_b_pipeline/cli.py` | Exposes one command surface for `doctor`, `reconcile`, `fetch`, `prepare`, verifier modes, pilot audit, and scoring, keeping stage transitions explicit. |
-| `phase_b_pipeline/config.py` | Loads and strictly validates the frozen config, experiment matrix, schemas, and tracked-resource identities so protocol drift fails early. |
-| `phase_b_pipeline/constants.py` | Centralizes frozen entity, relation, condition, schema, and protocol identifiers to prevent spelling or ordering drift between stages. |
-| `phase_b_pipeline/doctor.py` | Checks checkout identity, environment, ignore rules, resources, and worktree constraints and emits a machine-readable preflight manifest. |
-| `phase_b_pipeline/io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
-| `phase_b_pipeline/metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
-| `phase_b_pipeline/paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
-| `phase_b_pipeline/pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
-| `phase_b_pipeline/preparation.py` | Parses the immutable official corpus, audits BIO/relation alignment, hard-stops unresolved typed cases, and materializes deterministic records only after validation. |
-| `phase_b_pipeline/reconciliation.py` | Verifies historical ledger identity and physical defects while keeping those ledgers secondary to canonical evidence. |
-| `phase_b_pipeline/records.py` | Defines typed immutable sentence, gold, candidate, and verdict records so stages exchange validated objects instead of ad hoc dictionaries. |
-| `phase_b_pipeline/scoring.py` | Scores all frozen conditions offline with directed entity-typed matching and emits paired outcomes plus provenance. |
-| `phase_b_pipeline/split.py` | Implements the deterministic seed-42 `586/103/173` split and isolation checks needed to prevent evaluation leakage. |
-| `phase_b_pipeline/statistics.py` | Implements paired hierarchical bootstrap intervals, paired t-tests, exact Wilcoxon tests, and Holm correction for the predeclared paired design. |
-| `phase_b_pipeline/verifier.py` | Builds canonical requests and prompts and supports dry, live, and replay execution with pinned model identity, warmup, retries, caching, validation, and telemetry. |
+| `acquisition.py` | Downloads the approved immutable archive resumably, verifies size/hash/licensing metadata, and selectively extracts it with path-safety checks. |
+| `phase_b.py` | Exposes one command surface for `doctor`, `reconcile`, `fetch`, `prepare`, verifier modes, pilot audit, and scoring, keeping stage transitions explicit. |
+| `config.py` | Loads and strictly validates the frozen config, experiment matrix, schemas, and tracked-resource identities so protocol drift fails early. |
+| `constants.py` | Centralizes frozen entity, relation, condition, schema, and protocol identifiers to prevent spelling or ordering drift between stages. |
+| `doctor.py` | Checks checkout identity, environment, ignore rules, resources, and worktree constraints and emits a machine-readable preflight manifest. |
+| `phase_b_io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
+| `metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
+| `paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
+| `pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
+| `preparation.py` | Parses the immutable official corpus, audits BIO/relation alignment, hard-stops unresolved typed cases, and materializes deterministic records only after validation. |
+| `reconciliation.py` | Verifies historical ledger identity and physical defects while keeping those ledgers secondary to canonical evidence. |
+| `records.py` | Defines typed immutable sentence, gold, candidate, and verdict records so stages exchange validated objects instead of ad hoc dictionaries. |
+| `scoring.py` | Scores all frozen conditions offline with directed entity-typed matching and emits paired outcomes plus provenance. |
+| `split.py` | Implements the deterministic seed-42 `586/103/173` split and isolation checks needed to prevent evaluation leakage. |
+| `phase_b_statistics.py` | Implements paired hierarchical bootstrap intervals, paired t-tests, exact Wilcoxon tests, and Holm correction for the predeclared paired design. |
+| `verifier.py` | Builds canonical requests and prompts and supports dry, live, and replay execution with pinned model identity, warmup, retries, caching, validation, and telemetry. |
 
 ### Frozen verifier prompts
 

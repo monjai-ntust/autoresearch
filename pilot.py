@@ -17,9 +17,9 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .config import PipelineConfig
-from .constants import PROTOCOL_ID, WORKFLOW_ID
-from .io import (
+from config import PipelineConfig
+from constants import PROTOCOL_ID, WORKFLOW_ID
+from phase_b_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -28,11 +28,11 @@ from .io import (
     load_json,
     sha256_file,
 )
-from .paths import PathContractError, RunLayout
-from .records import Candidate, StrictTriple, Verdict
-from .scoring import _load_gold, _load_threshold
-from .split import SPLIT_ALGORITHM_REVISION
-from .verifier import (
+from paths import PathContractError, RunLayout
+from records import Candidate, StrictTriple, Verdict
+from scoring import _load_gold, _load_threshold
+from split import SPLIT_ALGORITHM_REVISION
+from verifier import (
     MODE_CONDITIONS,
     _load_candidates,
     _load_response_ledger,

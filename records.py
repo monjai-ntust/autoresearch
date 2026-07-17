@@ -9,8 +9,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES, TRAINING_SEEDS
-from .io import DataContractError
+from constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES, TRAINING_SEEDS
+from phase_b_io import DataContractError
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")

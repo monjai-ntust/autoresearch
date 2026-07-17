@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .constants import RUN_DIRECTORIES
+from constants import RUN_DIRECTORIES
 
 
 class PathContractError(ValueError):
@@ -27,12 +27,12 @@ def discover_source_root(start: Path | None = None) -> Path:
         if (
             (candidate / "pyproject.toml").is_file()
             and (candidate / "uv.lock").is_file()
-            and (candidate / "phase_b_pipeline").is_dir()
+            and (candidate / "phase_b.py").is_file()
         ):
             return candidate.resolve()
     raise PathContractError(
         "could not locate the standalone source root containing pyproject.toml, "
-        "uv.lock, and phase_b_pipeline"
+        "uv.lock, and phase_b.py"
     )
 
 

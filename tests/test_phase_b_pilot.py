@@ -8,19 +8,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from phase_b_pipeline.config import load_pipeline_config
-from phase_b_pipeline.constants import PROTOCOL_ID
-from phase_b_pipeline.io import (
+from config import load_pipeline_config
+from constants import PROTOCOL_ID
+from phase_b_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
     atomic_write_text,
     sha256_file,
 )
-from phase_b_pipeline.paths import RunLayout, discover_source_root
-from phase_b_pipeline.pilot import PilotInputs, run_verifier_pilot
-from phase_b_pipeline.records import StrictTriple, candidate_id_for
-from phase_b_pipeline.verifier import (
+from paths import RunLayout, discover_source_root
+from pilot import PilotInputs, run_verifier_pilot
+from records import StrictTriple, candidate_id_for
+from verifier import (
     _load_candidates,
     _load_sentences,
     _verdict_from_response,

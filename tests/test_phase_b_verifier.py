@@ -9,17 +9,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from phase_b_pipeline.config import load_pipeline_config
-from phase_b_pipeline.constants import PROTOCOL_ID
-from phase_b_pipeline.io import (
+from config import load_pipeline_config
+from constants import PROTOCOL_ID
+from phase_b_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
     sha256_file,
 )
-from phase_b_pipeline.paths import RunLayout, discover_source_root
-from phase_b_pipeline.records import StrictTriple, candidate_id_for
-from phase_b_pipeline.verifier import HttpResult, _verify_live_model, run_verifier
+from paths import RunLayout, discover_source_root
+from records import StrictTriple, candidate_id_for
+from verifier import HttpResult, _verify_live_model, run_verifier
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -474,10 +474,10 @@ class VerifierReplayTests(unittest.TestCase):
                 return model_evidence
 
             with patch(
-                "phase_b_pipeline.verifier._environment_manifest",
+                "verifier._environment_manifest",
                 return_value=environment,
             ), patch(
-                "phase_b_pipeline.verifier._verify_live_model",
+                "verifier._verify_live_model",
                 side_effect=verify_model,
             ):
                 manifest = run_verifier(
@@ -543,7 +543,7 @@ class LiveModelIdentityTests(unittest.TestCase):
                 return HttpResult(200, body, hashlib.sha256(b"body").hexdigest())
 
             real_sha256_file = __import__(
-                "phase_b_pipeline.verifier", fromlist=["sha256_file"]
+                "verifier", fromlist=["sha256_file"]
             ).sha256_file
 
             def sha256_file(path):
@@ -556,8 +556,8 @@ class LiveModelIdentityTests(unittest.TestCase):
                 "returncode": 0,
                 "stdout": "FROM sha256:" + verifier["model_blob_sha256"],
             }
-            with patch("phase_b_pipeline.verifier.sha256_file", side_effect=sha256_file), patch(
-                "phase_b_pipeline.verifier._command_output", return_value=command
+            with patch("verifier.sha256_file", side_effect=sha256_file), patch(
+                "verifier._command_output", return_value=command
             ):
                 evidence = _verify_live_model(
                     layout,

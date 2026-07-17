@@ -9,9 +9,9 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .config import PipelineConfig
-from .constants import CONDITION_IDS, MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from .io import (
+from config import PipelineConfig
+from constants import CONDITION_IDS, MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
+from phase_b_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -19,16 +19,16 @@ from .io import (
     load_json,
     sha256_file,
 )
-from .metrics import binary_metrics, triple_metrics
-from .paths import RunLayout
-from .records import Candidate, GoldRecord, StrictTriple, Verdict
-from .statistics import (
+from metrics import binary_metrics, triple_metrics
+from paths import RunLayout
+from records import Candidate, GoldRecord, StrictTriple, Verdict
+from phase_b_statistics import (
     exact_wilcoxon_signed_rank,
     holm_adjust,
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from .verifier import verifier_identity
+from verifier import verifier_identity
 
 
 @dataclass(frozen=True)

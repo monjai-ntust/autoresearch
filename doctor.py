@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .config import PipelineConfig
-from .constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from .io import atomic_write_json
-from .paths import RunLayout, resolve_tracked_path
+from config import PipelineConfig
+from constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
+from phase_b_io import atomic_write_json
+from paths import RunLayout, resolve_tracked_path
 
 
 def _command(source_root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
