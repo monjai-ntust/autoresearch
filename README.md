@@ -8,10 +8,11 @@ The canonical publication-facing Phase B surface is:
 python -B -m phase_b_pipeline
 ```
 
-The current B-05/B-06 slice implements checkout/environment `doctor`, frozen
-Section 5 ledger `reconcile`, immutable CODE-ACCORD `fetch`, strict `prepare`,
-frozen verifier `dry-run|live|replay`, and offline `CODE-STRICT-1` `score`
-stages. Official v1.0.0 preparation
+The current B-05/B-06 and development-only B-07 slice implements
+checkout/environment `doctor`, frozen Section 5 ledger `reconcile`, immutable
+CODE-ACCORD `fetch`, strict `prepare`, frozen verifier
+`dry-run|live|replay`, development `pilot-verifier` auditing, and offline
+`CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
 intentionally hard-stops with a complete
 audit because nine relation-marker arguments do not map to unique typed BIO
 spans; no row is silently repaired or omitted. See
@@ -72,10 +73,11 @@ override the current preparation hard stop or authorize the proposed migration.
   included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not
   committed.
 - Missing verifier Precision, Recall, and F1 evaluation remains incomplete. The
-  canonical prompts, dry-run/live/replay instrumentation, and offline scorer are
-  implemented, but no publication result has been produced. Valid results still
-  require the blocked prepared corpus, regenerated candidates, the B-07 pilot,
-  and later approved external-machine execution.
+  canonical prompts, dry-run/live/replay instrumentation, development-pilot
+  auditor, and offline scorer are implemented, but no publication result has
+  been produced. Valid results still require an approved resolution of the nine
+  corpus-alignment failures, regenerated development evidence, a passing actual
+  B-07 pilot, the user's go/no-go decision, and later external-machine execution.
 
 ## Installation
 
@@ -418,7 +420,8 @@ strict CSV/BIO decoding, exhaustive gold-alignment hard stops, deterministic
 dataset materialization fixtures, and historical helpers plus canonical
 output-path containment, configuration/matrix invariants, typed directed matching, stable
 candidate identities, deterministic `CODE-SPLIT-1`, leakage rejection,
-zero-denominator behavior, correction/error handling, exact Wilcoxon/Holm and
+zero-denominator behavior, correction/error handling, development-only pilot
+pairing and two-call determinism, exact Wilcoxon/Holm and
 paired-t calculations, paired hierarchical bootstrap replay, and manually
 derived four-condition scoring. It does not substitute for checkpoint, dataset,
 GPU, or Ollama evaluation.

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:candidate-index:1.0",
+  "title": "Phase B full development candidate index",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "workflow_id",
+    "split_id",
+    "split_manifest_sha256",
+    "files",
+    "candidate_count"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase-b-candidate-index-1.0"},
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "split_id": {"const": "CODE-SPLIT-1:development"},
+    "split_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "files": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "prefixItems": [
+        {"$ref": "#/$defs/seed42"},
+        {"$ref": "#/$defs/seed43"},
+        {"$ref": "#/$defs/seed44"},
+        {"$ref": "#/$defs/seed45"},
+        {"$ref": "#/$defs/seed46"},
+        {"$ref": "#/$defs/seed47"},
+        {"$ref": "#/$defs/seed48"},
+        {"$ref": "#/$defs/seed49"}
+      ],
+      "items": false
+    },
+    "candidate_count": {"type": "integer", "minimum": 8}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate": {
+      "type": "object",
+      "required": ["candidate_id", "example_id"],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^cand-[0-9a-f]{64}$"},
+        "example_id": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "file": {
+      "type": "object",
+      "required": ["training_seed", "path", "sha256", "candidate_count", "candidates"],
+      "properties": {
+        "training_seed": {"enum": [42, 43, 44, 45, 46, 47, 48, 49]},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "candidate_count": {"type": "integer", "minimum": 1},
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/candidate"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "seed42": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 42}}}]},
+    "seed43": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 43}}}]},
+    "seed44": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 44}}}]},
+    "seed45": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 45}}}]},
+    "seed46": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 46}}}]},
+    "seed47": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 47}}}]},
+    "seed48": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 48}}}]},
+    "seed49": {"allOf": [{"$ref": "#/$defs/file"}, {"properties": {"training_seed": {"const": 49}}}]}
+  },
+  "additionalProperties": false
+}

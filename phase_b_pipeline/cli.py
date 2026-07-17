@@ -12,6 +12,7 @@ from .config import load_pipeline_config
 from .doctor import run_doctor
 from .io import DataContractError
 from .paths import PathContractError, RunLayout, discover_source_root
+from .pilot import PilotInputs, run_verifier_pilot
 from .preparation import prepare_run
 from .reconciliation import reconcile_section5_evidence
 from .scoring import ScoreInputs, score_run
@@ -25,10 +26,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m phase_b_pipeline",
         description=(
-            "Canonical standalone Phase B workflow. This B-05/B-06 slice implements "
+            "Canonical standalone Phase B workflow. This B-05/B-06/B-07 development "
+            "slice implements "
             "doctor, secondary Section 5 evidence reconciliation, immutable "
             "CODE-ACCORD fetch/preparation, frozen verifier request/replay instrumentation, "
-            "and offline CODE-STRICT-1 scoring."
+            "development-pilot auditing, and offline CODE-STRICT-1 scoring."
         ),
     )
     parser.add_argument(
@@ -91,6 +93,44 @@ def _parser() -> argparse.ArgumentParser:
         "--model-blob",
         help="Run-relative frozen Ollama model blob required by live execution",
     )
+    verifier.add_argument(
+        "--pilot-selection",
+        help="Run-relative predeclared development-pilot selection bound by live execution",
+    )
+
+    pilot = subparsers.add_parser(
+        "pilot-verifier",
+        help="Audit two independent development-only response ledgers per verifier mode",
+    )
+    pilot.add_argument("--config", default=DEFAULT_CONFIG)
+    pilot.add_argument("--run-id", required=True)
+    pilot.add_argument(
+        "--evidence-class",
+        required=True,
+        choices=["development-pilot", "synthetic-fixture"],
+    )
+    pilot.add_argument("--sentences", help="Run-relative development sentences JSONL")
+    pilot.add_argument("--gold", help="Run-relative development gold JSONL")
+    pilot.add_argument("--candidates", help="Run-relative predeclared pilot candidates JSONL")
+    pilot.add_argument(
+        "--warmup-candidates",
+        help="Run-relative fixed single development warm-up candidate JSONL",
+    )
+    pilot.add_argument("--split-manifest", help="Run-relative authoritative split manifest")
+    pilot.add_argument(
+        "--candidate-index", help="Run-relative full development candidate index"
+    )
+    pilot.add_argument(
+        "--pilot-selection", help="Run-relative pre-call pilot-selection manifest"
+    )
+    pilot.add_argument(
+        "--threshold-selection", help="Run-relative development threshold-selection JSON"
+    )
+    pilot.add_argument(
+        "--capture-index",
+        required=True,
+        help="Run-relative index of four copied complete live-run evidence bundles",
+    )
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
     score.add_argument("--config", default=DEFAULT_CONFIG)
@@ -99,7 +139,9 @@ def _parser() -> argparse.ArgumentParser:
     score.add_argument("--candidates", help="Run-relative candidate JSONL path")
     score.add_argument("--simple-verdicts", help="Run-relative simple-verdict JSONL path")
     score.add_argument("--corrective-verdicts", help="Run-relative corrective-verdict JSONL path")
-    score.add_argument("--threshold-selection", help="Run-relative development threshold JSON path")
+    score.add_argument(
+        "--threshold-selection", help="Run-relative development threshold JSON path"
+    )
     return parser
 
 
@@ -111,7 +153,12 @@ def main(argv: list[str] | None = None) -> int:
         layout = RunLayout(source_root=source_root, run_id=args.run_id)
         if args.stage == "doctor":
             manifest, passed = run_doctor(layout, config)
-            print(json.dumps({"run_id": args.run_id, "status": manifest["status"]}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"run_id": args.run_id, "status": manifest["status"]},
+                    sort_keys=True,
+                )
+            )
             return 0 if passed else 2
 
         if args.stage == "fetch":
@@ -203,6 +250,11 @@ def main(argv: list[str] | None = None) -> int:
                 model_blob_path=(
                     layout.resolve(args.model_blob, must_exist=True) if args.model_blob else None
                 ),
+                pilot_selection_path=(
+                    layout.resolve(args.pilot_selection, must_exist=True)
+                    if args.pilot_selection
+                    else None
+                ),
             )
             print(
                 json.dumps(
@@ -217,6 +269,60 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
+
+        if args.stage == "pilot-verifier":
+            configured = config.paths
+            audit = run_verifier_pilot(
+                layout,
+                config,
+                PilotInputs(
+                    sentences=layout.resolve(
+                        args.sentences or configured["warmup_sentences"],
+                        must_exist=True,
+                    ),
+                    gold=layout.resolve(
+                        args.gold or configured["development_gold"], must_exist=True
+                    ),
+                    candidates=layout.resolve(
+                        args.candidates or configured["development_pilot_candidates"],
+                        must_exist=True,
+                    ),
+                    warmup_candidates=layout.resolve(
+                        args.warmup_candidates or configured["warmup_candidates"],
+                        must_exist=True,
+                    ),
+                    split_manifest=layout.resolve(
+                        args.split_manifest or configured["split_manifest"],
+                        must_exist=True,
+                    ),
+                    candidate_index=layout.resolve(
+                        args.candidate_index or configured["development_candidate_index"],
+                        must_exist=True,
+                    ),
+                    pilot_selection=layout.resolve(
+                        args.pilot_selection or configured["verifier_pilot_selection"],
+                        must_exist=True,
+                    ),
+                    threshold_selection=layout.resolve(
+                        args.threshold_selection or configured["threshold_selection"],
+                        must_exist=True,
+                    ),
+                    capture_index=layout.resolve(args.capture_index, must_exist=True),
+                ),
+                evidence_class=args.evidence_class,
+            )
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "pilot_status": audit["pilot_status"],
+                        "go_no_go_status": audit["go_no_go_status"],
+                        "publication_execution_admitted": False,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0 if audit["pilot_status"] == "pass" else 2
 
         configured = config.paths
         inputs = ScoreInputs(

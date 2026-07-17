@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:verifier-pilot-captures:1.0",
+  "title": "Phase B four-run verifier-pilot capture index",
+  "type": "object",
+  "required": ["schema_version", "protocol_id", "workflow_id", "captures"],
+  "properties": {
+    "schema_version": {"const": "phase-b-verifier-pilot-captures-1.0"},
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "captures": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {"$ref": "#/$defs/simple1"},
+        {"$ref": "#/$defs/simple2"},
+        {"$ref": "#/$defs/corrective1"},
+        {"$ref": "#/$defs/corrective2"}
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "capture": {
+      "type": "object",
+      "required": ["capture_id", "mode", "repeat", "source_run_id", "capture_root"],
+      "properties": {
+        "capture_id": {
+          "enum": [
+            "simple-repeat-1",
+            "simple-repeat-2",
+            "corrective-repeat-1",
+            "corrective-repeat-2"
+          ]
+        },
+        "mode": {"enum": ["simple", "corrective"]},
+        "repeat": {"enum": [1, 2]},
+        "source_run_id": {"type": "string", "minLength": 1},
+        "capture_root": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "simple1": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "simple-repeat-1"}, "mode": {"const": "simple"}, "repeat": {"const": 1}}}]},
+    "simple2": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "simple-repeat-2"}, "mode": {"const": "simple"}, "repeat": {"const": 2}}}]},
+    "corrective1": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "corrective-repeat-1"}, "mode": {"const": "corrective"}, "repeat": {"const": 1}}}]},
+    "corrective2": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "corrective-repeat-2"}, "mode": {"const": "corrective"}, "repeat": {"const": 2}}}]}
+  },
+  "additionalProperties": false
+}

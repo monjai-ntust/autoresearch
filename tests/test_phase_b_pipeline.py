@@ -182,6 +182,11 @@ class ConfigContractTests(unittest.TestCase):
             "schemas/phase_b/verifier-environment.schema.json",
             "schemas/phase_b/verifier-replay.schema.json",
             "schemas/phase_b/verifier-manifest.schema.json",
+            "schemas/phase_b/candidate-index.schema.json",
+            "schemas/phase_b/verifier-pilot-selection.schema.json",
+            "schemas/phase_b/verifier-pilot-captures.schema.json",
+            "schemas/phase_b/verifier-pilot-audit.schema.json",
+            "schemas/phase_b/verifier-pilot-failure.schema.json",
         ):
             with self.subTest(path=relative):
                 with (SOURCE_ROOT / relative).open(encoding="utf-8") as handle:

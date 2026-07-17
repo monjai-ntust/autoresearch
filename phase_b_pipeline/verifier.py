@@ -1007,6 +1007,7 @@ def run_verifier(
     warmup_candidates_path: Path | None = None,
     response_ledger_path: Path | None = None,
     cache_ledger_path: Path | None = None,
+    pilot_selection_path: Path | None = None,
     ollama_url: str = "http://localhost:11434",
     model_blob_path: Path | None = None,
     transport: HttpTransport | None = None,
@@ -1025,11 +1026,23 @@ def run_verifier(
         raise DataContractError("a response ledger is accepted only by replay execution")
     if execution_mode != "live" and cache_ledger_path is not None:
         raise DataContractError("a response cache is accepted only by live execution")
+    if pilot_selection_path is not None and cache_ledger_path is not None:
+        raise DataContractError(
+            "development-pilot live calls cannot use a response cache ledger"
+        )
     if execution_mode != "live" and any(
         value is not None
-        for value in (warmup_sentences_path, warmup_candidates_path, model_blob_path)
+        for value in (
+            warmup_sentences_path,
+            warmup_candidates_path,
+            model_blob_path,
+            pilot_selection_path,
+        )
     ):
-        raise DataContractError("warm-up and model-blob inputs are accepted only by live execution")
+        raise DataContractError(
+            "warm-up, model-blob, and pilot-selection inputs are accepted only by "
+            "live execution"
+        )
     if execution_mode == "live" and model_blob_path is None:
         raise DataContractError("live execution requires the verified run-local model blob")
     if execution_mode == "live" and (
@@ -1075,6 +1088,12 @@ def run_verifier(
 
     sentences = _load_sentences(sentences_path)
     candidate_rows = _load_candidates(candidates_path, sentences)
+    if pilot_selection_path is not None and any(
+        sentence.split != "development" for _, _, sentence in candidate_rows
+    ):
+        raise DataContractError(
+            "a pilot selection manifest is accepted only with development candidates"
+        )
     bundle = _prompt_bundle(config, mode)
     serialized_requests: list[dict[str, Any]] = []
     runtime_requests: list[dict[str, Any]] = []
@@ -1329,6 +1348,15 @@ def run_verifier(
                 **(
                     {layout.relative_identity(cache_ledger_path): sha256_file(cache_ledger_path)}
                     if cache_ledger_path is not None
+                    else {}
+                ),
+                **(
+                    {
+                        layout.relative_identity(pilot_selection_path): sha256_file(
+                            pilot_selection_path
+                        )
+                    }
+                    if pilot_selection_path is not None
                     else {}
                 ),
             },

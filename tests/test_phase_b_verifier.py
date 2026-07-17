@@ -11,7 +11,12 @@ from unittest.mock import patch
 
 from phase_b_pipeline.config import load_pipeline_config
 from phase_b_pipeline.constants import PROTOCOL_ID
-from phase_b_pipeline.io import atomic_write_jsonl
+from phase_b_pipeline.io import (
+    DataContractError,
+    atomic_write_json,
+    atomic_write_jsonl,
+    sha256_file,
+)
 from phase_b_pipeline.paths import RunLayout, discover_source_root
 from phase_b_pipeline.records import StrictTriple, candidate_id_for
 from phase_b_pipeline.verifier import HttpResult, _verify_live_model, run_verifier
@@ -241,6 +246,28 @@ class VerifierReplayTests(unittest.TestCase):
             self.assertEqual(verdict["attempts"], 2)
             self.assertTrue(verdict["telemetry"]["latency_observation_included"])
 
+    def test_pilot_live_execution_rejects_any_cache_ledger(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "pilot-cache-rejected")
+            layout.create()
+            placeholder = layout.resolve("inputs/placeholder")
+            with self.assertRaisesRegex(
+                DataContractError, "cannot use a response cache ledger"
+            ):
+                run_verifier(
+                    layout,
+                    self.config,
+                    mode="simple",
+                    execution_mode="live",
+                    sentences_path=placeholder,
+                    candidates_path=placeholder,
+                    warmup_sentences_path=placeholder,
+                    warmup_candidates_path=placeholder,
+                    cache_ledger_path=placeholder,
+                    pilot_selection_path=placeholder,
+                    model_blob_path=placeholder,
+                )
+
     def test_replay_outputs_verdicts_in_seed_candidate_order(self):
         with _temporary_output_directory() as temporary:
             plan_layout = RunLayout(Path(temporary), "plan-order")
@@ -351,7 +378,12 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "live-simple")
             layout.create()
-            sentences, candidates = _write_inputs(layout)
+            sentences = layout.resolve("data-prepared/development-pilot.jsonl")
+            candidates = layout.resolve("predictions/dev/pilot-candidates.jsonl")
+            atomic_write_jsonl(sentences, [_sentence(split="development")])
+            atomic_write_jsonl(candidates, [_candidate(split="development")])
+            pilot_selection = layout.resolve("predictions/dev/pilot-selection.json")
+            atomic_write_json(pilot_selection, {"fixture": True})
             warmup_sentence = {**_sentence(), "example_id": "ex-warm", "split": "development"}
             warmup_triple = {
                 "head": {"start": 0, "end": 0, "type": "Object", "text": "Door"},
@@ -458,12 +490,17 @@ class VerifierReplayTests(unittest.TestCase):
                     warmup_sentences_path=warmup_sentences,
                     warmup_candidates_path=warmup_candidates,
                     model_blob_path=model_blob,
+                    pilot_selection_path=pilot_selection,
                     transport=transport,
                     sleep=lambda _: None,
                 )
             self.assertEqual(len(calls), 2)
             self.assertEqual(manifest["warmup_candidate_count"], 1)
             self.assertFalse(manifest["warmup_latency_observation_included"])
+            self.assertEqual(
+                manifest["inputs"]["predictions/dev/pilot-selection.json"],
+                sha256_file(pilot_selection),
+            )
             self.assertTrue(layout.resolve("verifier/simple/warmup-response.jsonl").is_file())
             verdict = json.loads(
                 layout.resolve("verifier/simple/verdicts.jsonl").read_text(

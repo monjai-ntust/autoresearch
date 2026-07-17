@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:verifier-pilot-failure:1.0",
+  "title": "Phase B verifier-pilot contract-failure audit",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "workflow_id",
+    "evidence_class",
+    "pilot_status",
+    "go_no_go_status",
+    "publication_execution_admitted",
+    "error_category",
+    "error_message",
+    "input_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase-b-verifier-pilot-failure-1.0"},
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "evidence_class": {"type": "string", "minLength": 1},
+    "pilot_status": {"const": "fail"},
+    "go_no_go_status": {"const": "no_go_contract_failure"},
+    "publication_execution_admitted": {"const": false},
+    "error_category": {"enum": ["DataContractError", "PathContractError"]},
+    "error_message": {"type": "string", "minLength": 1},
+    "input_sha256": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    }
+  },
+  "additionalProperties": false
+}

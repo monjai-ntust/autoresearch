@@ -1,0 +1,438 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:verifier-pilot-audit:1.0",
+  "title": "Phase B development-only verifier pilot audit",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_id",
+    "workflow_id",
+    "evidence_class",
+    "pilot_scope",
+    "pilot_status",
+    "go_no_go_status",
+    "publication_execution_admitted",
+    "requires_user_go_no_go_approval",
+    "material_protocol_review_required",
+    "candidate_count",
+    "example_count",
+    "source_document_count",
+    "training_seeds",
+    "selected_development_threshold",
+    "input_sha256",
+    "prompt_identities",
+    "candidate_class_balance",
+    "candidate_class_balance_by_relation",
+    "capture_provenance",
+    "decision_diagnostics",
+    "corrective_outcome_diagnostics",
+    "checks",
+    "determinism",
+    "distributions",
+    "telemetry",
+    "output_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "phase-b-verifier-pilot-audit-1.0"},
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+    "evidence_class": {"enum": ["development-pilot", "synthetic-fixture"]},
+    "pilot_scope": {"const": "development-only"},
+    "pilot_status": {"enum": ["pass", "fail"]},
+    "go_no_go_status": {
+      "enum": [
+        "eligible_for_user_review",
+        "blocked_synthetic_fixture",
+        "no_go_pilot_failed"
+      ]
+    },
+    "publication_execution_admitted": {"const": false},
+    "requires_user_go_no_go_approval": {"const": true},
+    "material_protocol_review_required": {"type": "boolean"},
+    "candidate_count": {"type": "integer", "minimum": 1},
+    "example_count": {"type": "integer", "minimum": 1},
+    "source_document_count": {"type": "integer", "minimum": 1},
+    "training_seeds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"enum": [42, 43, 44, 45, 46, 47, 48, 49]}
+    },
+    "selected_development_threshold": {
+      "enum": [
+        0.0,
+        0.05,
+        0.1,
+        0.15,
+        0.2,
+        0.25,
+        0.3,
+        0.35,
+        0.4,
+        0.45,
+        0.5,
+        0.55,
+        0.6,
+        0.65,
+        0.7,
+        0.75,
+        0.8,
+        0.85,
+        0.9,
+        0.95
+      ]
+    },
+    "input_sha256": {"$ref": "#/$defs/hashMap"},
+    "prompt_identities": {
+      "type": "object",
+      "required": ["simple", "corrective"],
+      "properties": {
+        "simple": {"$ref": "#/$defs/identity"},
+        "corrective": {"$ref": "#/$defs/identity"}
+      },
+      "additionalProperties": false
+    },
+    "candidate_class_balance": {"$ref": "#/$defs/classCounts"},
+    "candidate_class_balance_by_relation": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/classCounts"}
+    },
+    "capture_provenance": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {"$ref": "#/$defs/simpleCapture1"},
+        {"$ref": "#/$defs/simpleCapture2"},
+        {"$ref": "#/$defs/correctiveCapture1"},
+        {"$ref": "#/$defs/correctiveCapture2"}
+      ],
+      "items": false
+    },
+    "decision_diagnostics": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/decisionDiagnostic"}, {"properties": {"condition_id": {"const": "VER-RAW"}, "repeat": {"const": 0}}}]},
+        {"allOf": [{"$ref": "#/$defs/decisionDiagnostic"}, {"properties": {"condition_id": {"const": "VER-CONFIDENCE"}, "repeat": {"const": 0}}}]},
+        {"allOf": [{"$ref": "#/$defs/decisionDiagnostic"}, {"properties": {"condition_id": {"const": "VER-SIMPLE"}, "repeat": {"const": 1}}}]},
+        {"allOf": [{"$ref": "#/$defs/decisionDiagnostic"}, {"properties": {"condition_id": {"const": "VER-SIMPLE"}, "repeat": {"const": 2}}}]},
+        {"allOf": [{"$ref": "#/$defs/decisionDiagnostic"}, {"properties": {"condition_id": {"const": "VER-CORRECTIVE"}, "repeat": {"const": 1}}}]},
+        {"allOf": [{"$ref": "#/$defs/decisionDiagnostic"}, {"properties": {"condition_id": {"const": "VER-CORRECTIVE"}, "repeat": {"const": 2}}}]}
+      ],
+      "items": false
+    },
+    "corrective_outcome_diagnostics": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/correctiveDiagnostic"}, {"properties": {"repeat": {"const": 1}}}]},
+        {"allOf": [{"$ref": "#/$defs/correctiveDiagnostic"}, {"properties": {"repeat": {"const": 2}}}]}
+      ],
+      "items": false
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["check_id", "status", "detail"],
+        "properties": {
+          "check_id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["pass", "fail"]},
+          "detail": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "determinism": {
+      "type": "object",
+      "required": ["simple", "corrective"],
+      "properties": {
+        "simple": {"$ref": "#/$defs/determinism"},
+        "corrective": {"$ref": "#/$defs/determinism"}
+      },
+      "additionalProperties": false
+    },
+    "distributions": {
+      "type": "object",
+      "required": ["simple", "corrective"],
+      "properties": {
+        "simple": {"$ref": "#/$defs/repeatDistributions"},
+        "corrective": {"$ref": "#/$defs/repeatDistributions"}
+      },
+      "additionalProperties": false
+    },
+    "telemetry": {
+      "type": "object",
+      "required": ["simple", "corrective"],
+      "properties": {
+        "simple": {"$ref": "#/$defs/repeatTelemetry"},
+        "corrective": {"$ref": "#/$defs/repeatTelemetry"}
+      },
+      "additionalProperties": false
+    },
+    "output_sha256": {"$ref": "#/$defs/hashMap"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "hashMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/sha256"}
+    },
+    "identity": {
+      "type": "object",
+      "required": ["prompt_sha256", "model_manifest_sha256", "decoding_sha256"],
+      "properties": {
+        "prompt_sha256": {"$ref": "#/$defs/sha256"},
+        "model_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "decoding_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "classCounts": {
+      "type": "object",
+      "required": ["gold_valid", "gold_invalid"],
+      "properties": {
+        "gold_valid": {"type": "integer", "minimum": 0},
+        "gold_invalid": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "required": [
+        "capture_id",
+        "mode",
+        "repeat",
+        "source_run_id",
+        "source_commit",
+        "checkout_manifest_sha256",
+        "verifier_manifest_sha256",
+        "environment_manifest_sha256",
+        "request_ledger_sha256",
+        "response_ledger_sha256",
+        "run_log_sha256",
+        "runtime_identity_sha256"
+      ],
+      "properties": {
+        "capture_id": {"type": "string", "minLength": 1},
+        "mode": {"enum": ["simple", "corrective"]},
+        "repeat": {"enum": [1, 2]},
+        "source_run_id": {"type": "string", "minLength": 1},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "checkout_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "verifier_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "environment_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "request_ledger_sha256": {"$ref": "#/$defs/sha256"},
+        "response_ledger_sha256": {"$ref": "#/$defs/sha256"},
+        "run_log_sha256": {"$ref": "#/$defs/sha256"},
+        "runtime_identity_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "simpleCapture1": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "simple-repeat-1"}, "mode": {"const": "simple"}, "repeat": {"const": 1}}}]},
+    "simpleCapture2": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "simple-repeat-2"}, "mode": {"const": "simple"}, "repeat": {"const": 2}}}]},
+    "correctiveCapture1": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "corrective-repeat-1"}, "mode": {"const": "corrective"}, "repeat": {"const": 1}}}]},
+    "correctiveCapture2": {"allOf": [{"$ref": "#/$defs/capture"}, {"properties": {"capture_id": {"const": "corrective-repeat-2"}, "mode": {"const": "corrective"}, "repeat": {"const": 2}}}]},
+    "decisionDiagnostic": {
+      "type": "object",
+      "required": [
+        "condition_id",
+        "repeat",
+        "candidate_count",
+        "tp",
+        "fp",
+        "fn",
+        "tn",
+        "agreement_count",
+        "disagreement_count",
+        "disagreement_rate"
+      ],
+      "properties": {
+        "condition_id": {
+          "enum": ["VER-RAW", "VER-CONFIDENCE", "VER-SIMPLE", "VER-CORRECTIVE"]
+        },
+        "repeat": {"type": "integer", "minimum": 0, "maximum": 2},
+        "candidate_count": {"type": "integer", "minimum": 1},
+        "tp": {"type": "integer", "minimum": 0},
+        "fp": {"type": "integer", "minimum": 0},
+        "fn": {"type": "integer", "minimum": 0},
+        "tn": {"type": "integer", "minimum": 0},
+        "agreement_count": {"type": "integer", "minimum": 0},
+        "disagreement_count": {"type": "integer", "minimum": 0},
+        "disagreement_rate": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "correctiveDiagnostic": {
+      "type": "object",
+      "required": [
+        "repeat",
+        "candidate_count",
+        "correction_attempted",
+        "correction_source_valid",
+        "correction_strict_gold_valid",
+        "correction_duplicate_emission",
+        "original_valid_to_final_valid",
+        "original_valid_to_final_invalid",
+        "original_invalid_to_final_valid",
+        "original_invalid_to_final_invalid"
+      ],
+      "properties": {
+        "repeat": {"enum": [1, 2]},
+        "candidate_count": {"type": "integer", "minimum": 1},
+        "correction_attempted": {"type": "integer", "minimum": 0},
+        "correction_source_valid": {"type": "integer", "minimum": 0},
+        "correction_strict_gold_valid": {"type": "integer", "minimum": 0},
+        "correction_duplicate_emission": {"type": "integer", "minimum": 0},
+        "original_valid_to_final_valid": {"type": "integer", "minimum": 0},
+        "original_valid_to_final_invalid": {"type": "integer", "minimum": 0},
+        "original_invalid_to_final_valid": {"type": "integer", "minimum": 0},
+        "original_invalid_to_final_invalid": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "countMap": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "distribution": {
+      "type": "object",
+      "required": [
+        "response_status",
+        "action",
+        "reason_code",
+        "correction_validation_status"
+      ],
+      "properties": {
+        "response_status": {"$ref": "#/$defs/countMap"},
+        "action": {"$ref": "#/$defs/countMap"},
+        "reason_code": {"$ref": "#/$defs/countMap"},
+        "correction_validation_status": {"$ref": "#/$defs/countMap"}
+      },
+      "additionalProperties": false
+    },
+    "repeatDistributions": {
+      "type": "object",
+      "required": ["repeat_1", "repeat_2"],
+      "properties": {
+        "repeat_1": {"$ref": "#/$defs/distribution"},
+        "repeat_2": {"$ref": "#/$defs/distribution"}
+      },
+      "additionalProperties": false
+    },
+    "telemetryRecord": {
+      "type": "object",
+      "required": [
+        "candidate_calls",
+        "attempt_count",
+        "retry_candidate_count",
+        "cache_hit_count",
+        "failed_verdict_count",
+        "transport_status",
+        "attempt_elapsed_seconds",
+        "prompt_eval_count",
+        "eval_count",
+        "ollama_total_duration_ns"
+      ],
+      "properties": {
+        "candidate_calls": {"type": "integer", "minimum": 1},
+        "attempt_count": {"type": "integer", "minimum": 1},
+        "retry_candidate_count": {"type": "integer", "minimum": 0},
+        "cache_hit_count": {"type": "integer", "minimum": 0},
+        "failed_verdict_count": {"type": "integer", "minimum": 0},
+        "transport_status": {"$ref": "#/$defs/countMap"},
+        "attempt_elapsed_seconds": {"type": "number", "minimum": 0},
+        "prompt_eval_count": {"type": "integer", "minimum": 0},
+        "eval_count": {"type": "integer", "minimum": 0},
+        "ollama_total_duration_ns": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "repeatTelemetry": {
+      "type": "object",
+      "required": ["repeat_1", "repeat_2"],
+      "properties": {
+        "repeat_1": {"$ref": "#/$defs/telemetryRecord"},
+        "repeat_2": {"$ref": "#/$defs/telemetryRecord"}
+      },
+      "additionalProperties": false
+    },
+    "determinism": {
+      "type": "object",
+      "required": [
+        "required_repeats",
+        "normalized_identical",
+        "mismatch_count",
+        "mismatch_candidate_ids"
+      ],
+      "properties": {
+        "required_repeats": {"const": 2},
+        "normalized_identical": {"type": "boolean"},
+        "mismatch_count": {"type": "integer", "minimum": 0},
+        "mismatch_candidate_ids": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^cand-[0-9a-f]{64}$"}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"evidence_class": {"const": "synthetic-fixture"}}},
+      "then": {"properties": {"go_no_go_status": {"const": "blocked_synthetic_fixture"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_class": {"const": "development-pilot"},
+          "pilot_status": {"const": "pass"}
+        },
+        "required": ["evidence_class", "pilot_status"]
+      },
+      "then": {
+        "properties": {
+          "go_no_go_status": {"const": "eligible_for_user_review"},
+          "material_protocol_review_required": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"pilot_status": {"const": "fail"}}},
+      "then": {"properties": {"material_protocol_review_required": {"const": true}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_class": {"const": "development-pilot"},
+          "pilot_status": {"const": "fail"}
+        },
+        "required": ["evidence_class", "pilot_status"]
+      },
+      "then": {"properties": {"go_no_go_status": {"const": "no_go_pilot_failed"}}}
+    },
+    {
+      "if": {"properties": {"pilot_status": {"const": "pass"}}},
+      "then": {
+        "properties": {
+          "material_protocol_review_required": {"const": false},
+          "checks": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "properties": {"status": {"const": "fail"}},
+                "required": ["status"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

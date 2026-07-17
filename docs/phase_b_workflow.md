@@ -6,8 +6,8 @@ parent repository or `research-logs`.
 
 ## Current implementation boundary
 
-The B-05/B-06 slice implements one public module entry point with six stages
-and focused contract tests:
+The B-05/B-06 and development-only B-07 slice implements one public module
+entry point with seven stages and focused contract tests:
 
 - `doctor` validates the direct source checkout, exact Python/uv requirements,
   Git cleanliness, root-anchored output ignore behavior, configuration/matrix
@@ -29,6 +29,12 @@ and focused contract tests:
   explicit `dry-run`, optional hash-gated `live`, and model-free `replay`
   execution, and retains environment, raw-response, retry, cache, token, and
   latency evidence under the selected run.
+- `pilot-verifier` audits two independently captured response ledgers for each
+  verifier mode against development-only sentences, typed gold, candidates,
+  and the frozen development threshold. It checks exact coverage, source-only
+  prompt evidence, response schemas, cache exclusion, source-grounded
+  corrections, and normalized two-call determinism. It never admits publication
+  execution.
 - `score` validates frozen gold, candidate, simple-verdict, corrective-verdict,
   and development-threshold records; applies typed directed matcher
   `CODE-STRICT-1`; and writes candidate outcomes, sentence outcomes, confusion
@@ -42,11 +48,12 @@ typed BIO span. In accordance with the approved protocol, `prepare` inventories
 all nine in `audit/gold-alignment-audit.json` and does not exclude, project,
 expand, or manually type them. A material protocol amendment is required before
 that stage may produce strict gold or a split. Deterministic checkpoint
-rebuilding, inference, threshold selection, development determinism-pilot
-selection, publication rendering, and parent-side archival are not implemented
-by this slice. Historical standalone scripts remain provenance paths and are
-not publication commands for Path A. Expensive training and final-test Qwen execution remain
-blocked until the approved B-07 go/no-go checkpoint.
+rebuilding, inference, threshold selection, the actual model-backed development
+pilot, publication rendering, and parent-side archival are not completed by
+this slice. Historical standalone scripts remain provenance paths and are not
+publication commands for Path A. Expensive publication training and final-test
+Qwen execution remain blocked until the B-07 evidence exists and the user makes
+the required go/no-go decision.
 
 The design-only [`Phase C migration plan`](phase_c_migration.md) describes the
 proposed raw-provenance/typed-strict dual view and the code/data paths that could
@@ -227,7 +234,89 @@ These commands do not override the preparation hard stop or the B-07/B-08
 execution gates. In the current checkout they are code-path validation and
 external handoff surfaces, not permission to inspect or call the final test set.
 
-## 7. Supply immutable offline-scoring inputs
+## 7. Audit the development-only verifier pilot
+
+This stage consumes, but does not create, the B-07 pilot evidence. The full
+eight-file development candidate index is distinct from the small pilot
+candidate subset. Freeze `candidate-index.json`, select the pilot subset without
+test labels, and write `pilot-selection.json` before any live call. The selection
+manifest binds the authoritative split, full index, exact subset hash, candidate
+IDs, examples, seed coverage, and selection rule.
+
+Use four distinct clean run IDs to execute two live calls per mode. Each call
+must receive the same predeclared selection manifest as an explicit input:
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  verifier \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-pilot-simple-1 \
+  --mode simple \
+  --execution live \
+  --sentences data-prepared/development.jsonl \
+  --candidates predictions/dev/pilot-candidates.jsonl \
+  --pilot-selection predictions/dev/pilot-selection.json \
+  --model-blob inputs/ollama/blobs/sha256-3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312
+```
+
+Repeat as `path-a-pilot-simple-2`, then use two more run IDs for `corrective`.
+Do not resume from a response cache. Preserve each complete run. In the audit
+run, copy its checkout/stage manifests and every verifier-stage output beneath
+`inputs/pilot/captures/<mode>-repeat-<n>/` while preserving its original
+run-relative paths. The 20 GB model-blob input remains content-addressed in its
+original run and is proven by the live preflight/environment/stage identities;
+do not duplicate it four times merely to assemble the audit. Then create the
+four-entry index defined by
+`schemas/phase_b/verifier-pilot-captures.schema.json`. The auditor verifies the
+copied checkout, stage, environment, request, response, run-log, warm-up, model,
+and verdict evidence against the source manifests; a response ledger alone is
+not pilot evidence.
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  pilot-verifier \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-development-pilot \
+  --evidence-class development-pilot \
+  --capture-index inputs/pilot/capture-index.json
+```
+
+The command proves every sentence belongs to the hashed authoritative
+development split, the threshold binds development gold plus the full
+eight-file candidate index, and the pilot subset is a pre-call subset of that
+index with source candidates from seeds 42–49. It reconstructs the canonical
+requests; opens and hash-verifies every indexed seed file; verifies four
+distinct clean, completed, pinned-Qwen live runs under one identical runtime;
+and proves that each capture used the fixed warm-up input and no cache ledger.
+It replays the captured responses and requires record-equivalent verdicts,
+validates retry timing against exact run-log events and source-grounded
+corrections, and compares only normalized scientific decision fields between
+repeats. It emits development-only class balance, gold/verifier disagreement
+diagnostics for all four conditions, strict-gold correction and transition
+diagnostics, four normalized verdict ledgers, and
+`audit/verifier-pilot/pilot-audit.json`, conforming to
+`schemas/phase_b/verifier-pilot-audit.schema.json`.
+
+A passing real pilot is reported only as `eligible_for_user_review`; the audit
+always records `publication_execution_admitted: false` and requires a user
+go/no-go decision. `synthetic-fixture` is available only for contract testing
+and is always reported as `blocked_synthetic_fixture`, even when every check
+passes. Completed captures with failed determinism, invalid responses, cache
+reuse, or ungrounded corrections produce a no-go audit instead of silently
+dropping candidates. After the CLI has resolved the configured run-relative
+paths, structural input/provenance failures raised inside the auditor retain
+`audit/verifier-pilot/pilot-failure.json` under a separate failure schema.
+Missing or escaping CLI paths fail before the audit stage starts and therefore
+do not claim an in-stage failure artifact.
+
+The current official workflow cannot create valid inputs for this command:
+preparation stops at the nine unresolved marker arguments, so the approved
+split, development gold, checkpoints, development candidates, and selected
+threshold do not exist. This machine also lacks the pinned Ollama model/runtime.
+The implemented auditor therefore validates the handoff contract; it is not a
+claim that the actual B-07 pilot has run.
+
+## 8. Supply immutable offline-scoring inputs
 
 Until preparation is unblocked and canonical inference is implemented,
 place the following externally produced, schema-valid files at their configured
@@ -266,7 +355,7 @@ Verdict records must carry the exact configured prompt-bundle, registry
 manifest, and decoding hashes. The scorer rejects internally consistent but
 noncanonical identities rather than accepting an unrelated model run.
 
-## 8. Reproduce offline strict scoring
+## 9. Reproduce offline strict scoring
 
 ```bash
 uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
@@ -311,17 +400,19 @@ The `-B` flag is mandatory for canonical commands: it prevents Python from
 creating `__pycache__` files in the tracked source area. `doctor` checks this
 before declaring the environment compliant.
 
-## 9. Reproducibility interpretation
+## 10. Reproducibility interpretation
 
 This core slice supports immutable CODE-ACCORD acquisition, exhaustive
-preparation auditing, exact verifier request planning/live instrumentation, and
-deterministic offline response/result replay once valid frozen inputs exist. It
+preparation auditing, exact verifier request planning/live instrumentation,
+development-pilot evidence auditing, and deterministic offline response/result
+replay once valid frozen inputs exist. It
 does not yet establish an approved prepared corpus or exact
 same-seed checkpoint rebuilding. The final workflow must resolve the official
 annotation incompatibility, fetch and verify DeBERTa, reconstruct
 `CODE-SPLIT-1` byte-identically, serialize full restart state,
 duplicate seed-42 training/inference under the pinned accelerator profile,
-rebuild seeds 43-49, freeze development/test inference, pass the development
-verifier determinism/label-quality pilot, score uncertainty/tests, and
+rebuild seeds 43-49, freeze development/test inference, produce and pass the
+development verifier determinism/label-quality pilot, receive the user go/no-go
+decision, score uncertainty/tests, and
 render/archive the final output. Those stages will be added to this same module
 entry point as their remaining gates are completed.
