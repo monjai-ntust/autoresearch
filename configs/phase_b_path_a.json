@@ -211,6 +211,7 @@
     "pyproject.toml",
     "docs/phase_b_workflow.md",
     "docs/phase_c_migration.md",
+    "docs/historical-transition-map.md",
     "configs/phase_b_section5_evidence.json",
     "schemas/phase_b/config.schema.json",
     "schemas/phase_b/experiment-matrix.schema.json",

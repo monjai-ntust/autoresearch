@@ -18,7 +18,6 @@ from paths import discover_source_root
 from preparation import (
     DatasetContract,
     EntityRecord,
-    GoldAlignmentError,
     _alignment_choice,
     _locate_annotation_files,
     _materialize_dataset,
@@ -318,7 +317,7 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(span, entity.entities[0])
         self.assertEqual(diagnosis["contained_by_one_span"], [entity.entities[0]])
 
-    def test_all_gold_alignment_failures_are_audited_before_hard_stop(self):
+    def test_all_gold_alignment_failures_are_retained_in_raw_view(self):
         with _temporary_output_directory() as temporary:
             root = Path(temporary)
             extracted = root / "extracted"
@@ -341,10 +340,8 @@ class PreparationTests(unittest.TestCase):
             identity["sha256"] = sha256_file(relation_path)
 
             paths = _locate_annotation_files(extracted, contract)
-            with self.assertRaises(GoldAlignmentError) as caught:
-                _prepare_corpus(paths, contract)
-            audit = caught.exception.audit
-            self.assertEqual(audit["status"], "hard_stop")
+            _, relations, _, _, _, audit, raw_rows = _prepare_corpus(paths, contract)
+            self.assertEqual(audit["status"], "raw_preserved_typed_strict_materialized")
             self.assertEqual(audit["summary"]["relation_rows_scanned"], 4329)
             self.assertEqual(audit["summary"]["none_relation_rows_scanned"], 1000)
             self.assertEqual(audit["summary"]["accepted_uuid_repair_rows"], 1)
@@ -360,6 +357,9 @@ class PreparationTests(unittest.TestCase):
                 {issue["official_entity_partition"] for issue in audit["issues"]},
                 {"train"},
             )
+            self.assertEqual(audit["summary"]["typed_strict_eligible_positive_rows"], 3327)
+            self.assertEqual(sum(len(values) for values in relations.values()), 3327)
+            self.assertEqual(sum(row["relation"] != "none" for row in raw_rows), 3329)
 
     def test_official_shape_repair_alignment_split_and_second_materialization(self):
         with _temporary_output_directory() as temporary:
@@ -367,9 +367,15 @@ class PreparationTests(unittest.TestCase):
             extracted = root / "extracted"
             contract = _build_official_shape_fixture(extracted)
             paths = _locate_annotation_files(extracted, contract)
-            entities, relations, repair, split, task_audit = _prepare_corpus(
-                paths, contract
-            )
+            (
+                entities,
+                relations,
+                repair,
+                split,
+                task_audit,
+                alignment_audit,
+                raw_rows,
+            ) = _prepare_corpus(paths, contract)
             self.assertEqual(len(entities), 862)
             self.assertEqual(sum(len(value.entities) for value in entities.values()), 4297)
             self.assertEqual(sum(len(value) for value in relations.values()), 3329)
@@ -386,6 +392,8 @@ class PreparationTests(unittest.TestCase):
                     entities=entities,
                     relations=relations,
                     repair_ledger=repair,
+                    alignment_audit=alignment_audit,
+                    raw_relation_rows=raw_rows,
                     split=split,
                     relation_split_audit=task_audit,
                 )
@@ -401,6 +409,7 @@ class PreparationTests(unittest.TestCase):
             with (first / "test-gold.jsonl").open(encoding="utf-8") as handle:
                 self.assertEqual(sum(1 for _ in handle), 173)
             self.assertEqual((first / "repair-ledger.jsonl").read_text(encoding="utf-8").count("\n"), 1)
+            self.assertEqual((first / "raw-relation-provenance.jsonl").read_text(encoding="utf-8").count("\n"), 4329)
 
 
 if __name__ == "__main__":

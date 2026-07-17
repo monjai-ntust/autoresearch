@@ -10,12 +10,13 @@ python -B phase_b.py
 
 The current B-05/B-06 and development-only B-07 slice implements
 checkout/environment `doctor`, frozen Section 5 ledger `reconcile`, immutable
-CODE-ACCORD `fetch`, strict `prepare`, frozen verifier
+CODE-ACCORD `fetch`, raw-provenance/typed-strict `prepare`, frozen verifier
 `dry-run|live|replay`, development `pilot-verifier` auditing, and offline
 `CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
-intentionally hard-stops with a complete
-audit because nine relation-marker arguments do not map to unique typed BIO
-spans; no row is silently repaired or omitted. See
+preserves all official relation rows in a raw-provenance view and writes a
+complete audit because nine relation-marker arguments do not map to unique typed
+BIO spans. Those nine rows remain auditable but are ineligible for typed-strict
+gold; no endpoint is silently repaired, projected, expanded, or omitted. See
 [`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for exact commands, input
 schemas, output layout, reproducibility boundaries, and the still-gated stages.
 Every workflow-created file is confined to ignored `output/<run-id>/`.
@@ -58,10 +59,11 @@ hash and newline form, preserves the two blank and two concatenated physical
 rows in `results.tsv` as historical defects, and reports zero claim families as
 canonical-ready. It neither repairs the ledgers nor authorizes an official run.
 
-The design-only [`Phase C migration plan`](docs/phase_c_migration.md) records
-what can be reused, what must change, the assumptions that remain frozen, and
-the evidence conditions that require that plan to be revised. It does not
-override the current preparation hard stop or authorize the proposed migration.
+[`docs/phase_c_migration.md`](docs/phase_c_migration.md) records the raw/strict
+design lineage, frozen assumptions, and evidence conditions that require a
+revision. The user approved B-05U materialization of that dual view; it still
+does not authorize model training, final-test tuning, verifier calls, or a
+paper-quality claim without the later gates.
 
 The maintained [`source change inventory`](docs/source-change-inventory.md)
 classifies every deletion, reuse, modification, and current-only path relative
@@ -80,9 +82,9 @@ edit that changes the comparison or a path's role.
   committed.
 - Missing verifier Precision, Recall, and F1 evaluation remains incomplete. The
   canonical prompts, dry-run/live/replay instrumentation, development-pilot
-  auditor, and offline scorer are implemented, but no publication result has
-  been produced. Valid results still require an approved resolution of the nine
-  corpus-alignment failures, regenerated development evidence, a passing actual
+  auditor, offline scorer, and raw/typed-strict materialization are implemented,
+  but no publication result has been produced. Valid results still require
+  regenerated development evidence, a passing actual
   B-07 pilot, the user's go/no-go decision, and later external-machine execution.
 
 ## Installation

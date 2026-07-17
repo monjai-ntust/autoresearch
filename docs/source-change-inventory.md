@@ -32,10 +32,10 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 100 differing paths: 58
+With this document included, the comparison contains 101 differing paths: 59
 current-only paths, 33 baseline-only paths, and 9 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 115.
+paths and the current tree has 116.
 
 ## Current architecture and rewrite boundary
 
@@ -148,6 +148,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `configs/phase_b_section5_evidence.json` | Registers the two historical ledgers and seven claim families as immutable secondary evidence so reconciliation cannot silently promote them to canonical results. |
 | `docs/phase_b_workflow.md` | Gives standalone commands, stage gates, output layout, environment assumptions, and reproducibility limitations for the canonical runner. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
+| `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
 | `docs/phase_b_root_module_mapping.md` | Maps every former package module to its root host, records the two standard-library collision renames, and states the package-removal parity gates. |
 | `docs/source-change-inventory.md` | Maintains this exhaustive, reasoned comparison with the fixed baseline and prevents future source edits from losing their deletion/reuse/rewrite rationale. |
 

@@ -42,12 +42,12 @@ entry point with seven stages and focused contract tests:
 
 The generic `CODE-SPLIT-1` iterative multilabel assignment primitive is tested
 for exact size, disjointness, repeatability, and input-order independence.
-Official-data preparation currently stops before producing a dataset: nine of
-6,658 positive-relation marker arguments cannot resolve to one authoritative
-typed BIO span. In accordance with the approved protocol, `prepare` inventories
-all nine in `audit/gold-alignment-audit.json` and does not exclude, project,
-expand, or manually type them. A material protocol amendment is required before
-that stage may produce strict gold or a split. Deterministic checkpoint
+Official-data preparation preserves a raw-provenance view before producing
+typed-strict gold: nine of 6,658 positive-relation marker arguments cannot
+resolve to one authoritative typed BIO span. `prepare` inventories all nine in
+`data-prepared/gold-alignment-audit.json`, preserves every raw row, and makes
+only those nine rows ineligible for typed strict gold; it does not project,
+expand, or manually type an endpoint. Deterministic checkpoint
 rebuilding, inference, threshold selection, the actual model-backed development
 pilot, publication rendering, and parent-side archival are not completed by
 this slice. Historical standalone scripts remain provenance paths and are not
@@ -55,11 +55,9 @@ publication commands for Path A. Expensive publication training and final-test
 Qwen execution remain blocked until the B-07 evidence exists and the user makes
 the required go/no-go decision.
 
-The design-only [`Phase C migration plan`](phase_c_migration.md) describes the
-proposed raw-provenance/typed-strict dual view and the code/data paths that could
-be reused if a later protocol amendment is approved. It is not an executable
-stage of this workflow; workflow 1.3 and its official-data hard stop remain
-authoritative.
+[`Phase C migration plan`](phase_c_migration.md) records the raw/typed design
+lineage and its remaining execution gates. B-05U approves its materialization,
+not training, final-test access, live verifier calls, or reporting a result.
 
 ## 1. Prepare the standalone checkout
 
@@ -151,17 +149,19 @@ uv run --frozen --python 3.10.20 python -B phase_b.py \
 ```
 
 Under protocol `B04-PATH-A-1.3`, the official v1.0.0 data deterministically
-exits 2 after retaining `audit/gold-alignment-audit.json`. The known immutable
+materializes a raw-provenance and typed-strict dataset. The known immutable
 audit contains 6,644 exact marker-to-BIO alignments, five markers contained in
 one typed span, and nine unresolved arguments across nine rows/eight sentences;
 all nine rows belong to the official entity-training partition. Three markers
 overlap multiple typed spans, three partially overlap one span, and three
-overlap none. This is a scientific hard stop, not a transient execution error.
-Do not edit the downloaded CSVs or treat the audit as permission to omit rows.
+overlap none. `raw-relation-provenance.jsonl` preserves all 4,329 rows;
+`typed-strict-eligibility.jsonl` records eligibility for the 3,329 positive
+rows; the typed view contains 3,320 eligible rows and 3,319 unique directed
+typed triples. Do not edit the downloaded CSVs or treat the audit as permission
+to omit raw evidence.
 
-When an approved protocol revision resolves this incompatibility, the same
-stage is designed to emit deterministic `data-prepared/`, the repair ledger,
-split/data manifests, test gold, distributions, attribution, and two
+The approved dual-view stage emits deterministic `data-prepared/`, the repair
+ledger, split/data manifests, test gold, distributions, attribution, and two
 independently generated trees whose inventories and tree hashes must be
 identical before atomic promotion.
 
@@ -230,7 +230,7 @@ contract is `schemas/phase_b/verifier-run-log.schema.json`; request/response
 replay and stage-manifest contracts are `verifier-replay.schema.json` and
 `verifier-manifest.schema.json` in the same schema directory.
 
-These commands do not override the preparation hard stop or the B-07/B-08
+These commands do not override the remaining B-07/B-08
 execution gates. In the current checkout they are code-path validation and
 external handoff surfaces, not permission to inspect or call the final test set.
 
@@ -309,16 +309,16 @@ paths, structural input/provenance failures raised inside the auditor retain
 Missing or escaping CLI paths fail before the audit stage starts and therefore
 do not claim an in-stage failure artifact.
 
-The current official workflow cannot create valid inputs for this command:
-preparation stops at the nine unresolved marker arguments, so the approved
-split, development gold, checkpoints, development candidates, and selected
-threshold do not exist. This machine also lacks the pinned Ollama model/runtime.
+The current official workflow has no regenerated model inputs for this command:
+the dual view is materialized by code but no official run has yet fetched the
+archive, regenerated checkpoints/development candidates, or selected a
+threshold. This machine also lacks the pinned Ollama model/runtime.
 The implemented auditor therefore validates the handoff contract; it is not a
 claim that the actual B-07 pilot has run.
 
 ## 8. Supply immutable offline-scoring inputs
 
-Until preparation is unblocked and canonical inference is implemented,
+Until canonical inference is implemented,
 place the following externally produced, schema-valid files at their configured
 paths inside a separate development run only. Such files are not publication
 inputs unless their provenance and hashes satisfy the frozen protocol:
@@ -406,9 +406,9 @@ This core slice supports immutable CODE-ACCORD acquisition, exhaustive
 preparation auditing, exact verifier request planning/live instrumentation,
 development-pilot evidence auditing, and deterministic offline response/result
 replay once valid frozen inputs exist. It
-does not yet establish an approved prepared corpus or exact
+does not yet establish an executed prepared corpus or exact
 same-seed checkpoint rebuilding. The final workflow must resolve the official
-annotation incompatibility, fetch and verify DeBERTa, reconstruct
+raw/strict corpus identities, fetch and verify DeBERTa, reconstruct
 `CODE-SPLIT-1` byte-identically, serialize full restart state,
 duplicate seed-42 training/inference under the pinned accelerator profile,
 rebuild seeds 43-49, freeze development/test inference, produce and pass the

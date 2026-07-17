@@ -92,19 +92,6 @@ class RelationRecord:
     tail_alignment: str
 
 
-class GoldAlignmentError(DataContractError):
-    """Raised after every incompatible official relation marker is audited."""
-
-    def __init__(self, audit: dict[str, Any]):
-        self.audit = audit
-        unresolved = audit["summary"]["unresolved_marker_arguments"]
-        rows = audit["summary"]["affected_positive_relation_rows"]
-        super().__init__(
-            f"CODE-STRICT-1 gold alignment found {unresolved} unresolved marker "
-            f"arguments across {rows} positive relation rows"
-        )
-
-
 def dataset_contract_from_config(config: PipelineConfig) -> DatasetContract:
     dataset = config.value["dataset"]
     return DatasetContract(
@@ -581,13 +568,20 @@ def _load_relations_all(
     *,
     expected_repaired_uuid: str,
     partition_by_id: dict[str, str] | None = None,
-) -> tuple[dict[str, list[RelationRecord]], list[dict[str, Any]], dict[str, int]]:
+) -> tuple[
+    dict[str, list[RelationRecord]],
+    list[dict[str, Any]],
+    dict[str, int],
+    dict[str, Any],
+    list[dict[str, Any]],
+]:
     relations: dict[str, list[RelationRecord]] = {}
     repair_ledger: list[dict[str, Any]] = []
     row_count = positive_count = none_count = 0
     strict_keys: dict[tuple[Any, ...], RelationRecord] = {}
     alignment_counts = Counter()
     alignment_issues: list[dict[str, Any]] = []
+    raw_rows: list[dict[str, Any]] = []
     for row_number, row in _read_csv(path, RELATION_HEADER):
         row_count += 1
         example_id, ledger = _repair_relation_id(
@@ -608,8 +602,19 @@ def _load_relations_all(
                 f"relations/all.csv record {row_number} content differs from entities/all.csv"
             )
         relation = row["relation_type"]
+        raw_row = {
+            "annotation_row": row_number,
+            "example_id": example_id,
+            "source_example_id": row["example_id"],
+            "content": entity.content,
+            "metadata": entity.metadata,
+            "tagged_sentence": row["tagged_sentence"],
+            "relation": relation,
+            "uuid_repair_applied": ledger is not None,
+        }
         if relation == "none":
             none_count += 1
+            raw_rows.append(raw_row)
             continue
         if relation not in RELATION_TYPES:
             raise DataContractError(
@@ -653,6 +658,10 @@ def _load_relations_all(
                 )
         head, head_alignment = aligned["1"]
         tail, tail_alignment = aligned["2"]
+        raw_row["head_alignment"] = head_alignment
+        raw_row["tail_alignment"] = tail_alignment
+        raw_row["strict_eligible"] = head is not None and tail is not None
+        raw_rows.append(raw_row)
         if head is None or tail is None:
             continue
         key = (
@@ -689,46 +698,41 @@ def _load_relations_all(
         raise DataContractError(
             "relations/all.csv must contain exactly the approved one-row UUID repair"
         )
-    if alignment_issues:
-        affected_rows = sorted({issue["annotation_row"] for issue in alignment_issues})
-        affected_ids = sorted({issue["example_id"] for issue in alignment_issues})
-        categories = Counter(issue["category"] for issue in alignment_issues)
-        partitions = Counter(
-            issue["official_entity_partition"] for issue in alignment_issues
-        )
-        raise GoldAlignmentError(
-            {
-                "schema_version": "phase-b-gold-alignment-audit-1.0",
-                "protocol_id": PROTOCOL_ID,
-                "dataset_id": "CODE-ACCORD-v1.0.0",
-                "status": "hard_stop",
-                "policy": "unique-typed-bio-span-by-canonical-position-1.0",
-                "summary": {
-                    "relation_rows_scanned": row_count,
-                    "positive_relation_rows_scanned": positive_count,
-                    "none_relation_rows_scanned": none_count,
-                    "accepted_uuid_repair_rows": len(repair_ledger),
-                    "marker_arguments_scanned": positive_count * 2,
-                    "exact_span_alignments": alignment_counts["exact_span"],
-                    "marker_contained_in_typed_span_alignments": alignment_counts[
-                        "marker_contained_in_typed_span"
-                    ],
-                    "unresolved_marker_arguments": len(alignment_issues),
-                    "affected_positive_relation_rows": len(affected_rows),
-                    "affected_sentence_ids": len(affected_ids),
-                    "affected_rows": affected_rows,
-                    "affected_ids": affected_ids,
-                    "unresolved_categories": dict(sorted(categories.items())),
-                    "official_entity_partitions": dict(sorted(partitions.items())),
-                },
-                "decision": (
-                    "No relation row was excluded, projected, expanded, or manually "
-                    "typed. Preparation cannot materialize CODE-STRICT-1 gold until "
-                    "a protocol amendment is approved."
-                ),
-                "issues": alignment_issues,
-            }
-        )
+    affected_rows = sorted({issue["annotation_row"] for issue in alignment_issues})
+    affected_ids = sorted({issue["example_id"] for issue in alignment_issues})
+    categories = Counter(issue["category"] for issue in alignment_issues)
+    partitions = Counter(issue["official_entity_partition"] for issue in alignment_issues)
+    audit = {
+        "schema_version": "phase-b-gold-alignment-audit-2.0",
+        "protocol_id": PROTOCOL_ID,
+        "dataset_id": "CODE-ACCORD-v1.0.0",
+        "status": "raw_preserved_typed_strict_materialized",
+        "policy": "unique-typed-bio-span-by-canonical-position-1.0",
+        "summary": {
+            "relation_rows_scanned": row_count,
+            "positive_relation_rows_scanned": positive_count,
+            "none_relation_rows_scanned": none_count,
+            "accepted_uuid_repair_rows": len(repair_ledger),
+            "marker_arguments_scanned": positive_count * 2,
+            "exact_span_alignments": alignment_counts["exact_span"],
+            "marker_contained_in_typed_span_alignments": alignment_counts["marker_contained_in_typed_span"],
+            "unresolved_marker_arguments": len(alignment_issues),
+            "affected_positive_relation_rows": len(affected_rows),
+            "affected_sentence_ids": len(affected_ids),
+            "affected_rows": affected_rows,
+            "affected_ids": affected_ids,
+            "unresolved_categories": dict(sorted(categories.items())),
+            "official_entity_partitions": dict(sorted(partitions.items())),
+            "typed_strict_eligible_positive_rows": positive_count - len(affected_rows),
+            "typed_strict_unique_triples": sum(len(values) for values in relations.values()),
+        },
+        "decision": (
+            "Raw provenance preserves every official relation row. The nine rows with "
+            "unresolved marker arguments remain auditable but are ineligible for typed "
+            "strict gold; no endpoint is projected, expanded, or manually typed."
+        ),
+        "issues": alignment_issues,
+    }
     for values in relations.values():
         values.sort(
             key=lambda item: (
@@ -750,7 +754,7 @@ def _load_relations_all(
         "none_relation_rows": none_count,
         "relation_covered_sentences": len(relations),
         "entity_only_sentences": len(set(entities) - set(relations)),
-    }
+    }, audit, raw_rows
 
 
 def _relation_task_ids(
@@ -827,6 +831,8 @@ def _materialize_dataset(
     entities: dict[str, EntityRecord],
     relations: dict[str, list[RelationRecord]],
     repair_ledger: list[dict[str, Any]],
+    alignment_audit: dict[str, Any],
+    raw_relation_rows: list[dict[str, Any]],
     split: Any,
     relation_split_audit: dict[str, int],
 ) -> None:
@@ -912,6 +918,23 @@ def _materialize_dataset(
     manifest["tie_break"] = "seeded_generator_then_ascending_uuid"
     atomic_write_json(destination / "split-manifest.json", manifest)
     atomic_write_jsonl(destination / "repair-ledger.jsonl", repair_ledger)
+    atomic_write_jsonl(destination / "raw-relation-provenance.jsonl", raw_relation_rows)
+    atomic_write_json(destination / "gold-alignment-audit.json", alignment_audit)
+    atomic_write_jsonl(
+        destination / "typed-strict-eligibility.jsonl",
+        [
+            {
+                "annotation_row": row["annotation_row"],
+                "example_id": row["example_id"],
+                "relation": row["relation"],
+                "strict_eligible": row.get("strict_eligible", False),
+                "head_alignment": row.get("head_alignment"),
+                "tail_alignment": row.get("tail_alignment"),
+            }
+            for row in raw_relation_rows
+            if row["relation"] != "none"
+        ],
+    )
 
     gold_records: list[dict[str, Any]] = []
     for record in by_split["test"]:
@@ -979,8 +1002,10 @@ def _materialize_dataset(
             },
             "alignment": {
                 "policy": "unique-typed-bio-span-by-canonical-position-1.0",
-                "unresolved": 0,
-                "ambiguous": 0,
+                "unresolved": alignment_audit["summary"]["unresolved_marker_arguments"],
+                "ineligible_positive_rows": alignment_audit["summary"]["affected_positive_relation_rows"],
+                "typed_strict_eligible_positive_rows": alignment_audit["summary"]["typed_strict_eligible_positive_rows"],
+                "typed_strict_unique_triples": alignment_audit["summary"]["typed_strict_unique_triples"],
             },
             "split": {
                 "split_id": "CODE-SPLIT-1",
@@ -993,7 +1018,9 @@ def _materialize_dataset(
                 "verify-six-annotation-byte-identities",
                 "repair-one-tab-expanded-example-id",
                 "exclude-explicit-none-pairs-from-positive-gold",
-                "align-markers-to-unique-typed-bio-spans",
+                "preserve-all-relation-rows-as-raw-provenance",
+                "derive-typed-strict-gold-from-unique-bio-alignments",
+                "retain-ineligible-marker-rows-in-alignment-audit",
                 "retain-five-entity-only-sentences",
                 "materialize-code-split-1",
             ],
@@ -1010,6 +1037,8 @@ def _prepare_corpus(
     list[dict[str, Any]],
     Any,
     dict[str, int],
+    dict[str, Any],
+    list[dict[str, Any]],
 ]:
     entities_all = _load_entities(annotation_paths["annotated_data/entities/all.csv"])
     entities_train = _load_entity_boundary(
@@ -1035,8 +1064,7 @@ def _prepare_corpus(
                 f"CODE-ACCORD {field} mismatch: expected {contract.counts[field]}, got {actual}"
             )
 
-    try:
-        relations, repair_ledger, relation_counts = _load_relations_all(
+    relations, repair_ledger, relation_counts, alignment_audit, raw_relation_rows = _load_relations_all(
             annotation_paths["annotated_data/relations/all.csv"],
             entities_all,
             expected_repaired_uuid=contract.repaired_uuid,
@@ -1045,20 +1073,6 @@ def _prepare_corpus(
                 **{example_id: "test" for example_id in entities_test},
             },
         )
-    except GoldAlignmentError as exc:
-        summary = exc.audit["summary"]
-        audited_counts = {
-            "relation_rows": summary["relation_rows_scanned"],
-            "positive_relation_rows": summary["positive_relation_rows_scanned"],
-            "none_relation_rows": summary["none_relation_rows_scanned"],
-        }
-        for field, actual in audited_counts.items():
-            if actual != contract.counts[field]:
-                raise DataContractError(
-                    f"CODE-ACCORD {field} mismatch before alignment hard stop: "
-                    f"expected {contract.counts[field]}, got {actual}"
-                ) from exc
-        raise
     for field, actual in relation_counts.items():
         if actual != contract.counts[field]:
             raise DataContractError(
@@ -1152,7 +1166,15 @@ def _prepare_corpus(
         }
         split_items.append(SplitItem(example_id, frozenset(labels)))
     split = build_official_code_split(split_items, entities_test)
-    return entities_all, relations, repair_ledger, split, relation_split_audit
+    return (
+        entities_all,
+        relations,
+        repair_ledger,
+        split,
+        relation_split_audit,
+        alignment_audit,
+        raw_relation_rows,
+    )
 
 
 def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
@@ -1192,24 +1214,15 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
         include_suffixes=tuple(contract.annotation_files),
     )
     annotation_paths = _locate_annotation_files(extracted, contract)
-    try:
-        entities, relations, repair_ledger, split, relation_split_audit = _prepare_corpus(
-            annotation_paths, contract
-        )
-    except GoldAlignmentError as exc:
-        audit_path = layout.resolve("audit/gold-alignment-audit.json")
-        if audit_path.exists():
-            existing = load_json(audit_path)
-            if existing != exc.audit:
-                raise DataContractError(
-                    "existing gold alignment audit differs from the current audit"
-                ) from exc
-        else:
-            atomic_write_json(audit_path, exc.audit)
-        relative = layout.relative_identity(audit_path)
-        raise DataContractError(
-            f"{exc}; complete deterministic audit retained at {relative}"
-        ) from exc
+    (
+        entities,
+        relations,
+        repair_ledger,
+        split,
+        relation_split_audit,
+        alignment_audit,
+        raw_relation_rows,
+    ) = _prepare_corpus(annotation_paths, contract)
 
     first = layout.resolve(".prepare-materialization-a.partial")
     second = layout.resolve(".prepare-materialization-b.partial")
@@ -1221,6 +1234,8 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
         entities=entities,
         relations=relations,
         repair_ledger=repair_ledger,
+        alignment_audit=alignment_audit,
+        raw_relation_rows=raw_relation_rows,
         split=split,
         relation_split_audit=relation_split_audit,
     )
@@ -1230,6 +1245,8 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
         entities=entities,
         relations=relations,
         repair_ledger=repair_ledger,
+        alignment_audit=alignment_audit,
+        raw_relation_rows=raw_relation_rows,
         split=split,
         relation_split_audit=relation_split_audit,
     )
@@ -1247,7 +1264,7 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
     if final_hash != first_hash or final_rows != first_rows:
         raise DataContractError("promoted prepared dataset differs from verified staging")
     manifest = {
-        "schema_version": "phase-b-data-preparation-manifest-1.0",
+        "schema_version": "phase-b-data-preparation-manifest-2.0",
         "protocol_id": PROTOCOL_ID,
         "dataset_id": contract.dataset_id,
         "archive_sha256": sha256_file(archive_path),
@@ -1261,7 +1278,10 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
         "counts": contract.counts,
         "split": {"train": 586, "development": 103, "test": 173, "seed": 42},
         "repair_rows": 1,
-        "unresolved_alignments": 0,
+        "unresolved_alignments": alignment_audit["summary"]["unresolved_marker_arguments"],
+        "typed_strict_ineligible_rows": alignment_audit["summary"]["affected_positive_relation_rows"],
+        "typed_strict_eligible_rows": alignment_audit["summary"]["typed_strict_eligible_positive_rows"],
+        "typed_strict_unique_triples": alignment_audit["summary"]["typed_strict_unique_triples"],
         "artifacts": final_rows,
     }
     atomic_write_json(manifest_path, manifest)

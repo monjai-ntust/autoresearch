@@ -2,8 +2,9 @@
 
 ## Status and authority
 
-This is a migration design and maintenance record. It does not activate a new
-publication protocol or authorize result-producing execution. The canonical
+This is a migration design and maintenance record. B-05U materialization of the
+raw-provenance/typed-strict dual view is approved; it does not authorize
+result-producing execution. The canonical
 publication path remains Phase B Path A, protocol `B04-PATH-A-1.3`, workflow
 `PATH-A-WORKFLOW-1.3`, invoked through:
 
@@ -11,10 +12,9 @@ publication path remains Phase B Path A, protocol `B04-PATH-A-1.3`, workflow
 python -B phase_b.py
 ```
 
-Official CODE-ACCORD v1.0.0 preparation must continue to retain the exhaustive
-alignment audit and hard-stop before materializing gold. Phase C describes how
-that integrity-focused baseline could migrate to the proposed dual-view
-solution after a separate protocol revision is approved. If this document and
+Official CODE-ACCORD v1.0.0 preparation must retain the exhaustive alignment
+audit before materializing gold. The approved dual-view workflow preserves raw
+provenance while deriving typed-strict gold only from uniquely aligned rows. If this document and
 the current Path A workflow conflict, the current approved Path A workflow is
 authoritative. If either conflicts with an applicable methodological
 requirement in the target-journal paper, the journal requirement takes
@@ -69,7 +69,7 @@ historical measurements to preserve a preferred result.
 | `config.py`, `constants.py`, `phase_b_io.py`, and `paths.py` | Reuse | Add versioned dual-view identities and manifests without weakening path containment or output-root rules. |
 | CSV/BIO parsing and entity partition checks in `preparation.py` | Reuse | Keep `entities/all.csv` authoritative and preserve all source row numbers and marker text. |
 | UUID repair and marker-alignment audit in `preparation.py` | Reuse | The exhaustive audit remains a prerequisite. Eligibility must be derived from its recorded exact/contained/unresolved status, never from a second fuzzy matcher. |
-| Current preparation hard stop | Adjust only after approval | Replace the post-audit stop with an approved dual-view gate that writes raw provenance and strict eligibility records before any split. Until approval, the stop remains mandatory. |
+| Current preparation hard stop | Approved B-05U replacement | Write raw provenance and strict eligibility records before the deterministic split; no endpoint repair or silent exclusion is permitted. |
 | Duplicate preservation/collapse logic | Reuse with explicit views | Preserve both source rows in raw provenance; collapse the one identical typed key only in set-based strict gold and record the contributing rows. |
 | `split.py` | Reuse after input change | Regenerate, never transplant, the assignment from strict-view label presence. Bind its seed, input inventory, output membership, and tree hash to the new protocol. |
 | `scoring.py`, `metrics.py`, and `phase_b_statistics.py` | Reuse | Permit scoring only after strict gold and all candidates share the same approved data/split identities. Metric definitions do not change merely to retain a historical trend. |
@@ -87,9 +87,9 @@ one run directory.
 1. **Freeze the baseline.** Record the source commit, configuration/protocol
    identities, archive and annotation hashes, current alignment-audit hash, and
    the expected hard-stop result.
-2. **Approve a protocol revision.** Freeze the raw-view and strict-view
-   definitions, row eligibility rule, duplicate semantics, publication wording,
-   and manifest schemas. No materialization code runs before this approval.
+2. **Approved B-05U dual-view materialization.** The raw-view and strict-view
+   definitions, row eligibility rule, duplicate semantics, and manifest schemas
+   are frozen for implementation. This does not approve result execution.
 3. **Materialize raw provenance.** Write all 3,329 positive rows and the 1,000
    `none` rows with original row numbers, marker fields, repair lineage, and
    raw-corpus counts. Prove the raw view is a lossless representation of the
@@ -187,3 +187,4 @@ needed, and approval status. Do not silently update protocol/config identities.
 | 2026-07-17 | C-MIGRATION-1.2 | Bound the standalone ledgers to a deterministic reconciliation audit and recorded their structural defects and coverage gaps. Migration step 6 now requires separately hashed evidence bundles for final results absent from the ledgers before claim-bearing adapters can be selected. The current canonical preparation hard stop and execution authority are unchanged. |
 | 2026-07-17 | C-MIGRATION-1.3 | Materialized the B-06 `CODE-VERIFIER-1` prompt/schema and dry-run/live/replay boundary. The historical SciERC verifier is now explicitly provenance-only because its ontology, parser, and output contract cannot preserve the approved CODE evaluation semantics; canonical training/inference migration remains adapter-based and gated. |
 | 2026-07-17 | C-MIGRATION-1.4 | Added the development-only B-07 four-run pilot auditor as a reusable migration contract. It keeps the full eight-file development index distinct from a predeclared subset, binds authoritative split/gold/threshold identities, verifies clean pinned-Qwen live-run bundles and retry evidence, audits source grounding plus strict-gold correction transitions, and requires normalized two-call determinism. Publication admission remains reserved for the user's go/no-go decision. No actual pilot evidence exists because the current preparation hard stop prevents valid development inputs. |
+| 2026-07-18 | C-MIGRATION-1.5 | The user-approved B-05U transition materialized the raw-provenance/typed-strict preparation gate: every official relation row remains in raw output; nine incompatible rows remain row-level audit evidence and are excluded only from typed-strict gold. Training, inference, verifier calls, and result-producing execution remain separately gated. |
