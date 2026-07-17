@@ -63,6 +63,12 @@ what can be reused, what must change, the assumptions that remain frozen, and
 the evidence conditions that require that plan to be revised. It does not
 override the current preparation hard stop or authorize the proposed migration.
 
+The maintained [`source change inventory`](docs/source-change-inventory.md)
+classifies every deletion, reuse, modification, and current-only path relative
+to the fixed baseline `9feafa4`, including the rationale for the separate
+canonical pipeline boundary. Update that inventory with every subsequent source
+edit that changes the comparison or a path's role.
+
 ## Repository status
 
 - Python 3.10 is the selected and minimum supported Python version.
