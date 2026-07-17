@@ -47,6 +47,7 @@
         "gold_original_valid",
         "candidate_predicted_valid",
         "action",
+        "reason_code",
         "correction_validation_status",
         "final_emitted_key",
         "error_category"
@@ -63,6 +64,21 @@
         "gold_original_valid": {"type": "boolean"},
         "candidate_predicted_valid": {"type": "boolean"},
         "action": {"type": ["string", "null"]},
+        "reason_code": {
+          "oneOf": [
+            {
+              "enum": [
+                "SUPPORTED",
+                "WRONG_RELATION",
+                "WRONG_HEAD",
+                "WRONG_TAIL",
+                "UNSUPPORTED",
+                "AMBIGUOUS"
+              ]
+            },
+            {"type": "null"}
+          ]
+        },
         "correction_validation_status": {"type": "string"},
         "final_emitted_key": {
           "oneOf": [{"$ref": "#/$defs/strictKey"}, {"type": "null"}]

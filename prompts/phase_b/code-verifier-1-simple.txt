@@ -1,0 +1,7 @@
+Judge whether the complete directed candidate is explicitly supported by the sentence.
+
+Return exactly one JSON object with:
+- action: KEEP, DISCARD, or UNCERTAIN.
+- reason_code: SUPPORTED, WRONG_RELATION, WRONG_HEAD, WRONG_TAIL, UNSUPPORTED, or AMBIGUOUS.
+
+KEEP is allowed only when the complete directed candidate is explicitly supported. Do not correct or replace the candidate in this mode.

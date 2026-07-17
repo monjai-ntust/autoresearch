@@ -28,6 +28,7 @@ from .statistics import (
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
+from .verifier import verifier_identity
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,10 @@ def _load_candidates(
 
 
 def _load_verdicts(
-    path: Path, condition_id: str, candidates: dict[str, Candidate]
+    path: Path,
+    condition_id: str,
+    candidates: dict[str, Candidate],
+    expected_identity: tuple[str, str, str],
 ) -> dict[str, Verdict]:
     records: dict[str, Verdict] = {}
     observed_order: list[tuple[int, str]] = []
@@ -124,6 +128,10 @@ def _load_verdicts(
     if len(identities) > 1:
         raise DataContractError(
             f"{path.name}: prompt/model/decoding identities differ within one condition"
+        )
+    if identities and identities != {expected_identity}:
+        raise DataContractError(
+            f"{path.name}: prompt/model/decoding identity differs from the frozen config"
         )
     return records
 
@@ -262,9 +270,17 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
     expected_split = config.value["evaluation_split_id"]
     gold = _load_gold(inputs.gold, expected_split)
     candidates, candidates_by_id = _load_candidates(inputs.candidates, expected_split, gold)
-    simple = _load_verdicts(inputs.simple_verdicts, "VER-SIMPLE", candidates_by_id)
+    simple = _load_verdicts(
+        inputs.simple_verdicts,
+        "VER-SIMPLE",
+        candidates_by_id,
+        verifier_identity(config, "simple"),
+    )
     corrective = _load_verdicts(
-        inputs.corrective_verdicts, "VER-CORRECTIVE", candidates_by_id
+        inputs.corrective_verdicts,
+        "VER-CORRECTIVE",
+        candidates_by_id,
+        verifier_identity(config, "corrective"),
     )
     threshold = _load_threshold(inputs.threshold_selection, config)
 
@@ -297,9 +313,20 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
     for candidate in candidates:
         gold_valid = candidate.triple in gold[candidate.triple.example_id].triples
         for condition_id in CONDITION_IDS:
-            predicted_valid, final_triple, action, correction_status, error_category = _condition_result(
-                condition_id, candidate, threshold, simple, corrective
+            condition_verdict = (
+                simple.get(candidate.candidate_id)
+                if condition_id == "VER-SIMPLE"
+                else corrective.get(candidate.candidate_id)
+                if condition_id == "VER-CORRECTIVE"
+                else None
             )
+            (
+                predicted_valid,
+                final_triple,
+                action,
+                correction_status,
+                error_category,
+            ) = _condition_result(condition_id, candidate, threshold, simple, corrective)
             quadrant = (
                 "tp" if predicted_valid and gold_valid else
                 "fp" if predicted_valid else
@@ -344,6 +371,7 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
                     "gold_original_valid": gold_valid,
                     "candidate_predicted_valid": predicted_valid,
                     "action": action,
+                    "reason_code": condition_verdict.reason_code if condition_verdict else None,
                     "correction_validation_status": correction_status,
                     "final_emitted_key": list(final_triple.key()) if final_triple else None,
                     "error_category": error_category,

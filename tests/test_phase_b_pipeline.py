@@ -26,7 +26,7 @@ from phase_b_pipeline.records import (
     Verdict,
     candidate_id_for,
 )
-from phase_b_pipeline.scoring import ScoreInputs, score_run
+from phase_b_pipeline.scoring import ScoreInputs, _load_verdicts, score_run
 from phase_b_pipeline.split import (
     SplitItem,
     build_official_code_split,
@@ -41,6 +41,7 @@ from phase_b_pipeline.statistics import (
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
+from phase_b_pipeline.verifier import verifier_identity
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -85,7 +86,18 @@ def _candidate_record(
     }
 
 
-def _verdict_record(candidate: dict, condition: str, action: str, corrected=None) -> dict:
+def _verdict_record(
+    candidate: dict,
+    condition: str,
+    action: str,
+    corrected=None,
+    identity: tuple[str, str, str] | None = None,
+) -> dict:
+    prompt_sha256, model_manifest_sha256, decoding_sha256 = identity or (
+        ONE_HASH,
+        ONE_HASH,
+        ONE_HASH,
+    )
     return {
         "protocol_id": PROTOCOL_ID,
         "condition_id": condition,
@@ -93,12 +105,13 @@ def _verdict_record(candidate: dict, condition: str, action: str, corrected=None
         "candidate_id": candidate["candidate_id"],
         "response_status": "valid_response",
         "action": action,
+        "reason_code": "SUPPORTED" if action == "KEEP" else "UNSUPPORTED",
         "corrected": corrected,
         "correction_validation_status": "valid" if corrected is not None else "not_applicable",
         "raw_response_sha256": ONE_HASH,
-        "prompt_sha256": ONE_HASH,
-        "model_manifest_sha256": ONE_HASH,
-        "decoding_sha256": ONE_HASH,
+        "prompt_sha256": prompt_sha256,
+        "model_manifest_sha256": model_manifest_sha256,
+        "decoding_sha256": decoding_sha256,
         "attempts": 1,
         "error_category": None,
         "telemetry": {},
@@ -163,6 +176,12 @@ class ConfigContractTests(unittest.TestCase):
             "schemas/phase_b/prepared-sentence.schema.json",
             "schemas/phase_b/section5-evidence-register.schema.json",
             "schemas/phase_b/section5-evidence-reconciliation.schema.json",
+            "schemas/phase_b/verifier-simple-response.schema.json",
+            "schemas/phase_b/verifier-corrective-response.schema.json",
+            "schemas/phase_b/verifier-run-log.schema.json",
+            "schemas/phase_b/verifier-environment.schema.json",
+            "schemas/phase_b/verifier-replay.schema.json",
+            "schemas/phase_b/verifier-manifest.schema.json",
         ):
             with self.subTest(path=relative):
                 with (SOURCE_ROOT / relative).open(encoding="utf-8") as handle:
@@ -176,6 +195,9 @@ class ConfigContractTests(unittest.TestCase):
         dataset = schema["properties"]["dataset"]
         self.assertFalse(dataset["additionalProperties"])
         self.assertLessEqual(set(dataset["required"]), set(dataset["properties"]))
+        verifier = schema["properties"]["verifier"]
+        self.assertFalse(verifier["additionalProperties"])
+        self.assertLessEqual(set(verifier["required"]), set(verifier["properties"]))
 
 
 class StrictMatcherTests(unittest.TestCase):
@@ -241,6 +263,35 @@ class StrictMatcherTests(unittest.TestCase):
         self.assertEqual(parsed.action, "CORRECT")
         self.assertIsNone(parsed.corrected)
         self.assertEqual(parsed.correction_validation_status, "ambiguous")
+
+    def test_offline_scoring_rejects_noncanonical_verifier_identity(self):
+        record = _candidate_record(
+            42,
+            "example",
+            "document",
+            _triple(
+                _span(0, 0, "Object", "door"),
+                "necessity",
+                _span(1, 1, "Quality", "rated"),
+            ),
+            0.8,
+        )
+        candidate = Candidate.from_mapping(record, "candidate")
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "identity-fixture")
+            layout.create()
+            verdict_path = layout.resolve("verifier/simple/verdicts.jsonl")
+            atomic_write_jsonl(
+                verdict_path,
+                [_verdict_record(record, "VER-SIMPLE", "KEEP")],
+            )
+            with self.assertRaisesRegex(DataContractError, "frozen config"):
+                _load_verdicts(
+                    verdict_path,
+                    "VER-SIMPLE",
+                    {candidate.candidate_id: candidate},
+                    (ZERO_HASH, ZERO_HASH, ZERO_HASH),
+                )
 
 
 class SplitContractTests(unittest.TestCase):
@@ -410,26 +461,56 @@ class OfflineScoringTests(unittest.TestCase):
                 _candidate_record(42, "ex-a", "doc-a", invalid_a, 0.4),
                 _candidate_record(42, "ex-b", "doc-b", gold_b, 0.2),
             ]
-            candidates.sort(key=lambda item: (item["training_seed"], item["example_id"], item["candidate_id"]))
+            candidates.sort(
+                key=lambda item: (
+                    item["training_seed"],
+                    item["example_id"],
+                    item["candidate_id"],
+                )
+            )
             by_relation = {item["relation"]: item for item in candidates}
+            simple_identity = verifier_identity(config, "simple")
+            corrective_identity = verifier_identity(config, "corrective")
             simple = [
-                _verdict_record(by_relation["necessity"], "VER-SIMPLE", "DISCARD"),
-                _verdict_record(by_relation["selection"], "VER-SIMPLE", "KEEP"),
+                _verdict_record(
+                    by_relation["necessity"],
+                    "VER-SIMPLE",
+                    "DISCARD",
+                    identity=simple_identity,
+                ),
+                _verdict_record(
+                    by_relation["selection"],
+                    "VER-SIMPLE",
+                    "KEEP",
+                    identity=simple_identity,
+                ),
                 {
-                    **_verdict_record(by_relation["greater"], "VER-SIMPLE", "DISCARD"),
+                    **_verdict_record(
+                        by_relation["greater"],
+                        "VER-SIMPLE",
+                        "DISCARD",
+                        identity=simple_identity,
+                    ),
                     "response_status": "malformed",
                     "action": None,
+                    "reason_code": None,
                     "error_category": "malformed_json",
                 },
             ]
             simple.sort(key=lambda item: (item["training_seed"], item["candidate_id"]))
             corrective = [
-                _verdict_record(by_relation["necessity"], "VER-CORRECTIVE", "KEEP"),
+                _verdict_record(
+                    by_relation["necessity"],
+                    "VER-CORRECTIVE",
+                    "KEEP",
+                    identity=corrective_identity,
+                ),
                 _verdict_record(
                     by_relation["selection"],
                     "VER-CORRECTIVE",
                     "CORRECT",
                     corrected={**gold_a, "head": {**gold_a["head"], "text": "Door"}},
+                    identity=corrective_identity,
                 ),
             ]
             corrective.sort(key=lambda item: (item["training_seed"], item["candidate_id"]))

@@ -15,6 +15,7 @@ from .paths import PathContractError, RunLayout, discover_source_root
 from .preparation import prepare_run
 from .reconciliation import reconcile_section5_evidence
 from .scoring import ScoreInputs, score_run
+from .verifier import run_verifier
 
 
 DEFAULT_CONFIG = "configs/phase_b_path_a.json"
@@ -24,9 +25,10 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m phase_b_pipeline",
         description=(
-            "Canonical standalone Phase B workflow. This B-05 slice implements "
+            "Canonical standalone Phase B workflow. This B-05/B-06 slice implements "
             "doctor, secondary Section 5 evidence reconciliation, immutable "
-            "CODE-ACCORD fetch/preparation, and offline CODE-STRICT-1 scoring."
+            "CODE-ACCORD fetch/preparation, frozen verifier request/replay instrumentation, "
+            "and offline CODE-STRICT-1 scoring."
         ),
     )
     parser.add_argument(
@@ -57,6 +59,38 @@ def _parser() -> argparse.ArgumentParser:
     )
     prepare.add_argument("--config", default=DEFAULT_CONFIG)
     prepare.add_argument("--run-id", required=True)
+
+    verifier = subparsers.add_parser(
+        "verifier",
+        help="Dry-run, execute, or replay the frozen CODE verifier contract",
+    )
+    verifier.add_argument("--config", default=DEFAULT_CONFIG)
+    verifier.add_argument("--run-id", required=True)
+    verifier.add_argument("--mode", required=True, choices=["simple", "corrective"])
+    verifier.add_argument(
+        "--execution", required=True, choices=["dry-run", "live", "replay"]
+    )
+    verifier.add_argument("--sentences", help="Run-relative prepared-sentence JSONL")
+    verifier.add_argument("--candidates", help="Run-relative candidate JSONL")
+    verifier.add_argument(
+        "--warmup-sentences",
+        help="Run-relative development sentences required by live execution",
+    )
+    verifier.add_argument(
+        "--warmup-candidates",
+        help="Run-relative single development warm-up candidate required by live execution",
+    )
+    verifier.add_argument(
+        "--response-ledger", help="Run-relative frozen response JSONL required by replay"
+    )
+    verifier.add_argument(
+        "--cache-ledger", help="Optional run-relative response cache used only by live execution"
+    )
+    verifier.add_argument("--ollama-url", default="http://localhost:11434")
+    verifier.add_argument(
+        "--model-blob",
+        help="Run-relative frozen Ollama model blob required by live execution",
+    )
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
     score.add_argument("--config", default=DEFAULT_CONFIG)
@@ -120,6 +154,64 @@ def main(argv: list[str] | None = None) -> int:
                         "byte_identical": manifest[
                             "byte_identical_independent_materializations"
                         ],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if args.stage == "verifier":
+            configured = config.paths
+            manifest = run_verifier(
+                layout,
+                config,
+                mode=args.mode,
+                execution_mode=args.execution,
+                sentences_path=layout.resolve(
+                    args.sentences or configured["sentences"], must_exist=True
+                ),
+                candidates_path=layout.resolve(
+                    args.candidates or configured["candidates"], must_exist=True
+                ),
+                warmup_sentences_path=(
+                    layout.resolve(
+                        args.warmup_sentences or configured["warmup_sentences"],
+                        must_exist=True,
+                    )
+                    if args.execution == "live"
+                    else None
+                ),
+                warmup_candidates_path=(
+                    layout.resolve(
+                        args.warmup_candidates or configured["warmup_candidates"],
+                        must_exist=True,
+                    )
+                    if args.execution == "live"
+                    else None
+                ),
+                response_ledger_path=(
+                    layout.resolve(args.response_ledger, must_exist=True)
+                    if args.response_ledger
+                    else None
+                ),
+                cache_ledger_path=(
+                    layout.resolve(args.cache_ledger, must_exist=True)
+                    if args.cache_ledger
+                    else None
+                ),
+                ollama_url=args.ollama_url,
+                model_blob_path=(
+                    layout.resolve(args.model_blob, must_exist=True) if args.model_blob else None
+                ),
+            )
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": manifest["status"],
+                        "condition_id": manifest["condition_id"],
+                        "execution_mode": manifest["execution_mode"],
+                        "candidate_count": manifest["candidate_count"],
                     },
                     sort_keys=True,
                 )

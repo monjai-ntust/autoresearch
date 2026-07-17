@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:code-verifier-1:corrective-response",
+  "title": "CODE-VERIFIER-1 corrective response",
+  "type": "object",
+  "required": ["action", "reason_code", "corrected"],
+  "properties": {
+    "action": {"enum": ["KEEP", "CORRECT", "DISCARD", "UNCERTAIN"]},
+    "reason_code": {
+      "enum": [
+        "SUPPORTED",
+        "WRONG_RELATION",
+        "WRONG_HEAD",
+        "WRONG_TAIL",
+        "UNSUPPORTED",
+        "AMBIGUOUS"
+      ]
+    },
+    "corrected": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["head_text", "head_type", "relation", "tail_text", "tail_type"],
+          "properties": {
+            "head_text": {"type": "string", "minLength": 1},
+            "head_type": {"enum": ["Object", "Property", "Quality", "Value"]},
+            "relation": {
+              "enum": [
+                "selection",
+                "necessity",
+                "part-of",
+                "not-part-of",
+                "equal",
+                "greater",
+                "greater-equal",
+                "less",
+                "less-equal"
+              ]
+            },
+            "tail_text": {"type": "string", "minLength": 1},
+            "tail_type": {"enum": ["Object", "Property", "Quality", "Value"]}
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

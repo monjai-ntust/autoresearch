@@ -21,7 +21,7 @@ from .constants import (
     TRAINING_SEEDS,
     WORKFLOW_ID,
 )
-from .io import DataContractError, load_json
+from .io import DataContractError, load_json, sha256_file
 from .paths import resolve_tracked_path
 
 
@@ -191,8 +191,32 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     verifier = _object(_required(value, "verifier", "config"), "config.verifier")
     expected_verifier = {
         "model": "qwen3:32b",
-        "registry_manifest_sha256": "030ee887880fc378860c2dd35101da424377520441ae4bfe7be6deff8ade7840",
+        "registry_manifest_sha256": (
+            "030ee887880fc378860c2dd35101da424377520441ae4bfe7be6deff8ade7840"
+        ),
         "model_blob_sha256": "3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
+        "prompt_status": "materialized_b06",
+        "prompt_revision": "CODE-VERIFIER-1",
+        "system_prompt": "prompts/phase_b/code-verifier-1-system.txt",
+        "system_prompt_sha256": "d5be0378a4f0c68bb7e8038ca4008490fafb27934c0996b8d022200567126a04",
+        "simple_prompt": "prompts/phase_b/code-verifier-1-simple.txt",
+        "simple_prompt_sha256": "6f53d575c990571a882e6e6b0fabf4a8c2ca7049b8af2fb0cc15abd1f54aa537",
+        "corrective_prompt": "prompts/phase_b/code-verifier-1-corrective.txt",
+        "corrective_prompt_sha256": (
+            "180e39c5a6cebd51620ee378a45c4da1cc2a5727d06de24a6717445f58fd36a3"
+        ),
+        "simple_response_schema": "schemas/phase_b/verifier-simple-response.schema.json",
+        "simple_response_schema_sha256": (
+            "86a93ff4227d65800e76704454f0e1b1a8c7729df506c18cc66a1018cbc253d9"
+        ),
+        "corrective_response_schema": "schemas/phase_b/verifier-corrective-response.schema.json",
+        "corrective_response_schema_sha256": (
+            "ff2a0e41359c230c98b8f754e57c28a4518d8bfbdd17114d8b743ab932065236"
+        ),
+        "simple_bundle_sha256": "1f663794ac3c2b43398da9afc24db0d1e8ac19d6648f110f540d5b9726bcc6c5",
+        "corrective_bundle_sha256": (
+            "369cd3681d3339879872ff2a91d7b1ac89ce4ffbf184473c59b7799f57d36203"
+        ),
         "stream": False,
         "think": False,
         "temperature": 0,
@@ -210,6 +234,19 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     for field, expected in expected_verifier.items():
         if verifier.get(field) != expected:
             raise DataContractError(f"config.verifier.{field} differs from the approved protocol")
+    verifier_resources = {
+        "system_prompt": "system_prompt_sha256",
+        "simple_prompt": "simple_prompt_sha256",
+        "corrective_prompt": "corrective_prompt_sha256",
+        "simple_response_schema": "simple_response_schema_sha256",
+        "corrective_response_schema": "corrective_response_schema_sha256",
+    }
+    for path_field, hash_field in verifier_resources.items():
+        resource = resolve_tracked_path(source_root, verifier[path_field])
+        if sha256_file(resource) != verifier[hash_field]:
+            raise DataContractError(
+                f"config.verifier.{hash_field} does not match {verifier[path_field]}"
+            )
 
     environment = _object(
         _required(value, "environment", "config"), "config.environment"
@@ -221,6 +258,9 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
         _required(value, "runtime_paths", "config"), "config.runtime_paths"
     )
     for field in (
+        "sentences",
+        "warmup_sentences",
+        "warmup_candidates",
         "gold",
         "candidates",
         "simple_verdicts",
@@ -228,7 +268,12 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
         "threshold_selection",
     ):
         raw = runtime_paths.get(field)
-        if not isinstance(raw, str) or not raw or Path(raw).is_absolute() or ".." in Path(raw).parts:
+        if (
+            not isinstance(raw, str)
+            or not raw
+            or Path(raw).is_absolute()
+            or ".." in Path(raw).parts
+        ):
             raise DataContractError(
                 f"config.runtime_paths.{field} must be a nonempty run-relative path"
             )

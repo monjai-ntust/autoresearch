@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:code-verifier-1:simple-response",
+  "title": "CODE-VERIFIER-1 simple response",
+  "type": "object",
+  "required": ["action", "reason_code"],
+  "properties": {
+    "action": {"enum": ["KEEP", "DISCARD", "UNCERTAIN"]},
+    "reason_code": {
+      "enum": [
+        "SUPPORTED",
+        "WRONG_RELATION",
+        "WRONG_HEAD",
+        "WRONG_TAIL",
+        "UNSUPPORTED",
+        "AMBIGUOUS"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

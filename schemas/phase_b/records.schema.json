@@ -118,6 +118,7 @@
         "candidate_id",
         "response_status",
         "action",
+        "reason_code",
         "corrected",
         "correction_validation_status",
         "raw_response_sha256",
@@ -143,6 +144,21 @@
           ]
         },
         "action": {"type": ["string", "null"]},
+        "reason_code": {
+          "oneOf": [
+            {
+              "enum": [
+                "SUPPORTED",
+                "WRONG_RELATION",
+                "WRONG_HEAD",
+                "WRONG_TAIL",
+                "UNSUPPORTED",
+                "AMBIGUOUS"
+              ]
+            },
+            {"type": "null"}
+          ]
+        },
         "corrected": {"oneOf": [{"$ref": "#/$defs/triple"}, {"type": "null"}]},
         "correction_validation_status": {"type": "string"},
         "raw_response_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},

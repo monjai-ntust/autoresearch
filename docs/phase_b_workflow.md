@@ -6,7 +6,7 @@ parent repository or `research-logs`.
 
 ## Current implementation boundary
 
-The B-05 core slice implements one public module entry point with five stages
+The B-05/B-06 slice implements one public module entry point with six stages
 and focused contract tests:
 
 - `doctor` validates the direct source checkout, exact Python/uv requirements,
@@ -25,6 +25,10 @@ and focused contract tests:
   their exact byte/SHA-256 identities, parses all rows, audits the one approved
   UUID repair, and attempts typed directed `CODE-STRICT-1` reconstruction plus
   byte-identical `CODE-SPLIT-1` materialization.
+- `verifier` materializes the exact `CODE-VERIFIER-1` request universe, supports
+  explicit `dry-run`, optional hash-gated `live`, and model-free `replay`
+  execution, and retains environment, raw-response, retry, cache, token, and
+  latency evidence under the selected run.
 - `score` validates frozen gold, candidate, simple-verdict, corrective-verdict,
   and development-threshold records; applies typed directed matcher
   `CODE-STRICT-1`; and writes candidate outcomes, sentence outcomes, confusion
@@ -38,10 +42,10 @@ typed BIO span. In accordance with the approved protocol, `prepare` inventories
 all nine in `audit/gold-alignment-audit.json` and does not exclude, project,
 expand, or manually type them. A material protocol amendment is required before
 that stage may produce strict gold or a split. Deterministic checkpoint
-rebuilding, inference, threshold selection, live verifier calls, publication
-rendering, and parent-side archival are also not implemented by this slice. The
-historical standalone scripts remain provenance paths and are not publication
-commands for Path A. Expensive training and final-test Qwen execution remain
+rebuilding, inference, threshold selection, development determinism-pilot
+selection, publication rendering, and parent-side archival are not implemented
+by this slice. Historical standalone scripts remain provenance paths and are
+not publication commands for Path A. Expensive training and final-test Qwen execution remain
 blocked until the approved B-07 go/no-go checkpoint.
 
 The design-only [`Phase C migration plan`](phase_c_migration.md) describes the
@@ -154,9 +158,78 @@ split/data manifests, test gold, distributions, attribution, and two
 independently generated trees whose inventories and tree hashes must be
 identical before atomic promotion.
 
-## 6. Supply immutable offline-scoring inputs
+## 6. Plan, execute, or replay the frozen verifier
 
-Until preparation is unblocked and inference/verifier stages are implemented,
+The tracked UTF-8 prompt files and response schemas define
+`CODE-VERIFIER-1`. A dry run validates prepared sentences and candidates and
+writes the exact request payloads, prompt/model/decoding hashes, environment
+manifest, append-only run log, and stage manifest without contacting Ollama or
+writing a verdict:
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  verifier \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-example \
+  --mode simple \
+  --execution dry-run
+```
+
+Use a distinct run ID to replay a frozen live-response ledger. The ledger must
+be copied beneath that run first; its cache keys must match every newly
+materialized request exactly. Replay performs no HTTP request and emits the
+schema-valid verdict file consumed by `score`:
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  verifier \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-simple-replay \
+  --mode simple \
+  --execution replay \
+  --response-ledger inputs/frozen-simple-responses.jsonl
+```
+
+Run the corrective condition separately with `--mode corrective`; it uses a
+different prompt hash and response schema. Corrected entity text is admitted
+only when it maps to one exact contiguous token sequence in the supplied
+sentence. Absent, repeated, same-as-original, malformed, and schema-invalid
+rewrites are retained with distinct failure status and emit no corrected triple.
+
+Live execution is implemented but remains scientifically gated. It additionally
+requires the complete 20,201,240,160-byte model blob beneath the run and exactly
+one predeclared development warm-up candidate. It hashes the full blob, verifies
+the Ollama tag manifest, Qwen3/32.8B/Q4_K_M details, and CLI modelfile reference,
+then retains the warm-up separately and excludes its latency from observations:
+
+```bash
+uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
+  verifier \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-simple-live \
+  --mode simple \
+  --execution live \
+  --model-blob inputs/ollama/blobs/sha256-3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312
+```
+
+The configured warm-up paths are
+`data-prepared/development.jsonl` and
+`predictions/dev/verifier-warmup-candidate.jsonl`. Live calls use at most three
+identical attempts, 300 seconds per attempt, and deterministic 2/4-second
+backoff. Cache hits are marked and never counted as new latency observations.
+The JSON-schema model responses, raw-body hashes, attempt telemetry, verdicts,
+environment manifest, and run log remain under `verifier/<mode>/`. The run-log
+contract is `schemas/phase_b/verifier-run-log.schema.json`; request/response
+replay and stage-manifest contracts are `verifier-replay.schema.json` and
+`verifier-manifest.schema.json` in the same schema directory.
+
+These commands do not override the preparation hard stop or the B-07/B-08
+execution gates. In the current checkout they are code-path validation and
+external handoff surfaces, not permission to inspect or call the final test set.
+
+## 7. Supply immutable offline-scoring inputs
+
+Until preparation is unblocked and canonical inference is implemented,
 place the following externally produced, schema-valid files at their configured
 paths inside a separate development run only. Such files are not publication
 inputs unless their provenance and hashes satisfy the frozen protocol:
@@ -189,7 +262,11 @@ The scorer recomputes every mean and selects the largest; an exact tie must use
 the higher threshold. It rejects an unproven selected value or any assertion
 that test labels were used.
 
-## 7. Reproduce offline strict scoring
+Verdict records must carry the exact configured prompt-bundle, registry
+manifest, and decoding hashes. The scorer rejects internally consistent but
+noncanonical identities rather than accepting an unrelated model run.
+
+## 8. Reproduce offline strict scoring
 
 ```bash
 uv run --frozen --python 3.10.20 python -B -m phase_b_pipeline \
@@ -234,16 +311,17 @@ The `-B` flag is mandatory for canonical commands: it prevents Python from
 creating `__pycache__` files in the tracked source area. `doctor` checks this
 before declaring the environment compliant.
 
-## 8. Reproducibility interpretation
+## 9. Reproducibility interpretation
 
 This core slice supports immutable CODE-ACCORD acquisition, exhaustive
-preparation auditing, and deterministic offline result replay once valid frozen
-inputs exist. It does not yet establish an approved prepared corpus or exact
+preparation auditing, exact verifier request planning/live instrumentation, and
+deterministic offline response/result replay once valid frozen inputs exist. It
+does not yet establish an approved prepared corpus or exact
 same-seed checkpoint rebuilding. The final workflow must resolve the official
 annotation incompatibility, fetch and verify DeBERTa, reconstruct
 `CODE-SPLIT-1` byte-identically, serialize full restart state,
 duplicate seed-42 training/inference under the pinned accelerator profile,
-rebuild seeds 43-49, freeze development/test inference, materialize and hash the
-approved prompts, pass the development verifier pilot, score uncertainty/tests,
-and render/archive the final output. Those stages will be added to this same
-module entry point as their B-05/B-06 gates are completed.
+rebuild seeds 43-49, freeze development/test inference, pass the development
+verifier determinism/label-quality pilot, score uncertainty/tests, and
+render/archive the final output. Those stages will be added to this same module
+entry point as their remaining gates are completed.

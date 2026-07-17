@@ -303,6 +303,7 @@ class Verdict:
     candidate_id: str
     response_status: str
     action: str | None
+    reason_code: str | None
     corrected: StrictTriple | None
     correction_validation_status: str
     raw_response_sha256: str | None
@@ -326,6 +327,7 @@ class Verdict:
                 "candidate_id",
                 "response_status",
                 "action",
+                "reason_code",
                 "corrected",
                 "correction_validation_status",
                 "raw_response_sha256",
@@ -363,6 +365,23 @@ class Verdict:
             raise DataContractError(f"{label}.action must be null for a failed response")
         if condition == "VER-SIMPLE" and action == "CORRECT":
             raise DataContractError(f"{label}: simple mode cannot return CORRECT")
+
+        reason_code = value.get("reason_code")
+        if reason_code is not None:
+            reason_code = _string(reason_code, f"{label}.reason_code")
+            if reason_code not in {
+                "SUPPORTED",
+                "WRONG_RELATION",
+                "WRONG_HEAD",
+                "WRONG_TAIL",
+                "UNSUPPORTED",
+                "AMBIGUOUS",
+            }:
+                raise DataContractError(f"{label}.reason_code is unsupported")
+        if response_status == "valid_response" and reason_code is None:
+            raise DataContractError(f"{label}.reason_code is required for a valid response")
+        if response_status != "valid_response" and reason_code is not None:
+            raise DataContractError(f"{label}.reason_code must be null for a failed response")
 
         correction_status = _string(
             _require(value, "correction_validation_status", label),
@@ -412,6 +431,7 @@ class Verdict:
             candidate_id=candidate_id,
             response_status=response_status,
             action=action,
+            reason_code=reason_code,
             corrected=corrected,
             correction_validation_status=correction_status,
             raw_response_sha256=raw_response_sha256,

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:verifier-run-log:1.0",
+  "title": "Phase B append-only verifier run-log event",
+  "type": "object",
+  "required": [
+    "protocol_id",
+    "condition_id",
+    "execution_mode",
+    "event",
+    "sequence",
+    "timestamp_utc",
+    "candidate_id",
+    "attempt",
+    "status",
+    "details"
+  ],
+  "properties": {
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "condition_id": {"enum": ["VER-SIMPLE", "VER-CORRECTIVE"]},
+    "execution_mode": {"enum": ["dry-run", "live", "replay"]},
+    "event": {
+      "enum": [
+        "run_started",
+        "model_identity_verified",
+        "request_planned",
+        "request_attempted",
+        "candidate_completed",
+        "run_completed",
+        "run_failed"
+      ]
+    },
+    "sequence": {"type": "integer", "minimum": 1},
+    "timestamp_utc": {"type": "string", "format": "date-time"},
+    "candidate_id": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^cand-[0-9a-f]{64}$"}
+      ]
+    },
+    "attempt": {"type": ["integer", "null"], "minimum": 1},
+    "status": {"type": "string", "minLength": 1},
+    "details": {"type": "object"}
+  },
+  "additionalProperties": false
+}

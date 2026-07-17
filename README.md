@@ -8,9 +8,10 @@ The canonical publication-facing Phase B surface is:
 python -B -m phase_b_pipeline
 ```
 
-The current B-05 core slice implements checkout/environment `doctor`, frozen
+The current B-05/B-06 slice implements checkout/environment `doctor`, frozen
 Section 5 ledger `reconcile`, immutable CODE-ACCORD `fetch`, strict `prepare`,
-and offline `CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
+frozen verifier `dry-run|live|replay`, and offline `CODE-STRICT-1` `score`
+stages. Official v1.0.0 preparation
 intentionally hard-stops with a complete
 audit because nine relation-marker arguments do not map to unique typed BIO
 spans; no row is silently repaired or omitted. See
@@ -23,6 +24,17 @@ verify_triples_llm.py -> build_kg.py` chain, reported baselines, ablations,
 closed-loop attempts, cross-dataset transfer, and negative results. Those paths
 are provenance evidence; they are not publication commands for approved Path A
 until their claim-bearing behavior is migrated behind the canonical runner.
+
+`phase_b_pipeline` is a protocol and orchestration layer, not a second encoder
+implementation. It owns the contracts that the historical root scripts do not
+provide: immutable identities, one experiment matrix, typed matching, split
+isolation, output containment, replay, and machine-readable manifests. Model
+training and extraction behavior remains in the historical implementation until
+a thin adapter can preserve it behind those contracts with parity evidence.
+The new verifier caller is necessarily canonical-specific because the retained
+root verifier hard-codes the SciERC ontology, parses free-form line responses,
+and lacks the approved prompt/schema/digest/cache/telemetry contract. The root
+script remains unchanged as provenance rather than being silently repurposed.
 
 This creates an explicit two-tier authority boundary. Canonical Path A data,
 manifests, typed matching, splits, checkpoints, and scores are authoritative for
@@ -60,8 +72,10 @@ override the current preparation hard stop or authorize the proposed migration.
   included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not
   committed.
 - Missing verifier Precision, Recall, and F1 evaluation remains incomplete. The
-  canonical offline scorer is implemented, but publication results require the
-  frozen external-machine inputs and later approved execution stages.
+  canonical prompts, dry-run/live/replay instrumentation, and offline scorer are
+  implemented, but no publication result has been produced. Valid results still
+  require the blocked prepared corpus, regenerated candidates, the B-07 pilot,
+  and later approved external-machine execution.
 
 ## Installation
 
@@ -174,6 +188,13 @@ uv run python build_kg.py \
 timeout/retry controls, but it does not implement the approved B-06 JSON-schema,
 model-digest, cache, telemetry, seed, or prompt-hash contract. Temperature zero
 alone is not proof of deterministic replay.
+
+The canonical verifier stage instead uses the tracked `CODE-VERIFIER-1` prompt
+files and response schemas under `prompts/phase_b/` and `schemas/phase_b/`.
+It can materialize exact requests without a model, verify and call the pinned
+Ollama artifact when live execution is authorized, or turn a frozen raw-response
+ledger into verdict records without another model call. See
+[`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for the commands and gates.
 
 ## Evaluation semantics
 
