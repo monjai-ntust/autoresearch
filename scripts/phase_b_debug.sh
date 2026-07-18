@@ -413,11 +413,16 @@ PY
 }
 
 run_legacy_train() {
-  local data_dir="$RUN_ROOT/inputs/extracted/CODE-ACCORD-v1.0.0-annotations/annotated_data"
+  local entities_train
+  local data_dir
   local checkpoint
+  entities_train="$(find "$RUN_ROOT/inputs/extracted" -type f -path '*/entities/train.csv' -print -quit)"
+  [[ -n "$entities_train" ]] \
+    || die "legacy-train could not locate entities/train.csv beneath $RUN_ROOT/inputs/extracted"
+  data_dir="$(dirname "$(dirname "$entities_train")")"
   checkpoint="$(legacy_checkpoint_path)"
   [[ -d "$data_dir/entities" && -d "$data_dir/relations" ]] \
-    || die "legacy-train requires the extracted annotation CSVs under $data_dir"
+    || die "legacy-train requires sibling entities/ and relations/ directories under $data_dir"
   uv run --frozen --python 3.10.20 python -B train_span.py \
     --dataset accord --data-dir "$data_dir" \
     --model-name microsoft/deberta-large \
