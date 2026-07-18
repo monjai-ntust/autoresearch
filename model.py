@@ -12,7 +12,7 @@ Section 3.1) -- while binding every emitted record to the typed strict data,
 split, and checkpoint identities and confining all output beneath the ignored
 ``output/<run-id>/`` tree.
 
-The stage has two implemented executions:
+The stage has three implemented executions:
 
 * ``dry-run`` validates the prepared sentences and checkpoint identity and
   materializes a deterministic per-sentence inference plan without producing a
@@ -22,12 +22,13 @@ The stage has two implemented executions:
   into canonical :class:`records.Candidate` records, reproducing the historical
   greedy non-overlapping NER selection and ``min(head, tail) * re`` confidence
   product on typed CODE spans.
-
-Live encoder inference (the retained ``train_span.py`` / ``models`` encoder run
-under a pinned accelerator profile) remains an externally gated stage and is not
-exposed by this slice; it will be added to this same module once the checkpoint
-rebuilding and fixture-parity gates are met. This slice therefore does not make
-``inference_kg.py`` eligible for removal.
+* ``live`` runs the retained encoder (``models.bert_kg_encoder`` under the
+  frozen recipe) over the prepared sentences to produce that prediction ledger,
+  then applies the same deterministic ledger->candidate transform as ``replay``.
+  Its forward outputs cannot be validated offline, so live execution remains
+  externally gated on the accelerator + real checkpoint, and ``inference_kg.py``
+  stays retained as provenance until external output parity is confirmed (see
+  ``docs/historical-transition-map.md``).
 """
 
 from __future__ import annotations

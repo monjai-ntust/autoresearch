@@ -450,26 +450,6 @@ def _parse_markers(tagged: str, *, label: str) -> tuple[str, dict[str, tuple[int
     return clean, markers
 
 
-def _align_marker(
-    entity: EntityRecord,
-    marker: tuple[int, int, str],
-    *,
-    label: str,
-) -> tuple[dict[str, Any], str]:
-    diagnosis = _marker_alignment_diagnosis(entity, marker)
-    exact_candidates = diagnosis["exact"]
-    containing_candidates = diagnosis["contained_by_one_span"]
-    if len(exact_candidates) == 1:
-        return dict(exact_candidates[0]), "exact_span"
-    if not exact_candidates and len(containing_candidates) == 1:
-        return dict(containing_candidates[0]), "marker_contained_in_typed_span"
-    candidate_count = len(exact_candidates) + len(containing_candidates)
-    raise DataContractError(
-        f"{label} marker aligns to {candidate_count} typed BIO spans; "
-        f"overlaps={len(diagnosis['overlapping'])}; expected exactly one"
-    )
-
-
 def _alignment_choice(
     entity: EntityRecord, marker: tuple[int, int, str]
 ) -> tuple[dict[str, Any] | None, str, dict[str, list[dict[str, Any]]]]:
