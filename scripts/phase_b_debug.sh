@@ -597,6 +597,19 @@ maybe_generate_live() {
   fi
 }
 
+maybe_legacy_checkpoint_diagnostic() {
+  local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
+  local checkpoint_blob="${CHECKPOINT_BLOB:-checkpoints/seed-$SEED/checkpoint.pt}"
+  if [[ -f "$RUN_ROOT/$checkpoint_manifest" && -f "$RUN_ROOT/$checkpoint_blob" ]]; then
+    note "canonical checkpoint inputs are present; legacy diagnostic is not needed"
+  elif [[ "$ALLOW_LEGACY_DIAGNOSTIC" == true ]]; then
+    note "canonical checkpoint inputs are missing; running acknowledged legacy diagnostic checkpoint command"
+    ensure_legacy_train
+  else
+    blocked "canonical checkpoint inputs are missing; for a diagnostic-only checkpoint rerun with: bash scripts/phase_b_debug.sh --run-id $RUN_ID --stage legacy-train --seed $SEED --allow-legacy-diagnostic"
+  fi
+}
+
 maybe_generate_replay() {
   local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
   local prediction_ledger="${PREDICTION_LEDGER:-predictions/test/prediction-ledger.jsonl}"
@@ -678,6 +691,7 @@ ensure_available() {
   ensure_bootstrap
   ensure_command_check
   ensure_plan
+  maybe_legacy_checkpoint_diagnostic
   maybe_generate_live
   maybe_generate_replay
   maybe_threshold
@@ -686,7 +700,6 @@ ensure_available() {
   blocked "verifier live and pilot-live require the recorded B-07 user go/no-go approval and separately selected/captured inputs"
   maybe_pilot_audit
   maybe_score
-  blocked "legacy-train is intentionally excluded from the canonical sweep; use --stage legacy-train --allow-legacy-diagnostic to debug retained provenance"
 }
 
 ensure_publishable() {

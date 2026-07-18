@@ -306,6 +306,14 @@ scripts/phase_b_debug.sh --run-id "$RUN_ID" \
   --stage legacy-train --seed 42 --allow-legacy-diagnostic
 ```
 
+To have the default `available` sweep make this same diagnostic checkpoint when
+the canonical seed checkpoint is absent, retain the acknowledgement while using
+the normal target:
+
+```bash
+scripts/phase_b_debug.sh --run-id "$RUN_ID" --allow-legacy-diagnostic
+```
+
 It uses only the run-local extracted annotation CSVs and writes its checkpoint
 plus a `completed_noncanonical_diagnostic` marker under
 `output/$RUN_ID/checkpoints/legacy-train-span/`. The explicit acknowledgement
