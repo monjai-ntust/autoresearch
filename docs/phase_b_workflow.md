@@ -314,6 +314,17 @@ and cannot pin the DeBERTa revision. Its marker records
 `publishable_primary_data: false`; the debug runner will not use that checkpoint
 for canonical candidate generation or let it satisfy `--stage publishable`.
 
+#### GB10 CUDA runtime requirement
+
+The locked environment uses PyTorch `2.9.1+cu130`, not CUDA 12.8. NVIDIA GB10
+reports compute capability 12.1; the former CUDA 12.8 wheel supports only up to
+12.0 and fails during NVRTC compilation of DeBERTa kernels with
+`invalid value for --gpu-architecture`. After pulling the CUDA-13 lockfile,
+run `uv sync --frozen` before retrying the diagnostic. The runner checks the
+active device's capability and bundled CUDA major version before loading the
+model, and fails with a concise environment message when that known-incompatible
+combination is present.
+
 ### Current executable boundary
 
 This source revision has **no canonical live-checkpoint command**. The

@@ -114,7 +114,13 @@ The tracked support files are part of the reproducibility contract:
 | `uv.lock` | Locks the resolved environment used for validation of this checkout. |
 | `.gitignore` | Excludes local datasets, checkpoints, caches, and generated outputs; it intentionally does not add a log rule. |
 
-PyTorch is resolved from the CUDA 12.8 wheel index. CPU execution is possible for small checks, but reported training runs require a suitable CUDA GPU and substantially more time and memory.
+PyTorch is resolved from the CUDA 13.0 wheel index. This is required for the
+external NVIDIA GB10 (compute capability 12.1): the prior CUDA 12.8 wheel
+reports support only through capability 12.0 and fails when NVRTC compiles
+DeBERTa relative-position kernels. After pulling a revision with this lockfile,
+run `uv sync --frozen` again before any GPU stage. CPU execution is possible for
+small checks, but reported training runs require a suitable CUDA GPU and
+substantially more time and memory.
 
 Model backbones are loaded through Hugging Face Transformers and may require network access on first use. The verifier and generation scripts additionally require `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the requested local model (historically `qwen3:32b`). `--ollama-url` is configurable, so on-premise execution is a deployment choice rather than a code-enforced invariant.
 

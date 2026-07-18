@@ -423,6 +423,30 @@ run_legacy_train() {
   checkpoint="$(legacy_checkpoint_path)"
   [[ -d "$data_dir/entities" && -d "$data_dir/relations" ]] \
     || die "legacy-train requires sibling entities/ and relations/ directories under $data_dir"
+  uv run --frozen --python 3.10.20 python -B - <<'PY'
+import torch
+
+if not torch.cuda.is_available():
+    raise SystemExit(
+        "legacy-train requires a CUDA-capable PyTorch runtime; no CUDA device is available"
+    )
+
+device = torch.cuda.get_device_properties(0)
+capability = (device.major, device.minor)
+cuda_version = tuple(int(part) for part in (torch.version.cuda or "0").split(".")[:2])
+if capability >= (12, 1) and cuda_version < (13, 0):
+    raise SystemExit(
+        f"CUDA device {device.name!r} has compute capability "
+        f"{device.major}.{device.minor}, but torch {torch.__version__} bundles CUDA "
+        f"{torch.version.cuda}; install the locked CUDA 13.0 environment with "
+        "`uv sync --frozen` after updating this checkout."
+    )
+print(
+    f"legacy-train CUDA preflight: {device.name}; "
+    f"compute capability {capability[0]}.{capability[1]}; "
+    f"torch {torch.__version__}; CUDA {torch.version.cuda}"
+)
+PY
   uv run --frozen --python 3.10.20 python -B train_span.py \
     --dataset accord --data-dir "$data_dir" \
     --model-name microsoft/deberta-large \
