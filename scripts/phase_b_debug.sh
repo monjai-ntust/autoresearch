@@ -275,10 +275,13 @@ fetch_complete() {
 }
 
 prepare_complete() {
+  local artifact
   json_equals "$RUN_ROOT/manifests/03-data-preparation-manifest.json" \
-    byte_identical_independent_materializations true \
-    && [[ -f "$RUN_ROOT/data-prepared/split-manifest.json" ]] \
-    && [[ -f "$RUN_ROOT/data-prepared/train.jsonl" ]]
+    byte_identical_independent_materializations true || return 1
+  for artifact in sentences.jsonl train.jsonl development.jsonl test.jsonl \
+    development-gold.jsonl test-gold.jsonl split-manifest.json; do
+    [[ -f "$RUN_ROOT/data-prepared/$artifact" ]] || return 1
+  done
 }
 
 plan_complete() {
@@ -351,6 +354,9 @@ ensure_fetch() {
 }
 
 ensure_prepare() {
+  if [[ -f "$RUN_ROOT/manifests/03-data-preparation-manifest.json" ]] && ! prepare_complete; then
+    die "prepared tree is incomplete or from an older artifact contract; do not mix it with this run. Start a new --run-id so prepare can materialize a complete fresh tree."
+  fi
   skip_or_run prepare prepare_complete \
     uv run --frozen python -B phase_b.py prepare \
       --config configs/phase_b_path_a.json --run-id "$RUN_ID"

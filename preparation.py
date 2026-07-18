@@ -923,26 +923,27 @@ def _materialize_dataset(
         ],
     )
 
-    gold_records: list[dict[str, Any]] = []
-    for record in by_split["test"]:
-        gold_records.append(
-            {
-                "protocol_id": PROTOCOL_ID,
-                "split_id": "CODE-SPLIT-1:test",
-                "example_id": record["example_id"],
-                "source_document_id": record["source_document_id"],
-                "gold_triples": [
-                    {
-                        "head": item["head"],
-                        "relation": item["relation"],
-                        "tail": item["tail"],
-                    }
-                    for item in record["relations"]
-                ],
-                "input_hashes": {"annotation_bundle": annotation_bundle},
-            }
-        )
-    atomic_write_jsonl(destination / "test-gold.jsonl", gold_records)
+    for split_name in ("development", "test"):
+        gold_records: list[dict[str, Any]] = []
+        for record in by_split[split_name]:
+            gold_records.append(
+                {
+                    "protocol_id": PROTOCOL_ID,
+                    "split_id": f"CODE-SPLIT-1:{split_name}",
+                    "example_id": record["example_id"],
+                    "source_document_id": record["source_document_id"],
+                    "gold_triples": [
+                        {
+                            "head": item["head"],
+                            "relation": item["relation"],
+                            "tail": item["tail"],
+                        }
+                        for item in record["relations"]
+                    ],
+                    "input_hashes": {"annotation_bundle": annotation_bundle},
+                }
+            )
+        atomic_write_jsonl(destination / f"{split_name}-gold.jsonl", gold_records)
 
     distributions: dict[str, Any] = {}
     for split_name, values in by_split.items():
