@@ -11,7 +11,7 @@ python -B phase_b.py
 The current B-05/B-06, development-only B-07, and B-05U slice implements
 checkout/environment `doctor`, frozen Section 5 ledger `reconcile`, immutable
 CODE-ACCORD `fetch`, raw-provenance/typed-strict `prepare`, canonical
-`model generate-candidates` (`dry-run|replay`), frozen verifier
+`model train` (`dry-run`) and `model generate-candidates` (`dry-run|replay`), frozen verifier
 `dry-run|live|replay`, development `pilot-verifier` auditing, and offline
 `CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
 preserves all official relation rows in a raw-provenance view and writes a

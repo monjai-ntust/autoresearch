@@ -10,7 +10,7 @@ from pathlib import Path
 
 from config import load_pipeline_config
 from constants import PROTOCOL_ID
-from model import generate_candidates
+from model import generate_candidates, plan_training
 from phase_b_io import DataContractError, atomic_write_json, atomic_write_jsonl
 from paths import RunLayout, discover_source_root
 from records import EntitySpan, StrictTriple, candidate_id_for
@@ -324,6 +324,54 @@ class ModelAdapterTests(unittest.TestCase):
                     checkpoint_manifest_path=checkpoint_wrong,
                     candidates_out_path=candidates,
                 )
+
+
+class ModelTrainTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/phase_b_path_a.json")
+
+    def test_dry_run_emits_recipe_bound_training_plan(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "train-dry")
+            layout.create()
+            manifest = plan_training(
+                layout, self.config, execution_mode="dry-run", training_seed=42
+            )
+            self.assertEqual(manifest["status"], "planned")
+            self.assertEqual(manifest["training_seed"], 42)
+            self.assertTrue(manifest["final_test_selection_forbidden"])
+            self.assertEqual(manifest["live_execution_status"], "gated_external_accelerator")
+            self.assertEqual(manifest["expected_checkpoint_dir"], "checkpoints/seed-42")
+            # The plan is bound to the exact frozen recipe and split.
+            self.assertEqual(manifest["recipe"], self.config.value["training"])
+            self.assertEqual(manifest["split"], self.config.value["split"])
+            self.assertEqual(set(manifest), _schema_required("model-train-manifest.schema.json"))
+            for path in Path(temporary).rglob("*"):
+                if path.is_file():
+                    self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))
+
+    def test_invalid_seed_is_rejected(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "train-badseed")
+            layout.create()
+            with self.assertRaises(DataContractError):
+                plan_training(layout, self.config, execution_mode="dry-run", training_seed=7)
+
+    def test_live_execution_is_not_implemented(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "train-live")
+            layout.create()
+            with self.assertRaises(DataContractError):
+                plan_training(layout, self.config, execution_mode="live", training_seed=42)
+
+    def test_train_refuses_to_overwrite(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "train-overwrite")
+            layout.create()
+            plan_training(layout, self.config, execution_mode="dry-run", training_seed=42)
+            with self.assertRaises(DataContractError):
+                plan_training(layout, self.config, execution_mode="dry-run", training_seed=42)
 
 
 if __name__ == "__main__":

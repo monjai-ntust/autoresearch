@@ -52,8 +52,10 @@ from records import Candidate, EntitySpan, StrictTriple, candidate_id_for
 from verifier import PreparedSentence, _load_sentences, _source_text
 
 EXECUTION_MODES = {"dry-run", "replay"}
+TRAIN_EXECUTION_MODES = {"dry-run"}
 _SPLIT_ID = "CODE-SPLIT-1"
 _CONFIDENCE_PRECISION = 6
+_CHECKPOINT_MANIFEST_CONTRACT = "urn:phase-b:model-checkpoint-manifest:1.0"
 
 
 def _utc_now() -> str:
@@ -485,5 +487,60 @@ def generate_candidates(
             "candidates_output": layout.relative_identity(candidates_out_path),
         }
     )
+    atomic_write_json(manifest_path, manifest)
+    return manifest
+
+
+def plan_training(
+    layout: RunLayout,
+    config: PipelineConfig,
+    *,
+    execution_mode: str,
+    training_seed: int,
+) -> dict[str, Any]:
+    """Plan deterministic encoder training for one seed (the `model train` stage).
+
+    Only `dry-run` is implemented in this slice: it validates the frozen recipe
+    and seed and materializes a machine-readable training plan plus the
+    checkpoint-manifest contract that live training must satisfy. Live training
+    itself requires the pinned accelerator profile and is an externally gated
+    stage; it is not exposed here, so `train_span.py` is not yet removable.
+    """
+
+    layout.require_existing()
+    if execution_mode not in TRAIN_EXECUTION_MODES:
+        raise DataContractError(
+            f"unsupported model-train execution mode: {execution_mode!r} "
+            "(only dry-run is implemented in this slice)"
+        )
+    if training_seed not in TRAINING_SEEDS:
+        raise DataContractError(f"training_seed {training_seed} is outside seeds 42-49")
+
+    split = config.value["split"]
+    if split.get("split_id") != _SPLIT_ID:
+        raise DataContractError(f"config.split.split_id must be {_SPLIT_ID}")
+
+    manifest_path = layout.resolve(f"manifests/model-train-{execution_mode}.json")
+    if manifest_path.exists():
+        raise DataContractError(
+            "model train refuses to overwrite existing artifact: "
+            + layout.relative_identity(manifest_path)
+        )
+
+    manifest = {
+        "protocol_id": PROTOCOL_ID,
+        "matcher_id": MATCHER_ID,
+        "stage": "model-train",
+        "execution_mode": execution_mode,
+        "status": "planned",
+        "created_at_utc": _utc_now(),
+        "training_seed": training_seed,
+        "split": dict(split),
+        "recipe": dict(config.value["training"]),
+        "expected_checkpoint_dir": f"checkpoints/seed-{training_seed}",
+        "checkpoint_manifest_contract": _CHECKPOINT_MANIFEST_CONTRACT,
+        "final_test_selection_forbidden": True,
+        "live_execution_status": "gated_external_accelerator",
+    }
     atomic_write_json(manifest_path, manifest)
     return manifest

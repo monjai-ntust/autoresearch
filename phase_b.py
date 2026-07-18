@@ -10,7 +10,7 @@ from pathlib import Path
 from acquisition import fetch_run
 from config import load_pipeline_config
 from doctor import run_doctor
-from model import generate_candidates
+from model import generate_candidates, plan_training
 from phase_b_io import DataContractError
 from paths import PathContractError, RunLayout, discover_source_root
 from pilot import PilotInputs, run_verifier_pilot
@@ -155,6 +155,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Run-relative frozen encoder prediction ledger required by replay",
     )
     generate.add_argument("--candidates-out", help="Run-relative candidate output JSONL")
+
+    train = model_actions.add_parser(
+        "train", help="Plan (dry-run) deterministic encoder training for one seed"
+    )
+    train.add_argument("--config", default=DEFAULT_CONFIG)
+    train.add_argument("--run-id", required=True)
+    train.add_argument("--execution", required=True, choices=["dry-run"])
+    train.add_argument("--seed", required=True, type=int)
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
     score.add_argument("--config", default=DEFAULT_CONFIG)
@@ -349,6 +357,25 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if audit["pilot_status"] == "pass" else 2
 
         if args.stage == "model":
+            if args.model_action == "train":
+                manifest = plan_training(
+                    layout,
+                    config,
+                    execution_mode=args.execution,
+                    training_seed=args.seed,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "run_id": args.run_id,
+                            "status": manifest["status"],
+                            "stage": "model-train",
+                            "training_seed": manifest["training_seed"],
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 0
             if args.model_action != "generate-candidates":
                 raise DataContractError(f"unsupported model action: {args.model_action!r}")
             configured = config.paths

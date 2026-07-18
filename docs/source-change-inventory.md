@@ -32,10 +32,10 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 108 differing paths: 66
+With this document included, the comparison contains 110 differing paths: 68
 current-only paths, 33 baseline-only paths, and 9 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 123.
+paths and the current tree has 125.
 
 ## Current architecture and rewrite boundary
 
@@ -62,12 +62,14 @@ the active modules at the root is the current boundary for three reasons:
    enforce its contracts at every boundary.
 
 This is not yet a complete end-to-end replacement. `model.py` adds the canonical
-`model generate-candidates` adapter with `dry-run` and `replay` executions,
-which transform a frozen encoder prediction ledger into typed `CODE-STRICT-1`
-candidates under the output contract; live encoder inference and fixture parity
-against `inference_kg.py` remain pending, so that historical script is not yet
-eligible for removal. Canonical training adapters still require parity evidence,
-and official data preparation now materializes the raw/typed-strict dual view.
+`model` stage: `generate-candidates` with `dry-run` and `replay` executions
+(transforming a frozen encoder prediction ledger into typed `CODE-STRICT-1`
+candidates under the output contract) and `train` with a `dry-run` execution
+(planning deterministic single-seed training against the frozen recipe and
+declaring the checkpoint-manifest contract). Live encoder inference and training,
+plus fixture parity against `inference_kg.py`/`train_span.py`, remain gated, so
+those historical scripts are not yet eligible for removal. Official data
+preparation now materializes the raw/typed-strict dual view.
 The root-module layout is an intermediate reviewable surface, not a claim that
 the historical model paths have been superseded.
 
@@ -154,6 +156,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
 | `docs/historical-transition-inventory.md` | B-05U family-level record of why each legacy executable family cannot remain independent, its canonical successor stage, and its raw-evidence disposition. |
+| `docs/secondary-data-replacement-map.md` | B-05U data-item-level map assigning every draft Section 5 secondary result family a disposition (canonical stage, retained input, corrected/unsupported, or external) and recording the open user decisions that gate each `secondary` sub-workflow. |
 | `docs/phase_b_root_module_mapping.md` | Maps every former package module to its root host, records the two standard-library collision renames, and states the package-removal parity gates. |
 | `docs/source-change-inventory.md` | Maintains this exhaustive, reasoned comparison with the fixed baseline and prevents future source edits from losing their deletion/reuse/rewrite rationale. |
 
@@ -168,7 +171,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `doctor.py` | Checks checkout identity, environment, ignore rules, resources, and worktree constraints and emits a machine-readable preflight manifest. |
 | `phase_b_io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
 | `metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
-| `model.py` | Canonical `model generate-candidates` adapter: `dry-run` plans the per-sentence inference universe, and `replay` transforms a frozen encoder prediction ledger into typed `CODE-STRICT-1` candidates bound to split and checkpoint identities. It reproduces the historical greedy non-overlap selection and softmax-product confidence while confining output to `output/<run-id>/`. |
+| `model.py` | Canonical `model` stage. `generate-candidates` (`dry-run` plan; `replay` of a frozen encoder prediction ledger into typed `CODE-STRICT-1` candidates, reproducing the historical greedy non-overlap selection and softmax-product confidence) and `train` (`dry-run` plan binding the frozen recipe and declaring the checkpoint-manifest contract). All output is confined to `output/<run-id>/`; live inference/training remain gated. |
 | `paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
 | `pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
 | `preparation.py` | Parses the immutable official corpus, audits BIO/relation alignment, hard-stops unresolved typed cases, and materializes deterministic records only after validation. |
@@ -203,6 +206,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `schemas/phase_b/model-generation-manifest.schema.json` | Validates the `model generate-candidates` stage manifest for both dry-run and replay executions. |
 | `schemas/phase_b/model-generation-plan.schema.json` | Validates the per-sentence dry-run inference plan emitted without contacting a model. |
 | `schemas/phase_b/model-prediction-ledger.schema.json` | Validates the frozen per-sentence encoder span/relation scores consumed by replay candidate generation. |
+| `schemas/phase_b/model-train-manifest.schema.json` | Validates the `model train` dry-run manifest that plans single-seed training against the frozen recipe and declares the checkpoint-manifest contract. |
 | `schemas/phase_b/outcomes.schema.json` | Validates paired candidate- and sentence-level outcomes required by confidence intervals and paired tests. |
 | `schemas/phase_b/prepared-sentence.schema.json` | Validates each normalized, provenance-bearing CODE-ACCORD sentence record. |
 | `schemas/phase_b/records.schema.json` | Validates gold, candidate, and verifier record variants at stage boundaries. |

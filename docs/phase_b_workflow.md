@@ -25,6 +25,11 @@ module entry point with eight stages and focused contract tests:
   their exact byte/SHA-256 identities, parses all rows, audits the one approved
   UUID repair, and attempts typed directed `CODE-STRICT-1` reconstruction plus
   byte-identical `CODE-SPLIT-1` materialization.
+- `model train` (`--execution dry-run`) is the canonical successor to
+  `train_span.py` for training orchestration. It validates the frozen recipe and
+  seed and writes a machine-readable training plan plus the checkpoint-manifest
+  contract that gated live training must satisfy; live training under the pinned
+  accelerator profile is not exposed by this slice.
 - `model generate-candidates` is the canonical successor to `inference_kg.py`.
   Its `dry-run` execution validates prepared sentences plus an encoder
   checkpoint identity and writes a per-sentence inference plan without calling a
