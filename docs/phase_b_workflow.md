@@ -182,15 +182,16 @@ scripts/phase_b_debug.sh --run-id "$RUN_ID"
 
 It treats a passing checkout manifest, reconciliation audit, verified
 acquisition manifest/archive, and byte-identical preparation manifest plus
-prepared split as completed. The default `publishable` target continues through
-every implemented canonical prerequisite, runs the first incomplete command,
-and exits on a new error; after fixing the error, rerun the same command with
-the same `RUN_ID`. `--help` lists explicit stages for every later documented
-command (checkpoint planning, candidate generation, thresholding,
-verifier/pilot, score, and the retained legacy diagnostic).
-`--stage publishable` walks the implemented canonical prerequisites and stops
-at the first missing publication gate. Those stages remain gated by their
-documented inputs and do not fabricate or copy missing artifacts.
+prepared split as completed. The default `available` target parser-checks every
+documented command, runs every stage whose required run-local artifacts are
+present, and exits on a new command error; after fixing the error, rerun the
+same command with the same `RUN_ID`. It reports missing external inputs and
+ungranted publication gates as `BLOCKED` and continues to test independent
+available stages. `--stage publishable` instead stops at the first missing
+canonical publication gate. `--help` lists explicit stages for every later
+documented command (checkpoint planning, candidate generation, thresholding,
+verifier/pilot, score, and the retained legacy diagnostic). These stages do not
+fabricate or copy missing artifacts.
 
 ## 3. Reconcile the frozen Section 5 ledgers
 

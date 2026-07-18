@@ -17,7 +17,7 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SOURCE_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 RUN_ID=""
-STAGE="publishable"
+STAGE="available"
 SEED=42
 BRANCH="refactor"
 MODE="simple"
@@ -45,7 +45,8 @@ runs from the first incomplete selected stage. It exits immediately on a new
 error; rerun the same command after fixing the cause.
 
 Stages:
-  publishable        run every implemented canonical prerequisite (default)
+  available          parser-check every command and run every available stage (default)
+  publishable        run the canonical chain until its first publication gate
   bootstrap          doctor -> reconcile -> fetch -> prepare only
   plan               record the implemented seed-specific model-train dry-run
   legacy-train       run the retained CSV trainer as a noncanonical diagnostic
@@ -93,6 +94,10 @@ does not implement a canonical CODE-SPLIT-1 JSONL training adapter. The
 legacy-train stage is available only to debug retained provenance code; its
 random legacy development split makes its checkpoint noncanonical and it is
 never fed into the publishable chain.
+
+The default available sweep treats missing checkpoint/candidate/verifier/pilot
+inputs and ungranted publication gates as BLOCKED, not as errors. Any command
+whose prerequisites are present is run and still stops the script on failure.
 EOF
 }
 
@@ -191,6 +196,68 @@ skip_or_run() {
   fi
   note "running $label"
   "$@"
+}
+
+command_check_marker() {
+  printf '%s\n' "$RUN_ROOT/manifests/debug-command-check.json"
+}
+
+command_check_complete() {
+  local marker
+  local commit
+  marker="$(command_check_marker)"
+  commit="$(git rev-parse HEAD)"
+  json_equals "$marker" status '"passed"' \
+    && json_equals "$marker" source_commit "\"$commit\""
+}
+
+write_command_check_marker() {
+  local marker
+  local commit
+  marker="$(command_check_marker)"
+  commit="$(git rev-parse HEAD)"
+  uv run --frozen python -B - "$marker" "$commit" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+marker = Path(sys.argv[1])
+marker.parent.mkdir(parents=True, exist_ok=True)
+marker.write_text(
+    json.dumps(
+        {"status": "passed", "source_commit": sys.argv[2]},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+}
+
+run_command_check() {
+  uv run --frozen python -B phase_b.py --help >/dev/null
+  uv run --frozen python -B phase_b.py doctor --help >/dev/null
+  uv run --frozen python -B phase_b.py reconcile --help >/dev/null
+  uv run --frozen python -B phase_b.py fetch --help >/dev/null
+  uv run --frozen python -B phase_b.py prepare --help >/dev/null
+  uv run --frozen python -B phase_b.py model --help >/dev/null
+  uv run --frozen python -B phase_b.py model train --help >/dev/null
+  uv run --frozen python -B phase_b.py model generate-candidates --help >/dev/null
+  uv run --frozen python -B phase_b.py select-threshold --help >/dev/null
+  uv run --frozen python -B phase_b.py verifier --help >/dev/null
+  uv run --frozen python -B phase_b.py pilot-verifier --help >/dev/null
+  uv run --frozen python -B phase_b.py score --help >/dev/null
+  uv run --frozen --python 3.10.20 python -B train_span.py --help >/dev/null
+  write_command_check_marker
+}
+
+ensure_command_check() {
+  skip_or_run "Phase B command-parser check" command_check_complete run_command_check
+}
+
+blocked() {
+  note "BLOCKED: $*"
 }
 
 doctor_complete() {
@@ -370,16 +437,20 @@ ensure_legacy_train() {
 
 ensure_generate_live() {
   ensure_bootstrap
-  [[ -n "$CHECKPOINT_MANIFEST" ]] || die "generate-live requires --checkpoint-manifest"
-  [[ -n "$CHECKPOINT_BLOB" ]] || die "generate-live requires --checkpoint-blob"
+  local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
+  local checkpoint_blob="${CHECKPOINT_BLOB:-checkpoints/seed-$SEED/checkpoint.pt}"
+  [[ -f "$RUN_ROOT/$checkpoint_manifest" ]] \
+    || die "generate-live requires $checkpoint_manifest (or --checkpoint-manifest)"
+  [[ -f "$RUN_ROOT/$checkpoint_blob" ]] \
+    || die "generate-live requires $checkpoint_blob (or --checkpoint-blob)"
   local sentences="${SENTENCES:-data-prepared/development.jsonl}"
   local output="${CANDIDATES_OUT:-predictions/dev/seed-$SEED-candidates.jsonl}"
   skip_or_run "model generate-candidates live" \
     "candidate_live_complete" \
     uv run --frozen --python 3.10.20 python -B phase_b.py model generate-candidates \
       --config configs/phase_b_path_a.json --run-id "$RUN_ID" --execution live \
-      --sentences "$sentences" --checkpoint-manifest "$CHECKPOINT_MANIFEST" \
-      --checkpoint-blob "$CHECKPOINT_BLOB" --candidates-out "$output"
+      --sentences "$sentences" --checkpoint-manifest "$checkpoint_manifest" \
+      --checkpoint-blob "$checkpoint_blob" --candidates-out "$output"
 }
 
 candidate_live_complete() {
@@ -389,16 +460,20 @@ candidate_live_complete() {
 
 ensure_generate_replay() {
   ensure_bootstrap
-  [[ -n "$CHECKPOINT_MANIFEST" ]] || die "generate-replay requires --checkpoint-manifest"
-  [[ -n "$PREDICTION_LEDGER" ]] || die "generate-replay requires --prediction-ledger"
+  local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
+  local prediction_ledger="${PREDICTION_LEDGER:-predictions/test/prediction-ledger.jsonl}"
+  [[ -f "$RUN_ROOT/$checkpoint_manifest" ]] \
+    || die "generate-replay requires $checkpoint_manifest (or --checkpoint-manifest)"
+  [[ -f "$RUN_ROOT/$prediction_ledger" ]] \
+    || die "generate-replay requires $prediction_ledger (or --prediction-ledger)"
   local sentences="${SENTENCES:-data-prepared/test.jsonl}"
   local output="${CANDIDATES_OUT:-predictions/test/candidates.jsonl}"
   skip_or_run "model generate-candidates replay" \
     "candidate_replay_complete" \
     uv run --frozen --python 3.10.20 python -B phase_b.py model generate-candidates \
       --config configs/phase_b_path_a.json --run-id "$RUN_ID" --execution replay \
-      --sentences "$sentences" --checkpoint-manifest "$CHECKPOINT_MANIFEST" \
-      --prediction-ledger "$PREDICTION_LEDGER" --candidates-out "$output"
+      --sentences "$sentences" --checkpoint-manifest "$checkpoint_manifest" \
+      --prediction-ledger "$prediction_ledger" --candidates-out "$output"
 }
 
 candidate_replay_complete() {
@@ -471,6 +546,112 @@ ensure_score() {
       --config configs/phase_b_path_a.json --run-id "$RUN_ID"
 }
 
+maybe_generate_live() {
+  local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
+  local checkpoint_blob="${CHECKPOINT_BLOB:-checkpoints/seed-$SEED/checkpoint.pt}"
+  local sentences="${SENTENCES:-data-prepared/development.jsonl}"
+  if candidate_live_complete; then
+    note "model generate-candidates live already has its completion artifact; skipping"
+  elif [[ -f "$RUN_ROOT/$checkpoint_manifest" && -f "$RUN_ROOT/$checkpoint_blob" \
+      && -f "$RUN_ROOT/$sentences" ]]; then
+    ensure_generate_live
+  else
+    blocked "model generate-candidates live needs $checkpoint_manifest, $checkpoint_blob, and $sentences"
+  fi
+}
+
+maybe_generate_replay() {
+  local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
+  local prediction_ledger="${PREDICTION_LEDGER:-predictions/test/prediction-ledger.jsonl}"
+  local sentences="${SENTENCES:-data-prepared/test.jsonl}"
+  if candidate_replay_complete; then
+    note "model generate-candidates replay already has its completion artifact; skipping"
+  elif [[ -f "$RUN_ROOT/$checkpoint_manifest" && -f "$RUN_ROOT/$prediction_ledger" \
+      && -f "$RUN_ROOT/$sentences" ]]; then
+    ensure_generate_replay
+  else
+    blocked "model generate-candidates replay needs $checkpoint_manifest, $prediction_ledger, and $sentences"
+  fi
+}
+
+maybe_threshold() {
+  if threshold_complete; then
+    note "select-threshold already has its completion artifact; skipping"
+  elif [[ -f "$RUN_ROOT/$CANDIDATES" ]]; then
+    ensure_threshold
+  else
+    blocked "select-threshold needs $CANDIDATES"
+  fi
+}
+
+maybe_verifier_dry() {
+  local original_mode="$MODE"
+  local mode
+  for mode in simple corrective; do
+    MODE="$mode"
+    if verifier_dry_complete; then
+      note "verifier dry-run ($MODE) already has its completion artifact; skipping"
+    elif [[ -f "$RUN_ROOT/data-prepared/test.jsonl" \
+        && -f "$RUN_ROOT/predictions/test/candidates.jsonl" ]]; then
+      ensure_verifier_dry
+    else
+      blocked "verifier dry-run ($MODE) needs data-prepared/test.jsonl and predictions/test/candidates.jsonl"
+    fi
+  done
+  MODE="$original_mode"
+}
+
+maybe_verifier_replay() {
+  if verifier_replay_complete; then
+    note "verifier replay ($MODE) already has its completion artifact; skipping"
+  elif [[ -f "$RUN_ROOT/data-prepared/test.jsonl" \
+      && -f "$RUN_ROOT/predictions/test/candidates.jsonl" \
+      && -f "$RUN_ROOT/$RESPONSE_LEDGER" ]]; then
+    ensure_verifier_replay
+  else
+    blocked "verifier replay ($MODE) needs test sentences, test candidates, and $RESPONSE_LEDGER"
+  fi
+}
+
+maybe_pilot_audit() {
+  if pilot_audit_complete; then
+    note "pilot-verifier audit already has its completion artifact; skipping"
+  elif [[ -f "$RUN_ROOT/$CAPTURE_INDEX" ]]; then
+    ensure_pilot_audit
+  else
+    blocked "pilot-verifier audit needs $CAPTURE_INDEX from four separately completed pilot-live runs"
+  fi
+}
+
+maybe_score() {
+  if score_complete; then
+    note "score already has its completion artifact; skipping"
+  elif [[ -f "$RUN_ROOT/data-prepared/test-gold.jsonl" \
+      && -f "$RUN_ROOT/predictions/test/candidates.jsonl" \
+      && -f "$RUN_ROOT/verifier/simple/verdicts.jsonl" \
+      && -f "$RUN_ROOT/verifier/corrective/verdicts.jsonl" \
+      && -f "$RUN_ROOT/predictions/dev/threshold-selection.json" ]]; then
+    ensure_score
+  else
+    blocked "score needs test gold/candidates, both verdict ledgers, and the development threshold"
+  fi
+}
+
+ensure_available() {
+  ensure_bootstrap
+  ensure_command_check
+  ensure_plan
+  maybe_generate_live
+  maybe_generate_replay
+  maybe_threshold
+  maybe_verifier_dry
+  maybe_verifier_replay
+  blocked "verifier live and pilot-live require the recorded B-07 user go/no-go approval and separately selected/captured inputs"
+  maybe_pilot_audit
+  maybe_score
+  blocked "legacy-train is intentionally excluded from the canonical sweep; use --stage legacy-train --allow-legacy-diagnostic to debug retained provenance"
+}
+
 ensure_publishable() {
   ensure_plan
   die "publishable chain is blocked at canonical live training: phase_b.py model train accepts only --execution dry-run. Implement a reviewed CODE-SPLIT-1 JSONL adapter that emits seeds 42-49 checkpoint blobs/manifests before continuing with generate-live, threshold, pilot, verifier, and score. --stage legacy-train is diagnostic-only and cannot remove this gate."
@@ -482,6 +663,7 @@ note "synchronizing the locked environment"
 uv sync --frozen
 
 case "$STAGE" in
+  available) ensure_available ;;
   bootstrap) ensure_bootstrap ;;
   plan) ensure_plan ;;
   legacy-train) ensure_legacy_train ;;
