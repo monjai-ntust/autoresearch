@@ -65,7 +65,7 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
         "split_id": "CODE-SPLIT-1",
         "training_seed": 42,
         "base_model": "microsoft/deberta-large",
-        "base_model_revision": "9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0",
+        "base_model_revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
         "checkpoint_sha256": "a" * 64,
         "checkpoint_step": 1900,
         "split_manifest_sha256": sha256_file(split),

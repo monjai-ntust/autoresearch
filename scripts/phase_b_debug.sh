@@ -266,7 +266,8 @@ blocked() {
 doctor_complete() {
   local commit
   commit="$(git rev-parse HEAD)"
-  json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" status '"pass"' \
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] \
+    && json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" status '"pass"' \
     && json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" \
       source.commit "\"$commit\""
 }

@@ -14,7 +14,13 @@ claim that canonical results equal the historical statistics.
   (A20 staircase plus A21 label smoothing), and `292b269` (dataset-directory
   control). The seed-propagation correction is `67d1eb2`.
 - The frozen base model is `microsoft/deberta-large` revision
-  `9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0`. The source config documents
+  `28c23d9eb93ea6cf11f845501ab7aeb2a497658b`. This is the first immutable
+  model-repository revision that contains `vocab.json` and `merges.txt` for the
+  DeBERTa v1 tokenizer. Its `pytorch_model.bin` SHA-256 is
+  `79da1770e499ab894937c426e1e43194e2ede6b492945efe0ee777b19722f334`,
+  identical to the previously selected `9a8befc6...` revision; only the model-
+  repository metadata/tokenizer assets needed for current Transformers loading
+  changed. The source config documents
   Python 3.10.20 and uv 0.11.26 without enforcing them; the current lock selects
   Torch 2.9.1 from the CUDA 13.0 index. Every live summary records the actual
   runtime, CPU/memory, GPU/memory, and deterministic-library settings.

@@ -129,6 +129,13 @@ substantially more time and memory.
 
 Model backbones are loaded through Hugging Face Transformers and may require network access on first use. The verifier and generation scripts additionally require `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the requested local model (historically `qwen3:32b`). `--ollama-url` is configurable, so on-premise execution is a deployment choice rather than a code-enforced invariant.
 
+`sentencepiece` and `protobuf` are direct locked dependencies for tokenizer
+conversion paths used by the retained model family. The frozen DeBERTa v1
+revision itself includes its BPE `vocab.json` and `merges.txt`; installing
+conversion packages cannot compensate for selecting an older model revision
+that lacks those files. A fresh clone should use `uv sync --frozen`; do not
+repair dependency or model identities ad hoc on the execution machine.
+
 ## Historical data acquisition paths
 
 The following downloaders support retained non-Path-A experiments. They write to

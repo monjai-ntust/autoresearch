@@ -40,7 +40,7 @@
     "split_id": {"const": "CODE-SPLIT-1"},
     "training_seed": {"type": "integer", "minimum": 42, "maximum": 49},
     "base_model": {"const": "microsoft/deberta-large"},
-    "base_model_revision": {"const": "9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0"},
+    "base_model_revision": {"const": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b"},
     "checkpoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "checkpoint_step": {"type": "integer", "minimum": 1},
     "split_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},

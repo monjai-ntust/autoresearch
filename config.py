@@ -151,7 +151,7 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     training = _object(_required(value, "training", "config"), "config.training")
     expected_training = {
         "base_model": "microsoft/deberta-large",
-        "base_model_revision": "9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0",
+        "base_model_revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
         "max_steps": 3500,
         "evaluation_every_steps": 100,
         "batch_size": 16,

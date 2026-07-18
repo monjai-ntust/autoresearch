@@ -6,10 +6,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "peft>=0.13.0",
+    "protobuf>=7.35.1",
     "pyarrow>=21.0.0",
     "pytorch-crf>=0.7.2",
     "requests>=2.32.0",
     "safetensors>=0.4.5",
+    "sentencepiece>=0.2.2",
     "torch==2.9.1",
     "transformers>=4.46.0",
 ]
