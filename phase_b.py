@@ -144,7 +144,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     generate.add_argument("--config", default=DEFAULT_CONFIG)
     generate.add_argument("--run-id", required=True)
-    generate.add_argument("--execution", required=True, choices=["dry-run", "replay"])
+    generate.add_argument(
+        "--execution", required=True, choices=["dry-run", "replay", "live"]
+    )
     generate.add_argument("--sentences", help="Run-relative prepared-sentence JSONL")
     generate.add_argument(
         "--checkpoint-manifest",
@@ -154,6 +156,17 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--prediction-ledger",
         help="Run-relative frozen encoder prediction ledger required by replay",
+    )
+    generate.add_argument(
+        "--checkpoint-blob",
+        help="Run-relative encoder checkpoint weights required by live execution",
+    )
+    generate.add_argument(
+        "--base-model",
+        help="Base model id or path for live execution (default: frozen recipe base model)",
+    )
+    generate.add_argument(
+        "--device", help="Torch device for live execution (default: cuda if available else cpu)"
     )
     generate.add_argument("--candidates-out", help="Run-relative candidate output JSONL")
 
@@ -413,6 +426,13 @@ def main(argv: list[str] | None = None) -> int:
                     if args.prediction_ledger
                     else None
                 ),
+                checkpoint_blob_path=(
+                    layout.resolve(args.checkpoint_blob, must_exist=True)
+                    if args.checkpoint_blob
+                    else None
+                ),
+                base_model=args.base_model,
+                device=args.device,
             )
             print(
                 json.dumps(

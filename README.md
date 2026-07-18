@@ -11,7 +11,7 @@ python -B phase_b.py
 The current B-05/B-06, development-only B-07, and B-05U slice implements
 checkout/environment `doctor`, frozen Section 5 ledger `reconcile`, immutable
 CODE-ACCORD `fetch`, raw-provenance/typed-strict `prepare`, canonical
-`model train` (`dry-run`) and `model generate-candidates` (`dry-run|replay`), frozen verifier
+`model train` (`dry-run`) and `model generate-candidates` (`dry-run|replay|live`), frozen verifier
 `dry-run|live|replay`, development `pilot-verifier` auditing, development
 `select-threshold`, and offline `CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
 preserves all official relation rows in a raw-provenance view and writes a
@@ -32,10 +32,12 @@ until their claim-bearing behavior is migrated behind the canonical runner.
 implementation. It owns the contracts that the historical root scripts do not
 provide: immutable identities, one experiment matrix, typed matching, split
 isolation, output containment, replay, and machine-readable manifests. The
-`model generate-candidates` adapter now transforms a frozen encoder prediction
-ledger into typed candidates under those contracts; encoder training and live
-extraction behavior remain in the historical implementation until a thin adapter
-can preserve them behind those contracts with parity evidence.
+`model generate-candidates` adapter transforms a frozen encoder prediction
+ledger into typed candidates under those contracts, and its `live` execution
+runs the retained encoder to produce that ledger; `model train` plans training
+against the frozen recipe. The live encoder train/inference and their
+output-parity against the historical scripts remain externally gated on the
+accelerator, so `train_span.py`/`inference_kg.py` are retained as provenance.
 The new verifier caller is necessarily canonical-specific because the retained
 root verifier hard-codes the SciERC ontology, parses free-form line responses,
 and lacks the approved prompt/schema/digest/cache/telemetry contract. The root

@@ -279,6 +279,34 @@ class ModelAdapterTests(unittest.TestCase):
                     prediction_ledger_path=ledger,
                 )
 
+    def test_live_argument_guards(self):
+        # These validations run before any torch import, so they are offline.
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "live-guards")
+            layout.create()
+            sentences, checkpoint, candidates = self._prepare(layout)
+            # live requires a checkpoint blob
+            with self.assertRaises(DataContractError):
+                generate_candidates(
+                    layout,
+                    self.config,
+                    execution_mode="live",
+                    sentences_path=sentences,
+                    checkpoint_manifest_path=checkpoint,
+                    candidates_out_path=candidates,
+                )
+            # a checkpoint blob is accepted only by live execution
+            with self.assertRaises(DataContractError):
+                generate_candidates(
+                    layout,
+                    self.config,
+                    execution_mode="dry-run",
+                    sentences_path=sentences,
+                    checkpoint_manifest_path=checkpoint,
+                    candidates_out_path=candidates,
+                    checkpoint_blob_path=checkpoint,
+                )
+
     def test_replay_refuses_to_overwrite_existing_candidates(self):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "no-overwrite")

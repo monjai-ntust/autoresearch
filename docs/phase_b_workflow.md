@@ -36,8 +36,12 @@ module entry point with nine stages and focused contract tests:
   model; its `replay` execution transforms a frozen encoder prediction ledger
   into typed `CODE-STRICT-1` candidates, reproducing the greedy non-overlapping
   entity selection and `min(head, tail) * re` softmax-product confidence on
-  typed CODE spans. Live encoder inference remains an externally gated stage and
-  is not exposed by this slice.
+  typed CODE spans. Its `live` execution runs the retained encoder
+  (`models.bert_kg_encoder`) over the prepared sentences to produce that
+  prediction ledger and then applies the identical transform, so a live run and a
+  replay of its produced ledger yield the same candidates; it hash-verifies the
+  checkpoint blob against the checkpoint manifest and is externally gated on the
+  accelerator and a trained checkpoint.
 - `select-threshold` is the canonical producer of the frozen development
   confidence threshold (VER-CONFIDENCE). It computes the per-seed development
   strict Triple F1 over the frozen grid from the eight-seed development candidate

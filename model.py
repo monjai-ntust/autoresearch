@@ -51,7 +51,7 @@ from phase_b_io import (
 from records import Candidate, EntitySpan, StrictTriple, candidate_id_for
 from verifier import PreparedSentence, _load_sentences, _source_text
 
-EXECUTION_MODES = {"dry-run", "replay"}
+EXECUTION_MODES = {"dry-run", "replay", "live"}
 TRAIN_EXECUTION_MODES = {"dry-run"}
 _SPLIT_ID = "CODE-SPLIT-1"
 _CONFIDENCE_PRECISION = 6
@@ -364,6 +364,174 @@ def _load_prediction_ledger(
     return candidates, len(observed_order), selected_total, duplicate_collapsed
 
 
+def _live_inference_records(
+    config: PipelineConfig,
+    checkpoint: CheckpointIdentity,
+    sentences: dict[str, PreparedSentence],
+    checkpoint_blob_path: Path,
+    base_model: str,
+    device_preference: str | None,
+) -> list[dict[str, Any]]:
+    """Run the retained encoder over prepared sentences and emit ledger records.
+
+    This is the externally gated `live` execution. It reuses the retained
+    ``models.bert_kg_encoder.BertKGExtractor`` and the exact
+    ``inference_kg.py`` forward logic (greedy non-overlapping span selection, then
+    relation extraction over the selected pairs with a softmax-product
+    confidence), but binds the CODE label space and writes the canonical
+    prediction-ledger schema. Torch and the model are imported lazily so the
+    module remains importable without an accelerator stack.
+
+    Assumptions (documented for external verification): the checkpoint was trained
+    with the same CODE label space (``data.code_accord``), ``re_context_span``
+    equal to the frozen ``context_between_spans`` recipe flag, ``bio_enrich`` off,
+    and non-marker relation extraction; and each sentence fits within the recipe
+    ``max_length``. These match ``model train`` / ``train_span.py`` defaults.
+    """
+
+    import torch  # lazy: only the externally gated live path needs the accelerator stack
+    from transformers import AutoTokenizer
+
+    from data.code_accord import (
+        ENTITY_TYPES as CA_ENTITY_TYPES,
+        ID2REL,
+        NO_REL_ID,
+        NUM_BIO_TAGS,
+        NUM_RELATIONS,
+    )
+    from models.bert_kg_encoder import BertKGExtractor
+
+    training = config.value["training"]
+    max_length = training["max_length"]
+    max_span_width = training["max_span_width"]
+    device = torch.device(device_preference or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    model = BertKGExtractor(
+        base_model,
+        num_bio_tags=NUM_BIO_TAGS,
+        num_relations=NUM_RELATIONS,
+        num_entity_types=len(CA_ENTITY_TYPES),
+        use_span_ner=True,
+        max_span_width=max_span_width,
+    )
+    # Match train_span.py: enabling re_context_span (the frozen
+    # context_between_spans recipe flag) requires rebuilding re_head with a 3H
+    # input before loading a checkpoint trained with that head.
+    if bool(training["context_between_spans"]):
+        model.re_context_span = True
+        hidden_size = model.backbone.hidden_size
+        model.re_head = torch.nn.Sequential(
+            torch.nn.Linear(hidden_size * 3, hidden_size),
+            torch.nn.GELU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(hidden_size, NUM_RELATIONS),
+        )
+    model = model.to(device)
+    state = torch.load(str(checkpoint_blob_path), map_location=device)
+    if isinstance(state, dict) and "encoder" in state:
+        model.load_state_dict(state["encoder"])
+    elif isinstance(state, dict) and "discriminator" in state:
+        model.load_state_dict(state["discriminator"])
+    else:
+        model.load_state_dict(state)
+    model.eval()
+
+    id2entity = {index + 1: entity_type for index, entity_type in enumerate(CA_ENTITY_TYPES)}
+    records: list[dict[str, Any]] = []
+    for example_id in sorted(sentences):
+        sentence = sentences[example_id]
+        words = list(sentence.words)
+        encoding = tokenizer(
+            words,
+            is_split_into_words=True,
+            padding=False,
+            truncation=True,
+            max_length=max_length,
+            return_tensors=None,
+        )
+        input_ids = torch.tensor([encoding["input_ids"]], dtype=torch.long, device=device)
+        attention_mask = torch.tensor(
+            [encoding["attention_mask"]], dtype=torch.long, device=device
+        )
+        word_ids = encoding.word_ids()
+        n_words = len(words)
+
+        with torch.no_grad():
+            hidden = model.encode(
+                modality="text", input_ids=input_ids, attention_mask=attention_mask
+            )
+            span_logits, candidate_spans = model.forward_span_ner(
+                hidden[0], word_ids, n_words, max_span_width
+            )
+
+        predicted_spans: list[dict[str, Any]] = []
+        if candidate_spans:
+            span_probabilities = torch.softmax(span_logits, dim=-1)
+            predicted_types = span_logits.argmax(dim=-1).tolist()
+            predicted_confidences = span_probabilities.max(dim=-1).values.tolist()
+            for (start, end), type_id, confidence in zip(
+                candidate_spans, predicted_types, predicted_confidences
+            ):
+                if type_id > 0 and end < n_words:
+                    predicted_spans.append(
+                        {
+                            "start": int(start),
+                            "end": int(end),
+                            "type": id2entity[type_id],
+                            "confidence": round(float(confidence), _CONFIDENCE_PRECISION),
+                        }
+                    )
+        predicted_spans.sort(key=lambda span: (span["start"], span["end"], span["type"]))
+
+        # Build the greedy-selection input from the sorted predicted spans so the
+        # live tie-break order is identical to the replay path (which reads the
+        # sorted ledger), guaranteeing live candidates equal a replay of the
+        # produced ledger.
+        scored = [
+            ScoredSpan(span["start"], span["end"], span["type"], span["confidence"])
+            for span in predicted_spans
+        ]
+        selected = _select_non_overlapping(scored)
+        selected_coords = [(span.start, span.end) for span in selected.values()]
+        pairs = [(head, tail) for head in selected_coords for tail in selected_coords if head != tail]
+        predicted_relations: list[dict[str, Any]] = []
+        if pairs:
+            with torch.no_grad():
+                relation_logits = model.forward_re(
+                    hidden[0],
+                    word_ids,
+                    [((head[0], head[1]), (tail[0], tail[1])) for head, tail in pairs],
+                )
+            relation_probabilities = torch.softmax(relation_logits, dim=-1)
+            relation_predictions = relation_logits.argmax(dim=-1).tolist()
+            relation_confidences = relation_probabilities.max(dim=-1).values.tolist()
+            for (head, tail), relation_id, relation_confidence in zip(
+                pairs, relation_predictions, relation_confidences
+            ):
+                if relation_id == NO_REL_ID:
+                    continue
+                predicted_relations.append(
+                    {
+                        "head": {"start": head[0], "end": head[1]},
+                        "tail": {"start": tail[0], "end": tail[1]},
+                        "relation": ID2REL[relation_id],
+                        "re_confidence": round(float(relation_confidence), _CONFIDENCE_PRECISION),
+                    }
+                )
+
+        records.append(
+            {
+                "protocol_id": PROTOCOL_ID,
+                "example_id": example_id,
+                "training_seed": checkpoint.training_seed,
+                "predicted_spans": predicted_spans,
+                "predicted_relations": predicted_relations,
+            }
+        )
+    return records
+
+
 def _generation_plan(
     sentences: dict[str, PreparedSentence], checkpoint: CheckpointIdentity
 ) -> list[dict[str, Any]]:
@@ -394,21 +562,37 @@ def generate_candidates(
     checkpoint_manifest_path: Path,
     candidates_out_path: Path,
     prediction_ledger_path: Path | None = None,
+    checkpoint_blob_path: Path | None = None,
+    base_model: str | None = None,
+    device: str | None = None,
 ) -> dict[str, Any]:
-    """Plan or replay canonical CODE-STRICT-1 candidate generation for one seed."""
+    """Plan, replay, or run canonical CODE-STRICT-1 candidate generation for one seed.
+
+    ``live`` execution runs the retained encoder to produce the prediction ledger
+    and then applies the same deterministic ledger->candidate transform as
+    ``replay``, so a live run and a replay of its produced ledger yield identical
+    candidates. Live execution is externally gated (accelerator + checkpoint).
+    """
 
     layout.require_existing()
     if execution_mode not in EXECUTION_MODES:
         raise DataContractError(f"unsupported model execution mode: {execution_mode!r}")
     if execution_mode == "replay" and prediction_ledger_path is None:
         raise DataContractError("replay requires a run-relative prediction ledger")
-    if execution_mode == "dry-run" and prediction_ledger_path is not None:
-        raise DataContractError("a prediction ledger is accepted only by replay execution")
+    if execution_mode != "replay" and prediction_ledger_path is not None:
+        raise DataContractError("a supplied prediction ledger is accepted only by replay execution")
+    if execution_mode == "live" and checkpoint_blob_path is None:
+        raise DataContractError("live execution requires the run-relative checkpoint blob")
+    if execution_mode != "live" and checkpoint_blob_path is not None:
+        raise DataContractError("a checkpoint blob is accepted only by live execution")
 
     plan_path = candidates_out_path.parent / "generation-plan.jsonl"
+    live_ledger_path = candidates_out_path.parent / "prediction-ledger.jsonl"
     manifest_path = layout.resolve(f"manifests/model-generate-candidates-{execution_mode}.json")
     planned_outputs = [manifest_path]
     planned_outputs.append(plan_path if execution_mode == "dry-run" else candidates_out_path)
+    if execution_mode == "live":
+        planned_outputs.append(live_ledger_path)
     existing = [layout.relative_identity(path) for path in planned_outputs if path.exists()]
     if existing:
         raise DataContractError(
@@ -463,17 +647,39 @@ def generate_candidates(
         atomic_write_json(manifest_path, manifest)
         return manifest
 
+    if execution_mode == "live":
+        blob_digest = sha256_file(checkpoint_blob_path)
+        if blob_digest != checkpoint.checkpoint_sha256:
+            raise DataContractError(
+                "live checkpoint blob hash does not match the checkpoint manifest identity"
+            )
+        records = _live_inference_records(
+            config,
+            checkpoint,
+            sentences,
+            checkpoint_blob_path,
+            base_model or config.value["training"]["base_model"],
+            device,
+        )
+        atomic_write_jsonl(
+            live_ledger_path,
+            sorted(records, key=lambda record: record["example_id"]),
+        )
+        ledger_path = live_ledger_path
+    else:
+        ledger_path = prediction_ledger_path
+
     input_hashes = {
         "prepared_sentences": inputs["prepared_sentences"]["sha256"],
         "checkpoint_manifest": inputs["checkpoint_manifest"]["sha256"],
-        "prediction_ledger": sha256_file(prediction_ledger_path),
+        "prediction_ledger": sha256_file(ledger_path),
     }
     inputs["prediction_ledger"] = {
-        "path": layout.relative_identity(prediction_ledger_path),
+        "path": layout.relative_identity(ledger_path),
         "sha256": input_hashes["prediction_ledger"],
     }
     candidates, sentence_count, selected_total, duplicate_collapsed = _load_prediction_ledger(
-        prediction_ledger_path, sentences, checkpoint, input_hashes
+        ledger_path, sentences, checkpoint, input_hashes
     )
     atomic_write_jsonl(candidates_out_path, candidates)
     manifest.update(
