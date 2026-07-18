@@ -173,8 +173,8 @@ data.
 ### Bash debug/resume runner
 
 On the external Linux machine, use the tracked runner to pull the latest
-`refactor` commit, synchronize the locked environment, and resume the bootstrap
-from its first incomplete run-local artifact:
+`refactor` commit, synchronize the locked environment, and run every
+implemented canonical prerequisite from its first incomplete run-local artifact:
 
 ```bash
 scripts/phase_b_debug.sh --run-id "$RUN_ID"
@@ -182,11 +182,14 @@ scripts/phase_b_debug.sh --run-id "$RUN_ID"
 
 It treats a passing checkout manifest, reconciliation audit, verified
 acquisition manifest/archive, and byte-identical preparation manifest plus
-prepared split as completed. It skips only those completed stages, runs the
-first incomplete command, and exits on a new error; after fixing the error,
-rerun the same command with the same `RUN_ID`. `--help` lists explicit stages
-for every later documented command (checkpoint planning, candidate generation,
-thresholding, verifier/pilot, and score). Those stages remain gated by their
+prepared split as completed. The default `publishable` target continues through
+every implemented canonical prerequisite, runs the first incomplete command,
+and exits on a new error; after fixing the error, rerun the same command with
+the same `RUN_ID`. `--help` lists explicit stages for every later documented
+command (checkpoint planning, candidate generation, thresholding,
+verifier/pilot, score, and the retained legacy diagnostic).
+`--stage publishable` walks the implemented canonical prerequisites and stops
+at the first missing publication gate. Those stages remain gated by their
 documented inputs and do not fabricate or copy missing artifacts.
 
 ## 3. Reconcile the frozen Section 5 ledgers
@@ -290,6 +293,24 @@ whose `expected_checkpoint_dir` is `checkpoints/seed-42`. The current planner
 records one seed per run and intentionally refuses to overwrite that record.
 The future training adapter must retain equivalent per-seed training evidence
 for seeds 43–49 in the run where it writes those checkpoints.
+
+### Legacy trainer: debug only, never publishable
+
+The runner also exposes the retained `train_span.py` command for diagnosing the
+historical CSV trainer with the closest frozen recipe settings:
+
+```bash
+scripts/phase_b_debug.sh --run-id "$RUN_ID" \
+  --stage legacy-train --seed 42 --allow-legacy-diagnostic
+```
+
+It uses only the run-local extracted annotation CSVs and writes its checkpoint
+plus a `completed_noncanonical_diagnostic` marker under
+`output/$RUN_ID/checkpoints/legacy-train-span/`. The explicit acknowledgement
+is required because this trainer constructs its own legacy development split
+and cannot pin the DeBERTa revision. Its marker records
+`publishable_primary_data: false`; the debug runner will not use that checkpoint
+for canonical candidate generation or let it satisfy `--stage publishable`.
 
 ### Current executable boundary
 

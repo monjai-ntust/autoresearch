@@ -9,15 +9,19 @@
 
 set -Eeuo pipefail
 IFS=$'\n\t'
+# Keep argparse/help and provenance strings UTF-8 even on a minimally configured
+# external shell; several retained historical help texts contain Unicode.
+export PYTHONUTF8=1
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SOURCE_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 RUN_ID=""
-STAGE="bootstrap"
+STAGE="publishable"
 SEED=42
 BRANCH="refactor"
 MODE="simple"
+ALLOW_LEGACY_DIAGNOSTIC=false
 RESPONSE_LEDGER="inputs/frozen-simple-responses.jsonl"
 CAPTURE_INDEX="inputs/pilot/capture-index.json"
 CHECKPOINT_MANIFEST=""
@@ -41,8 +45,10 @@ runs from the first incomplete selected stage. It exits immediately on a new
 error; rerun the same command after fixing the cause.
 
 Stages:
-  bootstrap          doctor -> reconcile -> fetch -> prepare (default)
+  publishable        run every implemented canonical prerequisite (default)
+  bootstrap          doctor -> reconcile -> fetch -> prepare only
   plan               record the implemented seed-specific model-train dry-run
+  legacy-train       run the retained CSV trainer as a noncanonical diagnostic
   generate-live      run documented live candidate generation
   generate-replay    run documented replay candidate generation
   threshold          run documented development threshold selection
@@ -57,6 +63,7 @@ Options:
   --run-id ID                 Existing or new Phase B run ID (required)
   --stage NAME                One stage from the list above
   --seed N                    Checkpoint seed (default: 42)
+  --allow-legacy-diagnostic   Required acknowledgement for legacy-train
   --mode simple|corrective    Verifier mode (default: simple)
   --checkpoint-manifest PATH  Run-relative checkpoint identity manifest
   --checkpoint-blob PATH      Run-relative checkpoint weights for generate-live
@@ -75,13 +82,17 @@ Options:
 Examples:
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage plan --seed 42
+  scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z \
+    --stage legacy-train --seed 42 --allow-legacy-diagnostic
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage generate-live \
     --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
     --checkpoint-blob checkpoints/seed-42/checkpoint.pt
 
 `model train --execution live` is intentionally not a stage: this revision
-does not implement a canonical CODE-SPLIT-1 JSONL training adapter. Do not use
-the legacy train_span.py CSV workflow as a substitute.
+does not implement a canonical CODE-SPLIT-1 JSONL training adapter. The
+legacy-train stage is available only to debug retained provenance code; its
+random legacy development split makes its checkpoint noncanonical and it is
+never fed into the publishable chain.
 EOF
 }
 
@@ -99,6 +110,7 @@ while (($#)); do
     --run-id) RUN_ID="${2:-}"; shift 2 ;;
     --stage) STAGE="${2:-}"; shift 2 ;;
     --seed) SEED="${2:-}"; shift 2 ;;
+    --allow-legacy-diagnostic) ALLOW_LEGACY_DIAGNOSTIC=true; shift ;;
     --mode) MODE="${2:-}"; shift 2 ;;
     --checkpoint-manifest) CHECKPOINT_MANIFEST="${2:-}"; shift 2 ;;
     --checkpoint-blob) CHECKPOINT_BLOB="${2:-}"; shift 2 ;;
@@ -205,6 +217,24 @@ plan_complete() {
     && json_equals "$RUN_ROOT/manifests/model-train-dry-run.json" training_seed "$SEED"
 }
 
+legacy_checkpoint_path() {
+  printf '%s\n' "$RUN_ROOT/checkpoints/legacy-train-span/seed-$SEED/checkpoint.pt"
+}
+
+legacy_completion_marker() {
+  printf '%s\n' "$RUN_ROOT/manifests/legacy-train-span-seed-$SEED.json"
+}
+
+legacy_train_complete() {
+  local checkpoint
+  local marker
+  checkpoint="$(legacy_checkpoint_path)"
+  marker="$(legacy_completion_marker)"
+  json_equals "$marker" status '"completed_noncanonical_diagnostic"' \
+    && json_equals "$marker" training_seed "$SEED" \
+    && [[ -s "$checkpoint" ]]
+}
+
 candidate_complete() {
   local execution="$1"
   local output="$2"
@@ -270,6 +300,72 @@ ensure_plan() {
     uv run --frozen python -B phase_b.py model train \
       --config configs/phase_b_path_a.json --run-id "$RUN_ID" \
       --execution dry-run --seed "$SEED"
+}
+
+write_legacy_completion_marker() {
+  local checkpoint
+  local marker
+  checkpoint="$(legacy_checkpoint_path)"
+  marker="$(legacy_completion_marker)"
+  uv run --frozen python -B - "$checkpoint" "$marker" "$SEED" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+checkpoint = Path(sys.argv[1])
+marker = Path(sys.argv[2])
+seed = int(sys.argv[3])
+digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+marker.parent.mkdir(parents=True, exist_ok=True)
+marker.write_text(
+    json.dumps(
+        {
+            "status": "completed_noncanonical_diagnostic",
+            "training_seed": seed,
+            "checkpoint_path": str(checkpoint).replace("\\", "/"),
+            "checkpoint_sha256": digest,
+            "publishable_primary_data": False,
+            "reason": "train_span.py uses legacy CSV inputs and resamples development data",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+}
+
+run_legacy_train() {
+  local data_dir="$RUN_ROOT/inputs/extracted/CODE-ACCORD-v1.0.0-annotations/annotated_data"
+  local checkpoint
+  checkpoint="$(legacy_checkpoint_path)"
+  [[ -d "$data_dir/entities" && -d "$data_dir/relations" ]] \
+    || die "legacy-train requires the extracted annotation CSVs under $data_dir"
+  uv run --frozen --python 3.10.20 python -B train_span.py \
+    --dataset accord --data-dir "$data_dir" \
+    --model-name microsoft/deberta-large \
+    --batch-size 16 --max-length 128 --lr 3e-5 \
+    --max-steps 3500 --warmup-steps 250 --max-span-width 8 \
+    --re-weight 1.0 --re-no-rel-weight 1.0 \
+    --neg-sample-ratio 3.0 --focal-gamma 2.0 \
+    --eval-every 100 --seed "$SEED" --primary-metric triple_f1 \
+    --label-smoothing 0.1 --re-focal-gamma 0.0 --re-neg-subsample 0.0 \
+    --re-context-span --doc-window-size 1 \
+    --re-comparison-boost 5.0 --re-boost-adaptive-steps 1000 \
+    --re-boost-adaptive-threshold 0.35 --re-boost-adaptive-threshold2 0.40 \
+    --re-boost-mid 3.5 --re-boost-end 2.0 \
+    --save-best-to "$checkpoint"
+  write_legacy_completion_marker
+}
+
+ensure_legacy_train() {
+  ensure_bootstrap
+  [[ "$ALLOW_LEGACY_DIAGNOSTIC" == true ]] \
+    || die "legacy-train is noncanonical; pass --allow-legacy-diagnostic to run it"
+  skip_or_run "legacy train_span.py diagnostic (seed $SEED)" legacy_train_complete \
+    run_legacy_train
 }
 
 ensure_generate_live() {
@@ -375,6 +471,11 @@ ensure_score() {
       --config configs/phase_b_path_a.json --run-id "$RUN_ID"
 }
 
+ensure_publishable() {
+  ensure_plan
+  die "publishable chain is blocked at canonical live training: phase_b.py model train accepts only --execution dry-run. Implement a reviewed CODE-SPLIT-1 JSONL adapter that emits seeds 42-49 checkpoint blobs/manifests before continuing with generate-live, threshold, pilot, verifier, and score. --stage legacy-train is diagnostic-only and cannot remove this gate."
+}
+
 note "updating source checkout from origin/$BRANCH"
 git pull --ff-only origin "$BRANCH"
 note "synchronizing the locked environment"
@@ -383,6 +484,7 @@ uv sync --frozen
 case "$STAGE" in
   bootstrap) ensure_bootstrap ;;
   plan) ensure_plan ;;
+  legacy-train) ensure_legacy_train ;;
   generate-live) ensure_generate_live ;;
   generate-replay) ensure_generate_replay ;;
   threshold) ensure_threshold ;;
@@ -392,6 +494,7 @@ case "$STAGE" in
   pilot-live) ensure_pilot_live ;;
   pilot-audit) ensure_pilot_audit ;;
   score) ensure_score ;;
+  publishable) ensure_publishable ;;
   *) die "unknown --stage: $STAGE (run with --help for the supported list)" ;;
 esac
 
