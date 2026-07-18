@@ -11,6 +11,7 @@ from acquisition import fetch_run
 from config import load_pipeline_config
 from doctor import run_doctor
 from model import generate_candidates, plan_training
+from threshold import select_threshold
 from phase_b_io import DataContractError
 from paths import PathContractError, RunLayout, discover_source_root
 from pilot import PilotInputs, run_verifier_pilot
@@ -163,6 +164,21 @@ def _parser() -> argparse.ArgumentParser:
     train.add_argument("--run-id", required=True)
     train.add_argument("--execution", required=True, choices=["dry-run"])
     train.add_argument("--seed", required=True, type=int)
+
+    threshold = subparsers.add_parser(
+        "select-threshold",
+        help="Select the development confidence threshold (VER-CONFIDENCE)",
+    )
+    threshold.add_argument("--config", default=DEFAULT_CONFIG)
+    threshold.add_argument("--run-id", required=True)
+    threshold.add_argument(
+        "--candidates",
+        required=True,
+        help="Run-relative eight-seed development candidates JSONL",
+    )
+    threshold.add_argument("--gold", help="Run-relative development gold JSONL")
+    threshold.add_argument("--split-manifest", help="Run-relative split manifest")
+    threshold.add_argument("--out", help="Run-relative threshold-selection.json output")
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
     score.add_argument("--config", default=DEFAULT_CONFIG)
@@ -405,6 +421,32 @@ def main(argv: list[str] | None = None) -> int:
                         "status": manifest["status"],
                         "execution_mode": manifest["execution_mode"],
                         "candidate_count": manifest["candidate_count"],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if args.stage == "select-threshold":
+            configured = config.paths
+            document = select_threshold(
+                layout,
+                config,
+                candidates_path=layout.resolve(args.candidates, must_exist=True),
+                gold_path=layout.resolve(
+                    args.gold or configured["development_gold"], must_exist=True
+                ),
+                split_manifest_path=layout.resolve(
+                    args.split_manifest or configured["split_manifest"], must_exist=True
+                ),
+                out_path=layout.resolve(args.out or configured["threshold_selection"]),
+            )
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": "selected",
+                        "selected_threshold": document["selected_threshold"],
                     },
                     sort_keys=True,
                 )

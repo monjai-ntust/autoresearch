@@ -32,10 +32,10 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 110 differing paths: 68
+With this document included, the comparison contains 112 differing paths: 70
 current-only paths, 33 baseline-only paths, and 9 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 125.
+paths and the current tree has 127.
 
 ## Current architecture and rewrite boundary
 
@@ -179,6 +179,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `records.py` | Defines typed immutable sentence, gold, candidate, and verdict records so stages exchange validated objects instead of ad hoc dictionaries. |
 | `scoring.py` | Scores all frozen conditions offline with directed entity-typed matching and emits paired outcomes plus provenance. |
 | `split.py` | Implements the deterministic seed-42 `586/103/173` split and isolation checks needed to prevent evaluation leakage. |
+| `threshold.py` | Canonical `select-threshold` producer of the frozen development confidence threshold (VER-CONFIDENCE): computes per-seed development strict Triple F1 over the grid, averages across eight seeds, and selects the argmax with the higher-threshold tie rule, reusing the scorer's gold/candidate loaders and matching its VER-CONFIDENCE matching. It never inspects test labels. |
 | `phase_b_statistics.py` | Implements paired hierarchical bootstrap intervals, paired t-tests, exact Wilcoxon tests, and Holm correction for the predeclared paired design. |
 | `verifier.py` | Builds canonical requests and prompts and supports dry, live, and replay execution with pinned model identity, warmup, retries, caching, validation, and telemetry. |
 
@@ -230,7 +231,8 @@ is a set relationship between the two trees, not provenance metadata.
 | Path | Current role and reason |
 | --- | --- |
 | `tests/test_artifact_contracts.py` | Protects retained historical pure functions, import safety, graph/rule behavior, and verifier contracts from cleanup regressions. |
-| `tests/test_phase_b_model.py` | Tests the candidate-generation adapter: dry-run planning, replay greedy/confidence/dedup parity, downstream round-trip, and rejection of orphan relations, oversized spans, recipe mismatch, and overwrite. |
+| `tests/test_phase_b_model.py` | Tests the candidate-generation adapter: dry-run planning, replay greedy/confidence/dedup parity, downstream round-trip, and rejection of orphan relations, oversized spans, recipe mismatch, and overwrite. Also tests the `model train` dry-run recipe/split binding. |
+| `tests/test_phase_b_threshold.py` | Tests development threshold selection: hand-derived argmax/tie-rule and false-positive curves, all-eight-seed coverage, overwrite refusal, and that the emitted file is consumable by the scorer's threshold loader. |
 | `tests/test_phase_b_pilot.py` | Exercises valid and invalid pilot selections, captures, determinism, and publication-admission barriers with synthetic data. |
 | `tests/test_phase_b_pipeline.py` | Tests config/path containment, typed records, metrics, split isolation, statistics, and offline scoring. |
 | `tests/test_phase_b_preparation.py` | Tests acquisition safety, official CSV/BIO parsing, alignment auditing, and deterministic materialization. |

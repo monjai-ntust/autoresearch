@@ -7,7 +7,7 @@ parent repository or `research-logs`.
 ## Current implementation boundary
 
 The B-05/B-06, development-only B-07, and B-05U slice implements one public
-module entry point with eight stages and focused contract tests:
+module entry point with nine stages and focused contract tests:
 
 - `doctor` validates the direct source checkout, exact Python/uv requirements,
   Git cleanliness, root-anchored output ignore behavior, configuration/matrix
@@ -38,6 +38,12 @@ module entry point with eight stages and focused contract tests:
   entity selection and `min(head, tail) * re` softmax-product confidence on
   typed CODE spans. Live encoder inference remains an externally gated stage and
   is not exposed by this slice.
+- `select-threshold` is the canonical producer of the frozen development
+  confidence threshold (VER-CONFIDENCE). It computes the per-seed development
+  strict Triple F1 over the frozen grid from the eight-seed development candidate
+  universe and development gold, averages across seeds, and selects the argmax
+  with the higher-threshold tie rule, never inspecting the test labels. It emits
+  the `threshold-selection.json` the `score` stage consumes.
 - `verifier` materializes the exact `CODE-VERIFIER-1` request universe, supports
   explicit `dry-run`, optional hash-gated `live`, and model-free `replay`
   execution, and retains environment, raw-response, retry, cache, token, and
@@ -371,6 +377,18 @@ Every JSONL record must end with a newline. Files must use stable ordering:
 The machine contracts are in `schemas/phase_b/records.schema.json`. In addition
 to schema validation, the runner recomputes every candidate ID from protocol,
 seed, and its typed directed strict key. SHA-256 identities are mandatory.
+
+The `predictions/dev/threshold-selection.json` file is now produced inside the
+run by the `select-threshold` stage from the eight-seed development candidate
+universe and development gold, rather than supplied externally:
+
+```bash
+uv run --frozen --python 3.10.20 python -B phase_b.py \
+  select-threshold \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-example \
+  --candidates predictions/dev/development-candidates.jsonl
+```
 
 The threshold file must conform to
 `schemas/phase_b/threshold-selection.schema.json`. It retains hashes for the
