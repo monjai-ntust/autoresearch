@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:phase-b:model-generation-plan:1.0",
+  "title": "Encoder candidate-generation plan record",
+  "description": "One record per prepared sentence emitted by the dry-run execution. It enumerates the deterministic inference universe without contacting a model or producing a candidate.",
+  "type": "object",
+  "required": [
+    "protocol_id",
+    "example_id",
+    "split",
+    "source_document_id",
+    "token_count",
+    "max_span_width",
+    "training_seed",
+    "checkpoint_sha256"
+  ],
+  "properties": {
+    "protocol_id": {"const": "B04-PATH-A-1.3"},
+    "example_id": {"type": "string", "format": "uuid"},
+    "split": {"enum": ["development", "test"]},
+    "source_document_id": {"type": "string", "minLength": 1},
+    "token_count": {"type": "integer", "minimum": 1},
+    "max_span_width": {"type": "integer", "minimum": 1},
+    "training_seed": {"type": "integer", "minimum": 42, "maximum": 49},
+    "checkpoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

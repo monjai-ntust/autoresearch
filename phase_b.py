@@ -10,6 +10,7 @@ from pathlib import Path
 from acquisition import fetch_run
 from config import load_pipeline_config
 from doctor import run_doctor
+from model import generate_candidates
 from phase_b_io import DataContractError
 from paths import PathContractError, RunLayout, discover_source_root
 from pilot import PilotInputs, run_verifier_pilot
@@ -131,6 +132,29 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="Run-relative index of four copied complete live-run evidence bundles",
     )
+
+    model = subparsers.add_parser(
+        "model", help="Canonical encoder candidate-generation adapter"
+    )
+    model_actions = model.add_subparsers(dest="model_action", required=True)
+    generate = model_actions.add_parser(
+        "generate-candidates",
+        help="Plan or replay CODE-STRICT-1 candidate generation for one training seed",
+    )
+    generate.add_argument("--config", default=DEFAULT_CONFIG)
+    generate.add_argument("--run-id", required=True)
+    generate.add_argument("--execution", required=True, choices=["dry-run", "replay"])
+    generate.add_argument("--sentences", help="Run-relative prepared-sentence JSONL")
+    generate.add_argument(
+        "--checkpoint-manifest",
+        required=True,
+        help="Run-relative encoder checkpoint identity manifest",
+    )
+    generate.add_argument(
+        "--prediction-ledger",
+        help="Run-relative frozen encoder prediction ledger required by replay",
+    )
+    generate.add_argument("--candidates-out", help="Run-relative candidate output JSONL")
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
     score.add_argument("--config", default=DEFAULT_CONFIG)
@@ -323,6 +347,42 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0 if audit["pilot_status"] == "pass" else 2
+
+        if args.stage == "model":
+            if args.model_action != "generate-candidates":
+                raise DataContractError(f"unsupported model action: {args.model_action!r}")
+            configured = config.paths
+            manifest = generate_candidates(
+                layout,
+                config,
+                execution_mode=args.execution,
+                sentences_path=layout.resolve(
+                    args.sentences or configured["sentences"], must_exist=True
+                ),
+                checkpoint_manifest_path=layout.resolve(
+                    args.checkpoint_manifest, must_exist=True
+                ),
+                candidates_out_path=layout.resolve(
+                    args.candidates_out or configured["candidates"]
+                ),
+                prediction_ledger_path=(
+                    layout.resolve(args.prediction_ledger, must_exist=True)
+                    if args.prediction_ledger
+                    else None
+                ),
+            )
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": manifest["status"],
+                        "execution_mode": manifest["execution_mode"],
+                        "candidate_count": manifest["candidate_count"],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
 
         configured = config.paths
         inputs = ScoreInputs(

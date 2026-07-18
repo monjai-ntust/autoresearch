@@ -32,10 +32,10 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 101 differing paths: 59
+With this document included, the comparison contains 108 differing paths: 66
 current-only paths, 33 baseline-only paths, and 9 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 116.
+paths and the current tree has 123.
 
 ## Current architecture and rewrite boundary
 
@@ -61,11 +61,15 @@ the active modules at the root is the current boundary for three reasons:
    That avoids a duplicate encoder while allowing the canonical runner to
    enforce its contracts at every boundary.
 
-This is not yet a complete end-to-end replacement. Canonical training and
-candidate extraction adapters still require parity evidence, and official data
-preparation correctly stops on nine unresolved typed alignment cases. The
-root-module layout is an intermediate reviewable surface, not a claim that the
-historical model paths have been superseded.
+This is not yet a complete end-to-end replacement. `model.py` adds the canonical
+`model generate-candidates` adapter with `dry-run` and `replay` executions,
+which transform a frozen encoder prediction ledger into typed `CODE-STRICT-1`
+candidates under the output contract; live encoder inference and fixture parity
+against `inference_kg.py` remain pending, so that historical script is not yet
+eligible for removal. Canonical training adapters still require parity evidence,
+and official data preparation now materializes the raw/typed-strict dual view.
+The root-module layout is an intermediate reviewable surface, not a claim that
+the historical model paths have been superseded.
 
 The similarly named paths below are not one-to-one rewrites:
 
@@ -149,6 +153,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `docs/phase_b_workflow.md` | Gives standalone commands, stage gates, output layout, environment assumptions, and reproducibility limitations for the canonical runner. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
+| `docs/historical-transition-inventory.md` | B-05U family-level record of why each legacy executable family cannot remain independent, its canonical successor stage, and its raw-evidence disposition. |
 | `docs/phase_b_root_module_mapping.md` | Maps every former package module to its root host, records the two standard-library collision renames, and states the package-removal parity gates. |
 | `docs/source-change-inventory.md` | Maintains this exhaustive, reasoned comparison with the fixed baseline and prevents future source edits from losing their deletion/reuse/rewrite rationale. |
 
@@ -163,6 +168,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `doctor.py` | Checks checkout identity, environment, ignore rules, resources, and worktree constraints and emits a machine-readable preflight manifest. |
 | `phase_b_io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
 | `metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
+| `model.py` | Canonical `model generate-candidates` adapter: `dry-run` plans the per-sentence inference universe, and `replay` transforms a frozen encoder prediction ledger into typed `CODE-STRICT-1` candidates bound to split and checkpoint identities. It reproduces the historical greedy non-overlap selection and softmax-product confidence while confining output to `output/<run-id>/`. |
 | `paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
 | `pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
 | `preparation.py` | Parses the immutable official corpus, audits BIO/relation alignment, hard-stops unresolved typed cases, and materializes deterministic records only after validation. |
@@ -193,6 +199,10 @@ is a set relationship between the two trees, not provenance metadata.
 | `schemas/phase_b/gold-alignment-audit.schema.json` | Validates the hard-stop audit for ambiguous or missing typed BIO alignment rather than allowing silent data loss. |
 | `schemas/phase_b/input-acquisition-manifest.schema.json` | Validates archive origin, licensing acknowledgment, size, hash, extraction, and cache status. |
 | `schemas/phase_b/metrics.schema.json` | Validates machine-readable offline metric counts and precision/recall/F1 outputs. |
+| `schemas/phase_b/model-checkpoint-manifest.schema.json` | Validates the encoder checkpoint identity (seed, split, recipe, checkpoint/split hashes) that a prediction ledger and its candidates are bound to. |
+| `schemas/phase_b/model-generation-manifest.schema.json` | Validates the `model generate-candidates` stage manifest for both dry-run and replay executions. |
+| `schemas/phase_b/model-generation-plan.schema.json` | Validates the per-sentence dry-run inference plan emitted without contacting a model. |
+| `schemas/phase_b/model-prediction-ledger.schema.json` | Validates the frozen per-sentence encoder span/relation scores consumed by replay candidate generation. |
 | `schemas/phase_b/outcomes.schema.json` | Validates paired candidate- and sentence-level outcomes required by confidence intervals and paired tests. |
 | `schemas/phase_b/prepared-sentence.schema.json` | Validates each normalized, provenance-bearing CODE-ACCORD sentence record. |
 | `schemas/phase_b/records.schema.json` | Validates gold, candidate, and verifier record variants at stage boundaries. |
@@ -216,6 +226,7 @@ is a set relationship between the two trees, not provenance metadata.
 | Path | Current role and reason |
 | --- | --- |
 | `tests/test_artifact_contracts.py` | Protects retained historical pure functions, import safety, graph/rule behavior, and verifier contracts from cleanup regressions. |
+| `tests/test_phase_b_model.py` | Tests the candidate-generation adapter: dry-run planning, replay greedy/confidence/dedup parity, downstream round-trip, and rejection of orphan relations, oversized spans, recipe mismatch, and overwrite. |
 | `tests/test_phase_b_pilot.py` | Exercises valid and invalid pilot selections, captures, determinism, and publication-admission barriers with synthetic data. |
 | `tests/test_phase_b_pipeline.py` | Tests config/path containment, typed records, metrics, split isolation, statistics, and offline scoring. |
 | `tests/test_phase_b_preparation.py` | Tests acquisition safety, official CSV/BIO parsing, alignment auditing, and deterministic materialization. |

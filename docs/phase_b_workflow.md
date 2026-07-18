@@ -6,8 +6,8 @@ parent repository or `research-logs`.
 
 ## Current implementation boundary
 
-The B-05/B-06 and development-only B-07 slice implements one public module
-entry point with seven stages and focused contract tests:
+The B-05/B-06, development-only B-07, and B-05U slice implements one public
+module entry point with eight stages and focused contract tests:
 
 - `doctor` validates the direct source checkout, exact Python/uv requirements,
   Git cleanliness, root-anchored output ignore behavior, configuration/matrix
@@ -25,6 +25,14 @@ entry point with seven stages and focused contract tests:
   their exact byte/SHA-256 identities, parses all rows, audits the one approved
   UUID repair, and attempts typed directed `CODE-STRICT-1` reconstruction plus
   byte-identical `CODE-SPLIT-1` materialization.
+- `model generate-candidates` is the canonical successor to `inference_kg.py`.
+  Its `dry-run` execution validates prepared sentences plus an encoder
+  checkpoint identity and writes a per-sentence inference plan without calling a
+  model; its `replay` execution transforms a frozen encoder prediction ledger
+  into typed `CODE-STRICT-1` candidates, reproducing the greedy non-overlapping
+  entity selection and `min(head, tail) * re` softmax-product confidence on
+  typed CODE spans. Live encoder inference remains an externally gated stage and
+  is not exposed by this slice.
 - `verifier` materializes the exact `CODE-VERIFIER-1` request universe, supports
   explicit `dry-run`, optional hash-gated `live`, and model-free `replay`
   execution, and retains environment, raw-response, retry, cache, token, and
@@ -318,8 +326,25 @@ claim that the actual B-07 pilot has run.
 
 ## 8. Supply immutable offline-scoring inputs
 
-Until canonical inference is implemented,
-place the following externally produced, schema-valid files at their configured
+`predictions/test/candidates.jsonl` can now be produced inside the run by
+`model generate-candidates --execution replay` from a frozen encoder prediction
+ledger and checkpoint manifest, rather than supplied externally:
+
+```bash
+uv run --frozen --python 3.10.20 python -B phase_b.py \
+  model generate-candidates \
+  --config configs/phase_b_path_a.json \
+  --run-id path-a-example \
+  --execution replay \
+  --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
+  --prediction-ledger predictions/test/prediction-ledger.jsonl
+```
+
+The generated candidates are publication inputs only when the prediction ledger
+and checkpoint identity were themselves produced by the gated live encoder
+inference stage; a synthetic or externally supplied ledger yields development
+evidence only. Until live inference exists, place the remaining
+externally produced, schema-valid files at their configured
 paths inside a separate development run only. Such files are not publication
 inputs unless their provenance and hashes satisfy the frozen protocol:
 
