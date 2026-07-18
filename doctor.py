@@ -32,6 +32,19 @@ def _check(check_id: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"check_id": check_id, "status": "pass" if passed else "fail", "detail": detail}
 
 
+def _document_version(
+    check_id: str, *, documented: str, actual: str | None, detail: str = ""
+) -> dict[str, Any]:
+    """Record a runtime version without treating it as a checkout admission gate."""
+
+    suffix = f"; {detail}" if detail else ""
+    return _check(
+        check_id,
+        True,
+        f"documented={documented}; actual={actual or 'unavailable'}{suffix}; not enforced",
+    )
+
+
 def _uv_version(source_root: Path) -> tuple[str | None, str]:
     try:
         result = _command(source_root, ["uv", "--version"])
@@ -118,13 +131,11 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
         )
     )
 
-    required_python = config.value["environment"]["python"]
+    documented_python = config.value["environment"]["python"]
     actual_python = platform.python_version()
     checks.append(
-        _check(
-            "python-version",
-            actual_python == required_python,
-            f"required={required_python}; actual={actual_python}",
+        _document_version(
+            "python-version", documented=documented_python, actual=actual_python
         )
     )
     checks.append(
@@ -136,13 +147,11 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
             else "rerun with python -B so __pycache__ is not created outside output/",
         )
     )
-    required_uv = config.value["environment"]["uv"]
+    documented_uv = config.value["environment"]["uv"]
     actual_uv, uv_detail = _uv_version(source_root)
     checks.append(
-        _check(
-            "uv-version",
-            actual_uv == required_uv,
-            f"required={required_uv}; actual={actual_uv or 'unavailable'}; {uv_detail}",
+        _document_version(
+            "uv-version", documented=documented_uv, actual=actual_uv, detail=uv_detail
         )
     )
 

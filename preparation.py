@@ -556,6 +556,7 @@ def _load_relations_all(
     list[dict[str, Any]],
 ]:
     relations: dict[str, list[RelationRecord]] = {}
+    raw_relation_ids: set[str] = set()
     repair_ledger: list[dict[str, Any]] = []
     row_count = positive_count = none_count = 0
     strict_keys: dict[tuple[Any, ...], RelationRecord] = {}
@@ -570,6 +571,7 @@ def _load_relations_all(
             file_label="annotated_data/relations/all.csv",
             entities=entities,
         )
+        raw_relation_ids.add(example_id)
         if ledger is not None:
             repair_ledger.append(ledger)
         entity = entities.get(example_id)
@@ -732,18 +734,23 @@ def _load_relations_all(
         "relation_rows": row_count,
         "positive_relation_rows": positive_count,
         "none_relation_rows": none_count,
-        "relation_covered_sentences": len(relations),
-        "entity_only_sentences": len(set(entities) - set(relations)),
+        # These are immutable-corpus counts, not typed-strict eligibility counts.
+        # A sentence whose relation markers are all ineligible remains relation-covered
+        # in raw provenance and must not make the source-identity check drift.
+        "relation_covered_sentences": len(raw_relation_ids),
+        "entity_only_sentences": len(set(entities) - raw_relation_ids),
     }, audit, raw_rows
 
 
 def _relation_task_ids(
     path: Path, entities: dict[str, EntityRecord], file_label: str
-) -> tuple[int, set[str], int]:
+) -> tuple[int, set[str], int, int]:
     ids: set[str] = set()
+    raw_ids: set[str] = set()
     repairs = 0
     rows = _read_csv(path, RELATION_HEADER)
     for row_number, row in rows:
+        raw_ids.add(row["example_id"])
         example_id, ledger = _repair_relation_id(
             row,
             row_number=row_number,
@@ -760,7 +767,7 @@ def _relation_task_ids(
         if row["relation_type"] not in {*RELATION_TYPES, "none"}:
             raise DataContractError(f"{file_label} record {row_number} has an unknown relation")
         ids.add(example_id)
-    return len(rows), ids, repairs
+    return len(rows), ids, repairs, len(raw_ids)
 
 
 def _annotation_bundle_sha256(contract: DatasetContract) -> str:
@@ -1059,12 +1066,12 @@ def _prepare_corpus(
                 f"CODE-ACCORD {field} mismatch: expected {contract.counts[field]}, got {actual}"
             )
 
-    train_rows, relation_train_ids, train_repairs = _relation_task_ids(
+    train_rows, relation_train_ids, train_repairs, train_raw_id_count = _relation_task_ids(
         annotation_paths["annotated_data/relations/train.csv"],
         entities_all,
         "annotated_data/relations/train.csv",
     )
-    test_rows, relation_test_ids, test_repairs = _relation_task_ids(
+    test_rows, relation_test_ids, test_repairs, test_raw_id_count = _relation_task_ids(
         annotation_paths["annotated_data/relations/test.csv"],
         entities_all,
         "annotated_data/relations/test.csv",
@@ -1072,8 +1079,10 @@ def _prepare_corpus(
     relation_split_audit = {
         "train_rows": train_rows,
         "test_rows": test_rows,
-        "train_unique_sentence_ids": len(relation_train_ids),
-        "test_unique_sentence_ids": len(relation_test_ids),
+        # Preserve physical task-file coverage before the approved ID repair;
+        # canonicalized IDs below are used for every entity/split intersection.
+        "train_unique_sentence_ids": train_raw_id_count,
+        "test_unique_sentence_ids": test_raw_id_count,
         "train_test_sentence_id_overlap": len(relation_train_ids & relation_test_ids),
         "entity_test_ids_in_relation_train": len(set(entities_test) & relation_train_ids),
         "entity_test_ids_in_relation_test": len(set(entities_test) & relation_test_ids),

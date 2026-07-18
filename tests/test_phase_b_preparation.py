@@ -19,6 +19,8 @@ from preparation import (
     DatasetContract,
     EntityRecord,
     _alignment_choice,
+    _load_entities,
+    _load_relations_all,
     _locate_annotation_files,
     _materialize_dataset,
     _parse_markers,
@@ -331,7 +333,10 @@ class PreparationTests(unittest.TestCase):
             )
             with relation_path.open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.reader(handle))
-            for row_index in (1, 2):
+            # Make every relation for the first sentence typed-strict ineligible.
+            # Raw corpus coverage must remain 857 even though the strict relation
+            # map now has only 856 sentence keys.
+            for row_index in (1, 2, 3, 4):
                 words = rows[row_index][1].split()
                 rows[row_index][3] = _tagged(words, 1, 2)
             _write_csv(relation_path, rows[0], rows[1:])
@@ -346,19 +351,28 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(audit["summary"]["none_relation_rows_scanned"], 1000)
             self.assertEqual(audit["summary"]["accepted_uuid_repair_rows"], 1)
             self.assertEqual(audit["summary"]["marker_arguments_scanned"], 6658)
-            self.assertEqual(audit["summary"]["exact_span_alignments"], 6656)
-            self.assertEqual(audit["summary"]["unresolved_marker_arguments"], 2)
-            self.assertEqual(audit["summary"]["affected_positive_relation_rows"], 2)
+            self.assertEqual(audit["summary"]["exact_span_alignments"], 6654)
+            self.assertEqual(audit["summary"]["unresolved_marker_arguments"], 4)
+            self.assertEqual(audit["summary"]["affected_positive_relation_rows"], 4)
             self.assertEqual(
                 audit["summary"]["unresolved_categories"],
-                {"no_bio_span_overlap": 2},
+                {"no_bio_span_overlap": 4},
             )
             self.assertEqual(
                 {issue["official_entity_partition"] for issue in audit["issues"]},
                 {"train"},
             )
-            self.assertEqual(audit["summary"]["typed_strict_eligible_positive_rows"], 3327)
-            self.assertEqual(sum(len(values) for values in relations.values()), 3327)
+            self.assertEqual(audit["summary"]["typed_strict_eligible_positive_rows"], 3325)
+            self.assertEqual(sum(len(values) for values in relations.values()), 3325)
+            self.assertEqual(len(relations), 856)
+            entities = _load_entities(paths["annotated_data/entities/all.csv"])
+            _, _, relation_counts, _, _ = _load_relations_all(
+                paths["annotated_data/relations/all.csv"],
+                entities,
+                expected_repaired_uuid=contract.repaired_uuid,
+            )
+            self.assertEqual(relation_counts["relation_covered_sentences"], 857)
+            self.assertEqual(relation_counts["entity_only_sentences"], 5)
             self.assertEqual(sum(row["relation"] != "none" for row in raw_rows), 3329)
 
     def test_official_shape_repair_alignment_split_and_second_materialization(self):

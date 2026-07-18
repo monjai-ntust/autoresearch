@@ -89,7 +89,7 @@ The similarly named paths below are not one-to-one rewrites:
 | Path | Current edit and reason |
 | --- | --- |
 | `.gitignore` | Ignores `/output/`, checkpoints, and downloaded/generated dataset directories while explicitly allowing the tracked CODE-ACCORD fixture. The obsolete ignore rule for tracked `results.tsv` is absent. This enforces the single temporary-output root without hiding retained evidence. |
-| `README.md` | Defines the repository as a standalone publication artifact, separates canonical commands from historical provenance paths, documents datasets, execution gates, outputs, limitations, and links this inventory. The baseline upstream pretraining description did not describe the retained research implementation. |
+| `README.md` | Defines the repository as a standalone publication artifact, separates canonical commands from historical provenance paths, documents fresh-clone preparation without historical checkpoints, environment-version recording, datasets, execution gates, outputs, limitations, and links this inventory. The baseline upstream pretraining description did not describe the retained research implementation. |
 | `bench_gpu.py` | Places benchmark execution behind `main()` and an import guard. Benchmark behavior remains available, while importing the module no longer downloads a model or allocates accelerator memory. |
 | `eval_graph_rag.py` | Describes retrieval as unique whitespace-token overlap instead of BM25-style retrieval. Runtime behavior is unchanged; the text now states the actual algorithm and avoids overstating the evaluation method. |
 | `pyproject.toml` | Names the publication artifact, removes unused upstream packages, and declares dependencies used by retained code (`peft`, `pytorch-crf`, and `safetensors`) while keeping the required Torch/Transformers/data stack. This makes installation reflect reachable code. |
@@ -152,7 +152,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `configs/phase_b_experiment_matrix.json` | Freezes the four evaluated conditions (`VER-RAW`, `VER-CONFIDENCE`, `VER-SIMPLE`, and `VER-CORRECTIVE`) in one machine-validated authority. |
 | `configs/phase_b_path_a.json` | Freezes dataset, model, seed, split, training, threshold, statistics, runtime, and tracked-resource identities for the canonical protocol. |
 | `configs/phase_b_section5_evidence.json` | Registers the two historical ledgers and seven claim families as immutable secondary evidence so reconciliation cannot silently promote them to canonical results. |
-| `docs/phase_b_workflow.md` | Gives standalone commands, stage gates, output layout, environment assumptions, and reproducibility limitations for the canonical runner. |
+| `docs/phase_b_workflow.md` | Gives standalone commands, fresh-clone/no-checkpoint bootstrap guidance, stage gates, output layout, non-enforcing environment-version recording, and reproducibility limitations for the canonical runner. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
 | `docs/historical-transition-inventory.md` | B-05U family-level record of why each legacy executable family cannot remain independent, its canonical successor stage, and its raw-evidence disposition. |
@@ -169,13 +169,13 @@ is a set relationship between the two trees, not provenance metadata.
 | `phase_b.py` | Exposes one command surface for `doctor`, `reconcile`, `fetch`, `prepare`, verifier modes, pilot audit, and scoring, keeping stage transitions explicit. |
 | `config.py` | Loads and strictly validates the frozen config, experiment matrix, schemas, and tracked-resource identities so protocol drift fails early. |
 | `constants.py` | Centralizes frozen entity, relation, condition, schema, and protocol identifiers to prevent spelling or ordering drift between stages. |
-| `doctor.py` | Checks checkout identity, environment, ignore rules, resources, and worktree constraints and emits a machine-readable preflight manifest. |
+| `doctor.py` | Checks checkout identity, ignore rules, resources, and worktree constraints; records configured-reference and actual Python/uv versions without enforcing an exact version; and emits a machine-readable preflight manifest. |
 | `phase_b_io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
 | `metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
 | `model.py` | Canonical `model` stage. `generate-candidates` (`dry-run` plan; `replay` of a frozen encoder prediction ledger into typed `CODE-STRICT-1` candidates; `live` runs the retained `models.bert_kg_encoder` to produce the ledger then applies the identical transform, hash-verifying the checkpoint blob) and `train` (`dry-run` plan binding the frozen recipe and declaring the checkpoint-manifest contract). All output is confined to `output/<run-id>/`; `live` inference and `live` training are externally gated on the accelerator. |
 | `paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
 | `pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
-| `preparation.py` | Parses the immutable official corpus, audits BIO/relation alignment, hard-stops unresolved typed cases, and materializes deterministic records only after validation. |
+| `preparation.py` | Parses the immutable official corpus, preserves raw relation-coverage statistics separately from typed-strict eligibility, audits BIO/relation alignment, and materializes deterministic records only after validation. |
 | `reconciliation.py` | Verifies historical ledger identity and physical defects while keeping those ledgers secondary to canonical evidence. |
 | `records.py` | Defines typed immutable sentence, gold, candidate, and verdict records so stages exchange validated objects instead of ad hoc dictionaries. |
 | `scoring.py` | Scores all frozen conditions offline with directed entity-typed matching and emits paired outcomes plus provenance. |

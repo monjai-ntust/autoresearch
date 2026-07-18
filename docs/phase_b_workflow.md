@@ -9,9 +9,10 @@ parent repository or `research-logs`.
 The B-05/B-06, development-only B-07, and B-05U slice implements one public
 module entry point with nine stages and focused contract tests:
 
-- `doctor` validates the direct source checkout, exact Python/uv requirements,
-  Git cleanliness, root-anchored output ignore behavior, configuration/matrix
-  identities, and tracked artifact hashes. It creates only
+- `doctor` validates the direct source checkout, Git cleanliness, root-anchored
+  output ignore behavior, configuration/matrix identities, and tracked artifact
+  hashes. It records the configured reference and actual Python/uv versions but
+  does not require an exact Python or uv version. It creates only
   `output/<run-id>/...` and records `manifests/00-checkout-manifest.json`.
 - `fetch` downloads the immutable Zenodo CODE-ACCORD v1.0.0 archive with safe
   partial-file resume, then requires exactly 101,265,616 bytes and MD5
@@ -85,15 +86,16 @@ not training, final-test access, live verifier calls, or reporting a result.
 ## 1. Prepare the standalone checkout
 
 Clone the source repository directly, check out the release commit, and run from
-its root. Install exactly uv 0.11.26; uv must then provision Python 3.10.20 from
-the lockfile:
+its root. Install uv and synchronize the locked environment:
 
 ```bash
-uv sync --frozen --python 3.10.20
+uv sync --frozen
 ```
 
 Do not copy a parent-repository path into the configuration. The sole writable
-runtime root is `output/`, which is root-anchored in `.gitignore`.
+runtime root is `output/`, which is root-anchored in `.gitignore`. The current
+reference environment records Python 3.10.20 and uv 0.11.26, but those are
+documented in the checkout manifest rather than enforced by `doctor`.
 
 ## 2. Validate the checkout and open one run
 
@@ -102,20 +104,32 @@ alphanumeric character, and otherwise uses only letters, digits, `.`, `_`, and
 `-`.
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   doctor \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
 ```
 
 The command exits 0 only when all implemented preflight checks pass. It exits 2
-and writes a blocked checkout manifest when the environment or checkout is not
-compliant. It refuses an existing run ID and rejects symlink, junction,
+and writes a blocked checkout manifest when the checkout is not compliant. Its
+manifest records both the configured reference and actual Python/uv versions,
+without treating version differences as a failure. It refuses an existing run ID and rejects symlink, junction,
 absolute-path, and `..` escapes.
 
 The checkout manifest always reports that publication execution is not yet
 admitted because B-07 approval has not occurred. A passing B-05 doctor is not
 permission to run the gated training or final-test verifier work.
+
+### Fresh clone: no checkpoints or previous run required
+
+Start with a new run ID and execute the first three stages in order: `doctor`,
+`fetch`, then `prepare`. Do not start with `prepare`, and do not reuse an
+`output/<run-id>/` directory from another checkout. No encoder checkpoint,
+prediction ledger, verifier record, or historical result is needed for these
+stages: `fetch` downloads the immutable CODE-ACCORD archive into the new run,
+and `prepare` derives the raw-provenance/typed-strict data from it. Checkpoints
+are required only later for `model generate-candidates`; the absent historical
+checkpoints are provenance, not a prerequisite for fresh-clone preparation.
 
 ## 3. Reconcile the frozen Section 5 ledgers
 
@@ -123,7 +137,7 @@ This stage is read-only with respect to the ledgers and does not require the
 CODE-ACCORD download:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   reconcile \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -150,7 +164,7 @@ The fetch stage requires the passing checkout manifest created by `doctor` in
 the same run:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   fetch \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -165,7 +179,7 @@ is accepted until its size and upstream MD5 match. The archive remains beneath
 ## 5. Audit and prepare CODE-ACCORD
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   prepare \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example
@@ -181,7 +195,10 @@ overlap none. `raw-relation-provenance.jsonl` preserves all 4,329 rows;
 `typed-strict-eligibility.jsonl` records eligibility for the 3,329 positive
 rows; the typed view contains 3,320 eligible rows and 3,319 unique directed
 typed triples. Do not edit the downloaded CSVs or treat the audit as permission
-to omit raw evidence.
+to omit raw evidence. Source-identity checks retain the immutable raw counts of
+857 relation-covered and five entity-only sentences; typed-strict eligibility is
+reported separately and can cover fewer sentences when every relation marker in
+a source sentence is ineligible.
 
 The approved dual-view stage emits deterministic `data-prepared/`, the repair
 ledger, split/data manifests, test gold, distributions, attribution, and two

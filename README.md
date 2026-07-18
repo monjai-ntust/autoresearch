@@ -78,7 +78,9 @@ edit that changes the comparison or a path's role.
 
 ## Repository status
 
-- Python 3.10 is the selected and minimum supported Python version.
+- Python 3.10 is the selected and minimum supported Python version. The Phase B
+  config records Python 3.10.20 and uv 0.11.26 as reference versions; `doctor`
+  records the actual versions without requiring an exact match.
 - The committed lockfile describes the current source environment; it is not an exact manifest of every historical run.
 - Historical raw logs and model checkpoints are not included.
 - The canonical CODE-ACCORD downloader is included, but the archive is not.
@@ -95,8 +97,9 @@ edit that changes the comparison or a path's role.
 ## Installation
 
 Install [uv](https://docs.astral.sh/uv/). For the canonical Phase B workflow,
-use the exact command and versions in `docs/phase_b_workflow.md`. The shorter
-command below is retained for historical-script development:
+use the fresh-clone sequence in `docs/phase_b_workflow.md`; it records, rather
+than enforces, the Python and uv versions. The shorter command below is retained
+for historical-script development:
 
 ```bash
 uv sync
@@ -106,7 +109,7 @@ The tracked support files are part of the reproducibility contract:
 
 | Path | Role |
 |---|---|
-| `.python-version` | Selects Python 3.10; the Path A config separately pins patch version 3.10.20. |
+| `.python-version` | Selects Python 3.10; the Path A config records 3.10.20 as its reference patch version. |
 | `pyproject.toml` | Declares the package metadata and direct dependencies used by `uv sync`. |
 | `uv.lock` | Locks the resolved environment used for validation of this checkout. |
 | `.gitignore` | Excludes local datasets, checkpoints, caches, and generated outputs; it intentionally does not add a log rule. |
@@ -419,7 +422,7 @@ For the reported full treatment, first run `--prep-data data/dapt_zh_laws`, then
 Run the publication-critical pure-function tests without downloading a model or dataset:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B -m unittest discover -s tests -v
+uv run --frozen python -B -m unittest discover -s tests -v
 ```
 
 The suite covers immutable resumable acquisition, safe selective ZIP extraction,
