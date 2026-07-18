@@ -29,10 +29,11 @@ module entry point with nine stages and focused contract tests:
   their exact byte/SHA-256 identities, parses all rows, audits the one approved
   UUID repair, and attempts typed directed `CODE-STRICT-1` reconstruction plus
   byte-identical `CODE-SPLIT-1` materialization.
-- `model train` (`--execution dry-run`) records the frozen recipe, one requested
-  seed, and the checkpoint-manifest contract. It is a planning/provenance
-  command, not a checkpoint generator; canonical live training under the pinned
-  accelerator profile is not yet exposed by this slice.
+- `model train` records the frozen recipe for one seed with `--execution
+  dry-run`, or invokes the original `train_span.py` loop in opt-in canonical
+  mode with `--execution live`. Live mode reads only the prepared train and
+  development JSONL, pins the DeBERTa revision, writes a resumable full state,
+  never loads test data, and emits a schema-bound checkpoint under the run.
 - `model generate-candidates` is the canonical successor to `inference_kg.py`.
   Its `dry-run` execution validates prepared sentences plus an encoder
   checkpoint identity and writes a per-sentence inference plan without calling a
@@ -73,20 +74,23 @@ typed-strict gold: nine of 6,658 positive-relation marker arguments cannot
 resolve to one authoritative typed BIO span. `prepare` inventories all nine in
 `data-prepared/gold-alignment-audit.json`, preserves every raw row, and makes
 only those nine rows ineligible for typed strict gold; it does not project,
-expand, or manually type an endpoint. Deterministic checkpoint rebuilding,
-inference, threshold selection, the actual model-backed development pilot,
+expand, or manually type an endpoint. The canonical checkpoint adapter and live
+candidate inference are implemented; their accelerator results, eight-seed
+aggregation, threshold selection, the actual model-backed development pilot,
 publication rendering, and parent-side archival are not completed by this
-slice. Historical standalone scripts remain provenance paths and are not
-publication commands for Path A. In particular, `train_span.py` reads legacy
-annotation CSVs and constructs its own development split, so it cannot produce
-a `CODE-SPLIT-1` checkpoint from the prepared primary data without an adapter.
+source-only slice. Historical standalone scripts remain provenance paths and
+are not publication commands for Path A. Direct `train_span.py` execution still
+reads legacy annotation CSVs and creates its old random development split; only
+`phase_b.py model train --execution live` opts it into the prepared
+`CODE-SPLIT-1` contract.
 Expensive publication training and final-test Qwen execution remain blocked
 until the B-07 evidence exists and the user makes the required go/no-go
 decision.
 
 [`Phase C migration plan`](phase_c_migration.md) records the raw/typed design
-lineage and its remaining execution gates. B-05U approves its materialization,
-not training, final-test access, live verifier calls, or reporting a result.
+lineage and its remaining execution gates. B-05C approves the compatibility
+trainer implementation; it does not waive the B-07 gate for the full eight-seed
+run, final-test access, live verifier calls, or reporting a result.
 
 ## 1. Prepare the standalone checkout
 
@@ -273,7 +277,7 @@ identical before atomic promotion.
 The primary workflow requires eight independently trained encoder checkpoints,
 one for each seed `42` through `49`. Each checkpoint must be trained only on
 `output/<run-id>/data-prepared/train.jsonl`, selected only against the matching
-`development.jsonl`/`development-gold.jsonl`, and kept away from `test.jsonl`
+`development.jsonl`, and kept away from `test.jsonl`
 and `test-gold.jsonl` until the protocol's final evaluation stage. The prepared
 split manifest is the authoritative source of those memberships; do not let a
 trainer resample or repartition them.
@@ -290,11 +294,65 @@ uv run --frozen python -B phase_b.py \
   --seed 42
 ```
 
-It writes `manifests/model-train-dry-run.json`, whose status is `planned` and
-whose `expected_checkpoint_dir` is `checkpoints/seed-42`. The current planner
-records one seed per run and intentionally refuses to overwrite that record.
-The future training adapter must retain equivalent per-seed training evidence
-for seeds 43–49 in the run where it writes those checkpoints.
+It writes `manifests/model-train-dry-run-seed-42.json`. At the approved external
+seed-42 smoke checkpoint, run the canonical live stage:
+
+```bash
+uv run --frozen python -B phase_b.py \
+  model train \
+  --config configs/phase_b_path_a.json \
+  --run-id "$RUN_ID" \
+  --execution live \
+  --seed 42
+```
+
+This thin orchestration call invokes the original `train_span.py` loop; it does
+not add a parallel encoder or replacement loss loop. Canonical mode pins the
+DeBERTa revision, adapts the prepared records into the trainer's existing
+example representation, uses the frozen recipe, selects by development Triple
+F1 with the earliest-step tie rule, and never loads the test split.
+
+Every completed development evaluation atomically refreshes
+`checkpoints/seed-42/restart-state.pt`, including model, optimizer, scheduler,
+Python/Torch/CUDA RNG, and train-sampler order/cursor. After a machine or command
+failure, rerun the identical live command; it resumes from that full state.
+
+Completion creates the selected checkpoint, restart state, training summary,
+checkpoint manifest, seed-specific stage manifest, progress log, and dataset
+compatibility audit beneath the same run. The checkpoint manifest binds the
+model to the fetched archive, acquisition/annotation/prepared/split identities,
+train/development files, code/config/model revision, selected metric, restart
+state, and source commit. Candidate generation rechecks those identities and
+rejects a copied, legacy-split, stale, or renamed checkpoint.
+
+### Historical-data comparability limit
+
+The pre–Phase A Git tree recovers only
+`data/code_accord/entities/train.csv`. Its Git blob and LF-normalized SHA-256
+match the official freshly downloaded entity-training CSV. The historical
+relation/test bytes and its seed-specific random train/development memberships
+were never committed. The audit therefore records
+`partial_match_full_legacy_equivalence_unavailable`: this is a new reproducible
+canonical rerun, not proof that the old aggregate statistics are unchanged.
+Matching the dataset name is not accepted as stronger evidence.
+The complete invariant/difference table and historical per-seed evidence are in
+[`model-training compatibility contract`](model-training-compatibility.md).
+
+### Debug runner and B-07 boundary
+
+Run or resume the selected seed with:
+
+```bash
+scripts/phase_b_debug.sh --run-id "$RUN_ID" --stage train-live --seed 42
+```
+
+`--stage publishable --seed 42` runs the dry plan, canonical training, and
+development candidate generation, then stops at B-07 for smoke/restart review.
+The default `available` sweep parser-checks live training but reports it as
+blocked rather than unexpectedly starting a 3,500-step job. After B-07
+approval, repeat the seed-specific training and development-candidate commands
+for seeds `42` through `49`; final-test inference and live verification remain
+separately gated.
 
 ### Legacy trainer: debug only, never publishable
 
@@ -317,8 +375,8 @@ scripts/phase_b_debug.sh --run-id "$RUN_ID" --allow-legacy-diagnostic
 It uses only the run-local extracted annotation CSVs and writes its checkpoint
 plus a `completed_noncanonical_diagnostic` marker under
 `output/$RUN_ID/checkpoints/legacy-train-span/`. The explicit acknowledgement
-is required because this trainer constructs its own legacy development split
-and cannot pin the DeBERTa revision. Its marker records
+is required because this direct command constructs its own legacy development
+split and is outside the canonical manifest chain. Its marker records
 `publishable_primary_data: false`; the debug runner will not use that checkpoint
 for canonical candidate generation or let it satisfy `--stage publishable`.
 
@@ -328,96 +386,42 @@ The locked environment uses PyTorch `2.9.1+cu130`, not CUDA 12.8. NVIDIA GB10
 reports compute capability 12.1; the former CUDA 12.8 wheel supports only up to
 12.0 and fails during NVRTC compilation of DeBERTa kernels with
 `invalid value for --gpu-architecture`. After pulling the CUDA-13 lockfile,
-run `uv sync --frozen` before retrying the diagnostic. The runner checks the
-active device's capability and bundled CUDA major version before loading the
-model, and fails with a concise environment message when that known-incompatible
-combination is present.
+run `uv sync --frozen` before retrying training. The diagnostic runner checks
+the active device capability and bundled CUDA major version before model load;
+canonical training additionally records Python, Torch, CUDA runtime, CUDA
+availability, and device identity in its training summary.
 
-### Current executable boundary
+### Canonical versus direct training
 
-This source revision has **no canonical live-checkpoint command**. The
-`phase_b.py model train` parser accepts only `--execution dry-run`. Do not
-substitute this incompatible historical command:
+Do not substitute a direct `python -B train_span.py --dataset accord ...`
+command for the canonical stage. Direct invocation deliberately preserves the
+historical CSV/random-split defaults. Only `phase_b.py model train --execution
+live` supplies the prepared split, revision pin, restart paths, no-test guard,
+and manifest validation required for Path A.
+
+### Live candidate handoff
+
+After the live training manifest is complete, generate development candidates
+from that run's checkpoint. The checkpoint manifest is created by the trainer;
+do not hand-author or trim its schema-bound provenance fields.
 
 ```bash
-# Not a Path A checkpoint-generation command; do not use for this workflow.
-python -B train_span.py --dataset accord ...
+uv run --frozen python -B phase_b.py \
+  model generate-candidates \
+  --config configs/phase_b_path_a.json \
+  --run-id "$RUN_ID" \
+  --execution live \
+  --sentences data-prepared/development.jsonl \
+  --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
+  --checkpoint-blob checkpoints/seed-42/checkpoint.pt \
+  --candidates-out predictions/dev/seed-42-candidates.jsonl
 ```
 
-`train_span.py` consumes legacy `entities/*.csv` and `relations/*.csv` files
-and samples its own development split. Its output therefore does not establish
-the required `CODE-SPLIT-1` membership, even when its model settings resemble
-the frozen recipe. A checkpoint made that way is historical/diagnostic evidence
-only and must not be passed to `model generate-candidates --execution live` as
-primary Path A evidence.
-
-### Required training-adapter handoff
-
-Before any live training is claimed, implement or obtain a reviewed adapter
-that consumes the prepared JSONL artifacts directly and writes everything below
-inside the same `output/<run-id>/` tree:
-
-1. Train one seed at a time on `data-prepared/train.jsonl`; use only
-   `data-prepared/development.jsonl` and `development-gold.jsonl` to select the
-   best checkpoint by development strict triple F1. Never open test data during
-   training or selection.
-2. Use the frozen configuration exactly: `microsoft/deberta-large` at revision
-   `9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0`, 3,500 maximum steps, evaluation
-   every 100 steps, batch size 16, maximum length 128, maximum span width 8,
-   learning rate `3e-5`, 250 warm-up steps, and the configured loss/context
-   settings in `configs/phase_b_path_a.json`.
-3. Save the selected PyTorch checkpoint at
-   `checkpoints/seed-<seed>/checkpoint.pt`; retain its selected step, complete
-   training log, runtime/device details, and SHA-256. The checkpoint must load
-   into `models.bert_kg_encoder.BertKGExtractor` with CODE-ACCORD's four entity
-   types, ten relation classes, `max_span_width: 8`, and
-   `re_context_span: true`.
-4. Write `checkpoints/seed-<seed>/checkpoint-manifest.json` with exactly the
-   fields required by `schemas/phase_b/model-checkpoint-manifest.schema.json`:
-
-   ```json
-   {
-     "protocol_id": "B04-PATH-A-1.3",
-     "split_id": "CODE-SPLIT-1",
-     "training_seed": 42,
-     "base_model": "microsoft/deberta-large",
-     "base_model_revision": "9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0",
-     "checkpoint_sha256": "<sha256 of checkpoint.pt>",
-     "checkpoint_step": 3500,
-     "split_manifest_sha256": "<sha256 of data-prepared/split-manifest.json>",
-     "max_span_width": 8,
-     "context_between_spans": true
-   }
-   ```
-
-   Replace the placeholders and the example selection step with values produced
-   by that run. The `checkpoint_step` value is a JSON integer, not a quoted
-   string. The manifest has no extra fields.
-5. Before candidate generation, independently verify the checkpoint hash and
-   that it loads into the retained encoder. Then run live candidate generation
-   against the same run's prepared split, for example:
-
-   ```bash
-   uv run --frozen python -B phase_b.py \
-     model generate-candidates \
-     --config configs/phase_b_path_a.json \
-     --run-id "$RUN_ID" \
-     --execution live \
-     --sentences data-prepared/development.jsonl \
-     --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
-     --checkpoint-blob checkpoints/seed-42/checkpoint.pt \
-     --candidates-out predictions/dev/seed-42-candidates.jsonl
-   ```
-
-   Run the same seed-specific process for development and, only after the
-   development threshold and required pilot approval, test inference. The live
-   candidate stage rejects a blob whose SHA-256 differs from its manifest.
-
-Until the adapter exists and has been reviewed and executed on the external
-accelerator, the fresh clone can generate the immutable primary corpus and
-checkpoint plans, but not valid primary checkpoints, candidates, verifier
-verdicts, or final metrics. Report that state as blocked rather than filling the
-required paths with placeholders.
+Run the same seed-specific process for development only after the smoke review,
+and run final-test inference only after threshold/pilot approval. The candidate
+stage verifies both the checkpoint blob hash and every fetched/prepared identity
+recorded by training. Missing external execution remains a disclosed block; do
+not create placeholder checkpoints, candidates, verdicts, or metrics.
 
 ## 7. Plan, execute, or replay the frozen verifier
 

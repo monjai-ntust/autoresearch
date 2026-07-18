@@ -11,7 +11,7 @@ python -B phase_b.py
 The current B-05/B-06, development-only B-07, and B-05U slice implements
 checkout/environment `doctor`, frozen Section 5 ledger `reconcile`, immutable
 CODE-ACCORD `fetch`, raw-provenance/typed-strict `prepare`, canonical
-`model train` (`dry-run`) and `model generate-candidates` (`dry-run|replay|live`), frozen verifier
+`model train` (`dry-run|live`) and `model generate-candidates` (`dry-run|replay|live`), frozen verifier
 `dry-run|live|replay`, development `pilot-verifier` auditing, development
 `select-threshold`, and offline `CODE-STRICT-1` `score` stages. Official v1.0.0 preparation
 preserves all official relation rows in a raw-provenance view and writes a
@@ -20,6 +20,9 @@ BIO spans. Those nine rows remain auditable but are ineligible for typed-strict
 gold; no endpoint is silently repaired, projected, expanded, or omitted. See
 [`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for exact commands, input
 schemas, output layout, reproducibility boundaries, and the still-gated stages.
+The [`model-training compatibility contract`](docs/model-training-compatibility.md)
+records preserved trainer invariants, necessary opt-in differences, and the
+limit on historical statistical comparison.
 Every workflow-created file is confined to ignored `output/<run-id>/`.
 
 The repository also retains the historical `train_span.py -> inference_kg.py ->
@@ -34,10 +37,12 @@ provide: immutable identities, one experiment matrix, typed matching, split
 isolation, output containment, replay, and machine-readable manifests. The
 `model generate-candidates` adapter transforms a frozen encoder prediction
 ledger into typed candidates under those contracts, and its `live` execution
-runs the retained encoder to produce that ledger; `model train` plans training
-against the frozen recipe. The live encoder train/inference and their
-output-parity against the historical scripts remain externally gated on the
-accelerator, so `train_span.py`/`inference_kg.py` are retained as provenance.
+runs the retained encoder to produce that ledger. `model train --execution
+live` invokes an opt-in compatibility mode in the original `train_span.py`
+loop: prepared train/development input, revision pinning, full restart state,
+no test access, and schema-bound provenance are added without a second encoder
+or loss loop. Actual accelerator smoke/parity evidence and the eight-seed run
+remain gated, so `train_span.py`/`inference_kg.py` are retained as provenance.
 The new verifier caller is necessarily canonical-specific because the retained
 root verifier hard-codes the SciERC ontology, parses free-form line responses,
 and lacks the approved prompt/schema/digest/cache/telemetry contract. The root
@@ -66,9 +71,9 @@ canonical-ready. It neither repairs the ledgers nor authorizes an official run.
 
 [`docs/phase_c_migration.md`](docs/phase_c_migration.md) records the raw/strict
 design lineage, frozen assumptions, and evidence conditions that require a
-revision. The user approved B-05U materialization of that dual view; it still
-does not authorize model training, final-test tuning, verifier calls, or a
-paper-quality claim without the later gates.
+revision. The user approved B-05C compatibility-training implementation; the
+full eight-seed execution, final-test tuning, verifier calls, and paper-quality
+claims still require their later gates.
 
 The maintained [`source change inventory`](docs/source-change-inventory.md)
 classifies every deletion, reuse, modification, and current-only path relative

@@ -173,11 +173,11 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--candidates-out", help="Run-relative candidate output JSONL")
 
     train = model_actions.add_parser(
-        "train", help="Plan (dry-run) deterministic encoder training for one seed"
+        "train", help="Plan or run deterministic canonical encoder training for one seed"
     )
     train.add_argument("--config", default=DEFAULT_CONFIG)
     train.add_argument("--run-id", required=True)
-    train.add_argument("--execution", required=True, choices=["dry-run"])
+    train.add_argument("--execution", required=True, choices=["dry-run", "live"])
     train.add_argument("--seed", required=True, type=int)
 
     threshold = subparsers.add_parser(

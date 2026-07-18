@@ -50,6 +50,7 @@ Stages:
   publishable        run the canonical chain until its first publication gate
   bootstrap          doctor -> reconcile -> fetch -> prepare only
   plan               record the implemented seed-specific model-train dry-run
+  train-live         run/resume canonical CODE-SPLIT-1 training for one seed
   legacy-train       run the retained CSV trainer as a noncanonical diagnostic
   generate-live      run documented live candidate generation
   generate-replay    run documented replay candidate generation
@@ -84,17 +85,17 @@ Options:
 Examples:
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage plan --seed 42
+  scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage train-live --seed 42
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z \
     --stage legacy-train --seed 42 --allow-legacy-diagnostic
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage generate-live \
     --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
     --checkpoint-blob checkpoints/seed-42/checkpoint.pt
 
-`model train --execution live` is intentionally not a stage: this revision
-does not implement a canonical CODE-SPLIT-1 JSONL training adapter. The
-legacy-train stage is available only to debug retained provenance code; its
-random legacy development split makes its checkpoint noncanonical and it is
-never fed into the publishable chain.
+The train-live stage is the canonical checkpoint producer. It consumes only
+the run-local prepared train/development split, writes a full restart state,
+and resumes it automatically after an interrupted evaluation checkpoint. The
+legacy-train stage remains diagnostic-only and is never fed into publication.
 
 The default available sweep treats missing checkpoint/candidate/verifier/pilot
 inputs and ungranted publication gates as BLOCKED, not as errors. Any command
@@ -263,7 +264,11 @@ blocked() {
 }
 
 doctor_complete() {
-  json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" status '"pass"'
+  local commit
+  commit="$(git rev-parse HEAD)"
+  json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" status '"pass"' \
+    && json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" \
+      source.commit "\"$commit\""
 }
 
 reconcile_complete() {
@@ -285,8 +290,16 @@ prepare_complete() {
 }
 
 plan_complete() {
-  json_equals "$RUN_ROOT/manifests/model-train-dry-run.json" status '"planned"' \
-    && json_equals "$RUN_ROOT/manifests/model-train-dry-run.json" training_seed "$SEED"
+  json_equals "$RUN_ROOT/manifests/model-train-dry-run-seed-$SEED.json" status '"planned"' \
+    && json_equals "$RUN_ROOT/manifests/model-train-dry-run-seed-$SEED.json" training_seed "$SEED"
+}
+
+train_live_complete() {
+  json_equals "$RUN_ROOT/manifests/model-train-live-seed-$SEED.json" status '"completed"' \
+    && json_equals "$RUN_ROOT/checkpoints/seed-$SEED/checkpoint-manifest.json" \
+      training_seed "$SEED" \
+    && [[ -s "$RUN_ROOT/checkpoints/seed-$SEED/checkpoint.pt" ]] \
+    && [[ -s "$RUN_ROOT/checkpoints/seed-$SEED/restart-state.pt" ]]
 }
 
 legacy_checkpoint_path() {
@@ -310,7 +323,7 @@ legacy_train_complete() {
 candidate_complete() {
   local execution="$1"
   local output="$2"
-  json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution.json" status '"completed"' \
+  json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED.json" status '"completed"' \
     && [[ -f "$RUN_ROOT/$output" ]]
 }
 
@@ -375,6 +388,14 @@ ensure_plan() {
     uv run --frozen python -B phase_b.py model train \
       --config configs/phase_b_path_a.json --run-id "$RUN_ID" \
       --execution dry-run --seed "$SEED"
+}
+
+ensure_train_live() {
+  ensure_bootstrap
+  skip_or_run "canonical model training (seed $SEED)" train_live_complete \
+    uv run --frozen python -B phase_b.py model train \
+      --config configs/phase_b_path_a.json --run-id "$RUN_ID" \
+      --execution live --seed "$SEED"
 }
 
 write_legacy_completion_marker() {
@@ -610,6 +631,14 @@ maybe_legacy_checkpoint_diagnostic() {
   fi
 }
 
+maybe_train_live() {
+  if train_live_complete; then
+    note "canonical model training (seed $SEED) already has its completion artifacts; skipping"
+  else
+    blocked "canonical model training is an external accelerator stage; run --stage train-live --seed $SEED to create/resume its checkpoint"
+  fi
+}
+
 maybe_generate_replay() {
   local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
   local prediction_ledger="${PREDICTION_LEDGER:-predictions/test/prediction-ledger.jsonl}"
@@ -691,6 +720,7 @@ ensure_available() {
   ensure_bootstrap
   ensure_command_check
   ensure_plan
+  maybe_train_live
   maybe_legacy_checkpoint_diagnostic
   maybe_generate_live
   maybe_generate_replay
@@ -704,7 +734,9 @@ ensure_available() {
 
 ensure_publishable() {
   ensure_plan
-  die "publishable chain is blocked at canonical live training: phase_b.py model train accepts only --execution dry-run. Implement a reviewed CODE-SPLIT-1 JSONL adapter that emits seeds 42-49 checkpoint blobs/manifests before continuing with generate-live, threshold, pilot, verifier, and score. --stage legacy-train is diagnostic-only and cannot remove this gate."
+  ensure_train_live
+  ensure_generate_live
+  die "seed-$SEED canonical training and development candidate generation are complete. The seed-42 smoke/restart evidence must be reviewed at B-07 before running and aggregating seeds 42-49 or executing the live verifier. Re-run completed stages with the same run ID after that decision."
 }
 
 note "updating source checkout from origin/$BRANCH"
@@ -716,6 +748,7 @@ case "$STAGE" in
   available) ensure_available ;;
   bootstrap) ensure_bootstrap ;;
   plan) ensure_plan ;;
+  train-live) ensure_train_live ;;
   legacy-train) ensure_legacy_train ;;
   generate-live) ensure_generate_live ;;
   generate-replay) ensure_generate_replay ;;

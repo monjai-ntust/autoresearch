@@ -33,6 +33,9 @@ The stage has three implemented executions:
 
 from __future__ import annotations
 
+import hashlib
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,10 +56,14 @@ from records import Candidate, EntitySpan, StrictTriple, candidate_id_for
 from verifier import PreparedSentence, _load_sentences, _source_text
 
 EXECUTION_MODES = {"dry-run", "replay", "live"}
-TRAIN_EXECUTION_MODES = {"dry-run"}
+TRAIN_EXECUTION_MODES = {"dry-run", "live"}
 _SPLIT_ID = "CODE-SPLIT-1"
 _CONFIDENCE_PRECISION = 6
-_CHECKPOINT_MANIFEST_CONTRACT = "urn:phase-b:model-checkpoint-manifest:1.0"
+_CHECKPOINT_MANIFEST_CONTRACT = "urn:phase-b:model-checkpoint-manifest:2.0"
+_HISTORICAL_ENTITY_TRAIN_SHA256 = (
+    "c13ad02ab72f0f3a3ddca588c02bcd5d7db1622ae81351d967431623963e4fcd"
+)
+_HISTORICAL_ENTITY_TRAIN_GIT_BLOB = "1b74f4a7d3693a903d93690adffcc2ef4f276bea"
 
 
 def _utc_now() -> str:
@@ -103,6 +110,19 @@ class CheckpointIdentity:
     checkpoint_step: int
     split_manifest_sha256: str
     max_span_width: int
+    archive_sha256: str
+    acquisition_manifest_sha256: str
+    annotation_bundle_sha256: str
+    prepared_dataset_tree_sha256: str
+    train_jsonl_sha256: str
+    development_jsonl_sha256: str
+    config_sha256: str
+    trainer_sha256: str
+    data_adapter_sha256: str
+    model_helper_sha256: str
+    source_commit: str
+    restart_state_sha256: str
+    dataset_compatibility_sha256: str
 
 
 @dataclass(frozen=True)
@@ -126,6 +146,7 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
     _exact_keys(
         value,
         {
+            "schema_version",
             "protocol_id",
             "split_id",
             "training_seed",
@@ -136,9 +157,28 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             "split_manifest_sha256",
             "max_span_width",
             "context_between_spans",
+            "archive_sha256",
+            "acquisition_manifest_sha256",
+            "annotation_bundle_sha256",
+            "prepared_dataset_tree_sha256",
+            "train_jsonl_sha256",
+            "development_jsonl_sha256",
+            "config_sha256",
+            "trainer_sha256",
+            "data_adapter_sha256",
+            "model_helper_sha256",
+            "source_commit",
+            "selected_metric",
+            "selected_metric_value",
+            "restart_state_sha256",
+            "dataset_compatibility_report",
+            "dataset_compatibility_sha256",
+            "historical_comparability",
         },
         label,
     )
+    if value["schema_version"] != "phase-b-model-checkpoint-manifest-2.0":
+        raise DataContractError(f"{label}.schema_version is unsupported")
     if value["protocol_id"] != PROTOCOL_ID:
         raise DataContractError(f"{label}.protocol_id differs from {PROTOCOL_ID}")
     if value["split_id"] != _SPLIT_ID:
@@ -153,6 +193,20 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
                 f"{label}.{field} differs from the approved training recipe"
             )
     step = _integer(value["checkpoint_step"], f"{label}.checkpoint_step", minimum=1)
+    if value["selected_metric"] != "development_strict_triple_f1":
+        raise DataContractError(f"{label}.selected_metric is unsupported")
+    _unit_float(value["selected_metric_value"], f"{label}.selected_metric_value")
+    if value["dataset_compatibility_report"] != "audit/model-training-dataset-compatibility.json":
+        raise DataContractError(f"{label}.dataset_compatibility_report is unsupported")
+    if value["historical_comparability"] != "partial_match_full_legacy_equivalence_unavailable":
+        raise DataContractError(f"{label}.historical_comparability is unsupported")
+    source_commit = value["source_commit"]
+    if (
+        not isinstance(source_commit, str)
+        or len(source_commit) != 40
+        or any(character not in "0123456789abcdef" for character in source_commit)
+    ):
+        raise DataContractError(f"{label}.source_commit must be a full Git object ID")
     return CheckpointIdentity(
         training_seed=seed,
         checkpoint_sha256=_sha256_hex(value["checkpoint_sha256"], f"{label}.checkpoint_sha256"),
@@ -161,6 +215,42 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             value["split_manifest_sha256"], f"{label}.split_manifest_sha256"
         ),
         max_span_width=_integer(value["max_span_width"], f"{label}.max_span_width", minimum=1),
+        archive_sha256=_sha256_hex(value["archive_sha256"], f"{label}.archive_sha256"),
+        acquisition_manifest_sha256=_sha256_hex(
+            value["acquisition_manifest_sha256"],
+            f"{label}.acquisition_manifest_sha256",
+        ),
+        annotation_bundle_sha256=_sha256_hex(
+            value["annotation_bundle_sha256"],
+            f"{label}.annotation_bundle_sha256",
+        ),
+        prepared_dataset_tree_sha256=_sha256_hex(
+            value["prepared_dataset_tree_sha256"],
+            f"{label}.prepared_dataset_tree_sha256",
+        ),
+        train_jsonl_sha256=_sha256_hex(
+            value["train_jsonl_sha256"], f"{label}.train_jsonl_sha256"
+        ),
+        development_jsonl_sha256=_sha256_hex(
+            value["development_jsonl_sha256"],
+            f"{label}.development_jsonl_sha256",
+        ),
+        config_sha256=_sha256_hex(value["config_sha256"], f"{label}.config_sha256"),
+        trainer_sha256=_sha256_hex(value["trainer_sha256"], f"{label}.trainer_sha256"),
+        data_adapter_sha256=_sha256_hex(
+            value["data_adapter_sha256"], f"{label}.data_adapter_sha256"
+        ),
+        model_helper_sha256=_sha256_hex(
+            value["model_helper_sha256"], f"{label}.model_helper_sha256"
+        ),
+        source_commit=source_commit,
+        restart_state_sha256=_sha256_hex(
+            value["restart_state_sha256"], f"{label}.restart_state_sha256"
+        ),
+        dataset_compatibility_sha256=_sha256_hex(
+            value["dataset_compatibility_sha256"],
+            f"{label}.dataset_compatibility_sha256",
+        ),
     )
 
 
@@ -407,7 +497,8 @@ def _live_inference_records(
     max_span_width = training["max_span_width"]
     device = torch.device(device_preference or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    model_revision = training["base_model_revision"]
+    tokenizer = AutoTokenizer.from_pretrained(base_model, revision=model_revision)
     model = BertKGExtractor(
         base_model,
         num_bio_tags=NUM_BIO_TAGS,
@@ -415,6 +506,7 @@ def _live_inference_records(
         num_entity_types=len(CA_ENTITY_TYPES),
         use_span_ner=True,
         max_span_width=max_span_width,
+        model_revision=model_revision,
     )
     # Match train_span.py: enabling re_context_span (the frozen
     # context_between_spans recipe flag) requires rebuilding re_head with a 3H
@@ -554,6 +646,61 @@ def _generation_plan(
     return plan
 
 
+def _validate_checkpoint_run_identity(
+    layout: RunLayout, config: PipelineConfig, checkpoint: CheckpointIdentity
+) -> None:
+    """Reject a checkpoint detached from this run's fetched/prepared corpus."""
+
+    acquisition_path = layout.resolve(
+        "manifests/02-input-acquisition-manifest.json", must_exist=True
+    )
+    preparation_path = layout.resolve(
+        "manifests/03-data-preparation-manifest.json", must_exist=True
+    )
+    split_path = layout.resolve("data-prepared/split-manifest.json", must_exist=True)
+    train_path = layout.resolve("data-prepared/train.jsonl", must_exist=True)
+    development_path = layout.resolve(
+        "data-prepared/development.jsonl", must_exist=True
+    )
+    compatibility_path = layout.resolve(
+        "audit/model-training-dataset-compatibility.json", must_exist=True
+    )
+    acquisition = load_json(acquisition_path)
+    preparation = load_json(preparation_path)
+    checkout = load_json(
+        layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
+    )
+    restart_path = layout.resolve(
+        f"checkpoints/seed-{checkpoint.training_seed}/restart-state.pt",
+        must_exist=True,
+    )
+    expected = {
+        "archive_sha256": preparation.get("archive_sha256"),
+        "acquisition_manifest_sha256": sha256_file(acquisition_path),
+        "annotation_bundle_sha256": preparation.get("annotation_bundle_sha256"),
+        "prepared_dataset_tree_sha256": preparation.get("dataset_tree_sha256"),
+        "split_manifest_sha256": sha256_file(split_path),
+        "train_jsonl_sha256": sha256_file(train_path),
+        "development_jsonl_sha256": sha256_file(development_path),
+        "config_sha256": sha256_file(config.path),
+        "trainer_sha256": sha256_file(layout.source_root / "train_span.py"),
+        "data_adapter_sha256": sha256_file(layout.source_root / "data/code_accord.py"),
+        "model_helper_sha256": sha256_file(
+            layout.source_root / "models/bert_kg_encoder.py"
+        ),
+        "source_commit": checkout.get("source", {}).get("commit"),
+        "restart_state_sha256": sha256_file(restart_path),
+        "dataset_compatibility_sha256": sha256_file(compatibility_path),
+    }
+    if acquisition.get("archive", {}).get("sha256") != expected["archive_sha256"]:
+        raise DataContractError("acquisition/preparation archive identities differ")
+    for field, actual in expected.items():
+        if getattr(checkpoint, field) != actual:
+            raise DataContractError(
+                f"checkpoint {field} does not match the selected run"
+            )
+
+
 def generate_candidates(
     layout: RunLayout,
     config: PipelineConfig,
@@ -587,9 +734,20 @@ def generate_candidates(
     if execution_mode != "live" and checkpoint_blob_path is not None:
         raise DataContractError("a checkpoint blob is accepted only by live execution")
 
-    plan_path = candidates_out_path.parent / "generation-plan.jsonl"
-    live_ledger_path = candidates_out_path.parent / "prediction-ledger.jsonl"
-    manifest_path = layout.resolve(f"manifests/model-generate-candidates-{execution_mode}.json")
+    sentences = _load_sentences(sentences_path)
+    checkpoint = _load_checkpoint_manifest(checkpoint_manifest_path, config)
+    _validate_checkpoint_run_identity(layout, config, checkpoint)
+
+    plan_path = candidates_out_path.parent / (
+        f"seed-{checkpoint.training_seed}-generation-plan.jsonl"
+    )
+    live_ledger_path = candidates_out_path.parent / (
+        f"seed-{checkpoint.training_seed}-prediction-ledger.jsonl"
+    )
+    manifest_path = layout.resolve(
+        f"manifests/model-generate-candidates-{execution_mode}-"
+        f"seed-{checkpoint.training_seed}.json"
+    )
     planned_outputs = [manifest_path]
     planned_outputs.append(plan_path if execution_mode == "dry-run" else candidates_out_path)
     if execution_mode == "live":
@@ -599,9 +757,6 @@ def generate_candidates(
         raise DataContractError(
             "model stage refuses to overwrite existing artifacts: " + ", ".join(existing)
         )
-
-    sentences = _load_sentences(sentences_path)
-    checkpoint = _load_checkpoint_manifest(checkpoint_manifest_path, config)
 
     inputs = {
         "prepared_sentences": {
@@ -698,28 +853,197 @@ def generate_candidates(
     return manifest
 
 
+def _normalized_lf_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def _find_extracted_annotation(layout: RunLayout, suffix: str) -> Path:
+    extracted = layout.resolve("inputs/extracted")
+    if not extracted.is_dir():
+        raise DataContractError("live training requires the extracted annotation tree")
+    matches = [
+        path
+        for path in extracted.rglob(Path(suffix).name)
+        if path.is_file() and path.as_posix().endswith(suffix)
+    ]
+    if len(matches) != 1:
+        raise DataContractError(
+            f"expected exactly one extracted {suffix}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _required_run_file(layout: RunLayout, relative: str) -> Path:
+    path = layout.resolve(relative)
+    if not path.is_file():
+        raise DataContractError(f"live training requires {relative}")
+    return path
+
+
+def _dataset_compatibility_report(
+    layout: RunLayout, config: PipelineConfig, preparation: dict[str, Any]
+) -> tuple[Path, dict[str, Any]]:
+    official_entities = _find_extracted_annotation(
+        layout, "annotated_data/entities/train.csv"
+    )
+    historical_entities = layout.source_root / "data/code_accord/entities/train.csv"
+    if not historical_entities.is_file():
+        raise DataContractError("recoverable pre-Phase A entity training CSV is missing")
+    official_sha = sha256_file(official_entities)
+    expected_sha = config.value["dataset"]["annotation_files"][
+        "annotated_data/entities/train.csv"
+    ]["sha256"]
+    historical_normalized_sha = _normalized_lf_sha256(historical_entities)
+    if official_sha != expected_sha:
+        raise DataContractError("freshly extracted entity train CSV hash is not official")
+    if historical_normalized_sha != _HISTORICAL_ENTITY_TRAIN_SHA256:
+        raise DataContractError("tracked pre-Phase A entity train CSV identity changed")
+
+    report = {
+        "schema_version": "phase-b-training-dataset-compatibility-1.0",
+        "status": "partial_match_full_legacy_equivalence_unavailable",
+        "fresh_clone_dataset": {
+            "dataset_id": config.value["dataset"]["dataset_id"],
+            "archive_sha256": preparation["archive_sha256"],
+            "annotation_bundle_sha256": preparation["annotation_bundle_sha256"],
+            "entity_train_sha256": official_sha,
+            "prepared_dataset_tree_sha256": preparation["dataset_tree_sha256"],
+        },
+        "pre_phase_a_baseline": {
+            "source_commit": "9feafa4029e65ab48ecfb2f452f4b0fabbff0826",
+            "tracked_path": "data/code_accord/entities/train.csv",
+            "git_blob_sha1": _HISTORICAL_ENTITY_TRAIN_GIT_BLOB,
+            "normalized_lf_sha256": historical_normalized_sha,
+            "recoverable_files": ["annotated_data/entities/train.csv"],
+            "unavailable_files": [
+                "annotated_data/entities/all.csv",
+                "annotated_data/entities/test.csv",
+                "annotated_data/relations/all.csv",
+                "annotated_data/relations/train.csv",
+                "annotated_data/relations/test.csv",
+            ],
+        },
+        "comparisons": {
+            "entity_train_bytes": "match_after_checkout_line_ending_normalization",
+            "relation_and_test_bytes": "unavailable_in_pre_phase_a_git_history",
+            "legacy_random_train_development_membership": "not_persisted",
+            "canonical_code_split_1_membership": "new_frozen_split",
+        },
+        "historical_statistical_continuity_claim_permitted": False,
+        "conclusion": (
+            "The recoverable entity-training source matches the official download, "
+            "but missing historical relation/test bytes and unpersisted random "
+            "development membership prevent a full dataset or unchanged-statistics claim."
+        ),
+    }
+    path = layout.resolve("audit/model-training-dataset-compatibility.json")
+    if path.exists():
+        if load_json(path) != report:
+            raise DataContractError("existing dataset compatibility audit differs")
+    else:
+        atomic_write_json(path, report)
+    return path, report
+
+
+def _training_command(
+    layout: RunLayout,
+    config: PipelineConfig,
+    training_seed: int,
+    checkpoint_path: Path,
+    restart_path: Path,
+    progress_path: Path,
+    summary_path: Path,
+) -> list[str]:
+    training = config.value["training"]
+    boost = training["comparison_boost"]
+    command = [
+        sys.executable,
+        "-B",
+        "train_span.py",
+        "--canonical-mode",
+        "--dataset",
+        "accord",
+        "--prepared-dir",
+        str(layout.resolve("data-prepared", must_exist=True)),
+        "--model-name",
+        training["base_model"],
+        "--model-revision",
+        training["base_model_revision"],
+        "--batch-size",
+        str(training["batch_size"]),
+        "--max-length",
+        str(training["max_length"]),
+        "--lr",
+        str(training["learning_rate"]),
+        "--max-steps",
+        str(training["max_steps"]),
+        "--warmup-steps",
+        str(training["warmup_steps"]),
+        "--max-span-width",
+        str(training["max_span_width"]),
+        "--re-weight",
+        str(training["re_loss_weight"]),
+        "--re-no-rel-weight",
+        str(training["re_no_rel_weight"]),
+        "--neg-sample-ratio",
+        str(training["ner_negative_ratio"]),
+        "--focal-gamma",
+        str(training["ner_focal_gamma"]),
+        "--eval-every",
+        str(training["evaluation_every_steps"]),
+        "--seed",
+        str(training_seed),
+        "--primary-metric",
+        "triple_f1",
+        "--label-smoothing",
+        str(training["label_smoothing"]),
+        "--re-focal-gamma",
+        str(training["re_focal_gamma"]),
+        "--re-neg-subsample",
+        str(training["re_negative_subsample"]),
+        "--doc-window-size",
+        str(training["document_window_size"]),
+        "--re-comparison-boost",
+        str(boost["initial"]),
+        "--re-boost-adaptive-steps",
+        str(boost["adaptive_step"]),
+        "--re-boost-adaptive-threshold",
+        str(boost["threshold_low"]),
+        "--re-boost-adaptive-threshold2",
+        str(boost["threshold_high"]),
+        "--re-boost-mid",
+        str(boost["middle"]),
+        "--re-boost-end",
+        str(boost["low"]),
+        "--re-context-span",
+        "--skip-test-eval",
+        "--save-best-to",
+        str(checkpoint_path),
+        "--save-last-to",
+        str(restart_path),
+        "--progress-log",
+        str(progress_path),
+        "--run-summary-out",
+        str(summary_path),
+    ]
+    if restart_path.exists() and not summary_path.exists():
+        command.extend(["--resume-from", str(restart_path)])
+    return command
+
+
 def plan_training(
     layout: RunLayout,
     config: PipelineConfig,
     *,
     execution_mode: str,
     training_seed: int,
+    command_runner=subprocess.run,
 ) -> dict[str, Any]:
-    """Plan deterministic encoder training for one seed (the `model train` stage).
-
-    Only `dry-run` is implemented in this slice: it validates the frozen recipe
-    and seed and materializes a machine-readable training plan plus the
-    checkpoint-manifest contract that live training must satisfy. Live training
-    itself requires the pinned accelerator profile and is an externally gated
-    stage; it is not exposed here, so `train_span.py` is not yet removable.
-    """
+    """Plan or execute compatibility-hosted canonical training for one seed."""
 
     layout.require_existing()
     if execution_mode not in TRAIN_EXECUTION_MODES:
-        raise DataContractError(
-            f"unsupported model-train execution mode: {execution_mode!r} "
-            "(only dry-run is implemented in this slice)"
-        )
+        raise DataContractError(f"unsupported model-train execution mode: {execution_mode!r}")
     if training_seed not in TRAINING_SEEDS:
         raise DataContractError(f"training_seed {training_seed} is outside seeds 42-49")
 
@@ -727,19 +1051,20 @@ def plan_training(
     if split.get("split_id") != _SPLIT_ID:
         raise DataContractError(f"config.split.split_id must be {_SPLIT_ID}")
 
-    manifest_path = layout.resolve(f"manifests/model-train-{execution_mode}.json")
+    manifest_name = f"model-train-{execution_mode}-seed-{training_seed}.json"
+    manifest_path = layout.resolve(f"manifests/{manifest_name}")
     if manifest_path.exists():
         raise DataContractError(
             "model train refuses to overwrite existing artifact: "
             + layout.relative_identity(manifest_path)
         )
 
-    manifest = {
+    manifest: dict[str, Any] = {
         "protocol_id": PROTOCOL_ID,
         "matcher_id": MATCHER_ID,
         "stage": "model-train",
         "execution_mode": execution_mode,
-        "status": "planned",
+        "status": "planned" if execution_mode == "dry-run" else "completed",
         "created_at_utc": _utc_now(),
         "training_seed": training_seed,
         "split": dict(split),
@@ -747,7 +1072,159 @@ def plan_training(
         "expected_checkpoint_dir": f"checkpoints/seed-{training_seed}",
         "checkpoint_manifest_contract": _CHECKPOINT_MANIFEST_CONTRACT,
         "final_test_selection_forbidden": True,
-        "live_execution_status": "gated_external_accelerator",
+        "live_execution_status": (
+            "gated_external_accelerator"
+            if execution_mode == "dry-run"
+            else "completed_external_accelerator"
+        ),
     }
+    if execution_mode == "dry-run":
+        atomic_write_json(manifest_path, manifest)
+        return manifest
+
+    checkout_path = _required_run_file(layout, "manifests/00-checkout-manifest.json")
+    acquisition_path = _required_run_file(
+        layout, "manifests/02-input-acquisition-manifest.json"
+    )
+    preparation_path = _required_run_file(
+        layout, "manifests/03-data-preparation-manifest.json"
+    )
+    checkout = load_json(checkout_path)
+    acquisition = load_json(acquisition_path)
+    preparation = load_json(preparation_path)
+    if checkout.get("status") != "pass":
+        raise DataContractError("live training requires a passing checkout manifest")
+    if preparation.get("byte_identical_independent_materializations") is not True:
+        raise DataContractError("live training requires verified deterministic preparation")
+    if preparation.get("acquisition_manifest_sha256") != sha256_file(acquisition_path):
+        raise DataContractError("preparation is not bound to this acquisition manifest")
+    archive_sha = acquisition.get("archive", {}).get("sha256")
+    if preparation.get("archive_sha256") != archive_sha:
+        raise DataContractError("acquisition/preparation archive identities differ")
+
+    split_path = _required_run_file(layout, "data-prepared/split-manifest.json")
+    train_path = _required_run_file(layout, "data-prepared/train.jsonl")
+    development_path = _required_run_file(layout, "data-prepared/development.jsonl")
+    compatibility_path, compatibility = _dataset_compatibility_report(
+        layout, config, preparation
+    )
+    checkpoint_dir = layout.resolve(f"checkpoints/seed-{training_seed}")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = checkpoint_dir / "checkpoint.pt"
+    restart_path = checkpoint_dir / "restart-state.pt"
+    summary_path = checkpoint_dir / "training-summary.json"
+    checkpoint_manifest_path = checkpoint_dir / "checkpoint-manifest.json"
+    progress_path = layout.resolve(f"logs/model-train-seed-{training_seed}.log")
+    if checkpoint_path.exists() and not restart_path.exists() and not summary_path.exists():
+        raise DataContractError("orphan checkpoint without restart or summary blocks training")
+
+    command = _training_command(
+        layout,
+        config,
+        training_seed,
+        checkpoint_path,
+        restart_path,
+        progress_path,
+        summary_path,
+    )
+    if not summary_path.exists():
+        try:
+            command_runner(command, cwd=layout.source_root, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise DataContractError(
+                f"canonical trainer failed with exit status {exc.returncode}; "
+                "rerun the same command to resume from its last complete state"
+            ) from exc
+
+    for required_path in (checkpoint_path, restart_path, summary_path, progress_path):
+        if not required_path.is_file():
+            raise DataContractError(
+                "canonical trainer did not produce " + layout.relative_identity(required_path)
+            )
+    summary = load_json(summary_path)
+    if (
+        summary.get("status") != "completed"
+        or summary.get("canonical_mode") is not True
+        or summary.get("seed") != training_seed
+        or summary.get("test_evaluated") is not False
+    ):
+        raise DataContractError("canonical trainer summary violates the live contract")
+    checkpoint_step = summary.get("selected_step")
+    selected_metrics = summary.get("selected_metrics", {})
+    selected_value = selected_metrics.get("triple_f1")
+    if (
+        isinstance(checkpoint_step, bool)
+        or not isinstance(checkpoint_step, int)
+        or checkpoint_step < 1
+        or isinstance(selected_value, bool)
+        or not isinstance(selected_value, (int, float))
+    ):
+        raise DataContractError("canonical trainer summary lacks a selected checkpoint metric")
+
+    checkpoint_manifest = {
+        "schema_version": "phase-b-model-checkpoint-manifest-2.0",
+        "protocol_id": PROTOCOL_ID,
+        "split_id": _SPLIT_ID,
+        "training_seed": training_seed,
+        "base_model": config.value["training"]["base_model"],
+        "base_model_revision": config.value["training"]["base_model_revision"],
+        "checkpoint_sha256": sha256_file(checkpoint_path),
+        "checkpoint_step": checkpoint_step,
+        "split_manifest_sha256": sha256_file(split_path),
+        "max_span_width": config.value["training"]["max_span_width"],
+        "context_between_spans": config.value["training"]["context_between_spans"],
+        "archive_sha256": archive_sha,
+        "acquisition_manifest_sha256": sha256_file(acquisition_path),
+        "annotation_bundle_sha256": preparation["annotation_bundle_sha256"],
+        "prepared_dataset_tree_sha256": preparation["dataset_tree_sha256"],
+        "train_jsonl_sha256": sha256_file(train_path),
+        "development_jsonl_sha256": sha256_file(development_path),
+        "config_sha256": sha256_file(config.path),
+        "trainer_sha256": sha256_file(layout.source_root / "train_span.py"),
+        "data_adapter_sha256": sha256_file(layout.source_root / "data/code_accord.py"),
+        "model_helper_sha256": sha256_file(
+            layout.source_root / "models/bert_kg_encoder.py"
+        ),
+        "source_commit": checkout.get("source", {}).get("commit"),
+        "selected_metric": "development_strict_triple_f1",
+        "selected_metric_value": float(selected_value),
+        "restart_state_sha256": sha256_file(restart_path),
+        "dataset_compatibility_report": layout.relative_identity(compatibility_path),
+        "dataset_compatibility_sha256": sha256_file(compatibility_path),
+        "historical_comparability": compatibility["status"],
+    }
+    if checkpoint_manifest_path.exists():
+        if load_json(checkpoint_manifest_path) != checkpoint_manifest:
+            raise DataContractError("existing checkpoint manifest differs from training outputs")
+    else:
+        atomic_write_json(checkpoint_manifest_path, checkpoint_manifest)
+    manifest.update(
+        {
+            "inputs": {
+                "checkout_manifest_sha256": sha256_file(checkout_path),
+                "acquisition_manifest_sha256": sha256_file(acquisition_path),
+                "preparation_manifest_sha256": sha256_file(preparation_path),
+                "split_manifest_sha256": sha256_file(split_path),
+                "train_jsonl_sha256": sha256_file(train_path),
+                "development_jsonl_sha256": sha256_file(development_path),
+            },
+            "outputs": {
+                "checkpoint": layout.relative_identity(checkpoint_path),
+                "checkpoint_manifest": layout.relative_identity(checkpoint_manifest_path),
+                "restart_state": layout.relative_identity(restart_path),
+                "training_summary": layout.relative_identity(summary_path),
+                "progress_log": layout.relative_identity(progress_path),
+                "dataset_compatibility_report": layout.relative_identity(
+                    compatibility_path
+                ),
+            },
+            "resume": {
+                "resumed": summary.get("resumed_from") is not None,
+                "restart_state_sha256": sha256_file(restart_path),
+            },
+            "environment": summary.get("environment"),
+            "historical_comparability": compatibility["status"],
+        }
+    )
     atomic_write_json(manifest_path, manifest)
     return manifest

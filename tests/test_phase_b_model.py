@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -11,7 +12,13 @@ from pathlib import Path
 from config import load_pipeline_config
 from constants import PROTOCOL_ID
 from model import generate_candidates, plan_training
-from phase_b_io import DataContractError, atomic_write_json, atomic_write_jsonl
+from phase_b_io import (
+    DataContractError,
+    atomic_write_bytes,
+    atomic_write_json,
+    atomic_write_jsonl,
+    sha256_file,
+)
 from paths import RunLayout, discover_source_root
 from records import EntitySpan, StrictTriple, candidate_id_for
 from verifier import _load_candidates, _load_sentences
@@ -45,8 +52,15 @@ def _sentence(split: str = "test") -> dict:
     }
 
 
-def _checkpoint_manifest() -> dict:
+def _checkpoint_manifest(layout: RunLayout, config) -> dict:
+    acquisition = layout.resolve("manifests/02-input-acquisition-manifest.json")
+    preparation = layout.resolve("manifests/03-data-preparation-manifest.json")
+    split = layout.resolve("data-prepared/split-manifest.json")
+    train = layout.resolve("data-prepared/train.jsonl")
+    development = layout.resolve("data-prepared/development.jsonl")
+    compatibility = layout.resolve("audit/model-training-dataset-compatibility.json")
     return {
+        "schema_version": "phase-b-model-checkpoint-manifest-2.0",
         "protocol_id": PROTOCOL_ID,
         "split_id": "CODE-SPLIT-1",
         "training_seed": 42,
@@ -54,10 +68,68 @@ def _checkpoint_manifest() -> dict:
         "base_model_revision": "9a8befc6d3fbfa800e65f5279aa34d27eaf6d1b0",
         "checkpoint_sha256": "a" * 64,
         "checkpoint_step": 1900,
-        "split_manifest_sha256": "b" * 64,
+        "split_manifest_sha256": sha256_file(split),
         "max_span_width": 8,
         "context_between_spans": True,
+        "archive_sha256": "c" * 64,
+        "acquisition_manifest_sha256": sha256_file(acquisition),
+        "annotation_bundle_sha256": "d" * 64,
+        "prepared_dataset_tree_sha256": "e" * 64,
+        "train_jsonl_sha256": sha256_file(train),
+        "development_jsonl_sha256": sha256_file(development),
+        "config_sha256": sha256_file(config.path),
+        "trainer_sha256": sha256_file(layout.source_root / "train_span.py"),
+        "data_adapter_sha256": sha256_file(layout.source_root / "data/code_accord.py"),
+        "model_helper_sha256": sha256_file(
+            layout.source_root / "models/bert_kg_encoder.py"
+        ),
+        "source_commit": "3" * 40,
+        "selected_metric": "development_strict_triple_f1",
+        "selected_metric_value": 0.4,
+        "restart_state_sha256": sha256_file(
+            layout.resolve("checkpoints/seed-42/restart-state.pt")
+        ),
+        "dataset_compatibility_report": "audit/model-training-dataset-compatibility.json",
+        "dataset_compatibility_sha256": sha256_file(compatibility),
+        "historical_comparability": "partial_match_full_legacy_equivalence_unavailable",
     }
+
+
+def _prepare_run_identities(layout: RunLayout, *, compatibility=True):
+    atomic_write_json(
+        layout.resolve("manifests/00-checkout-manifest.json"),
+        {"status": "pass", "source": {"commit": "3" * 40}},
+    )
+    atomic_write_bytes(layout.source_root / "train_span.py", b"trainer\n")
+    atomic_write_bytes(layout.source_root / "data/code_accord.py", b"adapter\n")
+    atomic_write_bytes(
+        layout.source_root / "models/bert_kg_encoder.py", b"model\n"
+    )
+    atomic_write_bytes(
+        layout.resolve("checkpoints/seed-42/restart-state.pt"), b"restart\n"
+    )
+    acquisition = layout.resolve("manifests/02-input-acquisition-manifest.json")
+    atomic_write_json(acquisition, {"archive": {"sha256": "c" * 64}})
+    atomic_write_json(
+        layout.resolve("manifests/03-data-preparation-manifest.json"),
+        {
+            "archive_sha256": "c" * 64,
+            "acquisition_manifest_sha256": sha256_file(acquisition),
+            "annotation_bundle_sha256": "d" * 64,
+            "dataset_tree_sha256": "e" * 64,
+            "byte_identical_independent_materializations": True,
+        },
+    )
+    atomic_write_json(layout.resolve("data-prepared/split-manifest.json"), {"split_id": "CODE-SPLIT-1"})
+    atomic_write_jsonl(layout.resolve("data-prepared/train.jsonl"), [_sentence("train")])
+    atomic_write_jsonl(
+        layout.resolve("data-prepared/development.jsonl"), [_sentence("development")]
+    )
+    if compatibility:
+        atomic_write_json(
+            layout.resolve("audit/model-training-dataset-compatibility.json"),
+            {"status": "partial_match_full_legacy_equivalence_unavailable"},
+        )
 
 
 def _ledger_record(relations: list[dict] | None = None) -> dict:
@@ -116,11 +188,12 @@ class ModelAdapterTests(unittest.TestCase):
         cls.config = load_pipeline_config(SOURCE_ROOT, "configs/phase_b_path_a.json")
 
     def _prepare(self, layout: RunLayout, split: str = "test"):
+        _prepare_run_identities(layout)
         sentences = layout.resolve("data-prepared/test.jsonl")
         checkpoint = layout.resolve("checkpoints/checkpoint-manifest.json")
         candidates = layout.resolve("predictions/test/candidates.jsonl")
         atomic_write_jsonl(sentences, [_sentence(split)])
-        atomic_write_json(checkpoint, _checkpoint_manifest())
+        atomic_write_json(checkpoint, _checkpoint_manifest(layout, self.config))
         return sentences, checkpoint, candidates
 
     def test_dry_run_plans_without_producing_a_candidate(self):
@@ -141,12 +214,12 @@ class ModelAdapterTests(unittest.TestCase):
             self.assertIsNone(manifest["candidates_output"])
             self.assertFalse(candidates.exists())
             self.assertEqual(set(manifest), _schema_required("model-generation-manifest.schema.json"))
-            plan_path = layout.resolve("predictions/test/generation-plan.jsonl")
+            plan_path = layout.resolve("predictions/test/seed-42-generation-plan.jsonl")
             plan = [json.loads(line) for line in plan_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(plan), 1)
             self.assertEqual(set(plan[0]), _schema_required("model-generation-plan.schema.json"))
             self.assertEqual(plan[0]["token_count"], len(WORDS))
-            for path in Path(temporary).rglob("*"):
+            for path in layout.run_root.rglob("*"):
                 if path.is_file():
                     self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))
 
@@ -339,7 +412,7 @@ class ModelAdapterTests(unittest.TestCase):
             layout = RunLayout(Path(temporary), "recipe")
             layout.create()
             sentences, _checkpoint, candidates = self._prepare(layout)
-            wrong = _checkpoint_manifest()
+            wrong = _checkpoint_manifest(layout, self.config)
             wrong["base_model"] = "bert-base-uncased"
             checkpoint_wrong = layout.resolve("checkpoints/wrong-manifest.json")
             atomic_write_json(checkpoint_wrong, wrong)
@@ -386,12 +459,122 @@ class ModelTrainTests(unittest.TestCase):
             with self.assertRaises(DataContractError):
                 plan_training(layout, self.config, execution_mode="dry-run", training_seed=7)
 
-    def test_live_execution_is_not_implemented(self):
+    def test_live_execution_requires_bootstrap_artifacts(self):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "train-live")
             layout.create()
             with self.assertRaises(DataContractError):
                 plan_training(layout, self.config, execution_mode="live", training_seed=42)
+
+    def test_live_execution_resumes_and_emits_schema_bound_checkpoint(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "train-live-complete")
+            layout.create()
+            _prepare_run_identities(layout, compatibility=False)
+            atomic_write_json(
+                layout.resolve("manifests/00-checkout-manifest.json"),
+                {
+                    "status": "pass",
+                    "source": {"commit": "5" * 40},
+                },
+            )
+            extracted = layout.resolve(
+                "inputs/extracted/CODE-ACCORD-v1.0.0-annotations/"
+                "annotated_data/entities/train.csv"
+            )
+            historical = SOURCE_ROOT / "data/code_accord/entities/train.csv"
+            historical_copy = layout.source_root / "data/code_accord/entities/train.csv"
+            atomic_write_bytes(
+                historical_copy, historical.read_bytes().replace(b"\r\n", b"\n")
+            )
+            atomic_write_bytes(layout.source_root / "train_span.py", b"trainer\n")
+            atomic_write_bytes(layout.source_root / "data/code_accord.py", b"adapter\n")
+            atomic_write_bytes(
+                layout.source_root / "models/bert_kg_encoder.py", b"model\n"
+            )
+            atomic_write_bytes(
+                extracted, historical.read_bytes().replace(b"\r\n", b"\n")
+            )
+            observed_commands = []
+
+            def interrupted(command, *, cwd, check):
+                observed_commands.append(command)
+                restart = Path(command[command.index("--save-last-to") + 1])
+                atomic_write_bytes(restart, b"partial restart")
+                raise subprocess.CalledProcessError(9, command)
+
+            with self.assertRaises(DataContractError):
+                plan_training(
+                    layout,
+                    self.config,
+                    execution_mode="live",
+                    training_seed=42,
+                    command_runner=interrupted,
+                )
+
+            def completed(command, *, cwd, check):
+                observed_commands.append(command)
+                self.assertIn("--resume-from", command)
+                checkpoint = Path(command[command.index("--save-best-to") + 1])
+                restart = Path(command[command.index("--save-last-to") + 1])
+                summary = Path(command[command.index("--run-summary-out") + 1])
+                progress = Path(command[command.index("--progress-log") + 1])
+                atomic_write_bytes(checkpoint, b"checkpoint")
+                atomic_write_bytes(restart, b"restart")
+                atomic_write_bytes(progress, b"completed\n")
+                atomic_write_json(
+                    summary,
+                    {
+                        "status": "completed",
+                        "canonical_mode": True,
+                        "seed": 42,
+                        "test_evaluated": False,
+                        "selected_step": 100,
+                        "selected_metrics": {"ner_f1": 0.5, "triple_f1": 0.4},
+                        "resumed_from": str(restart),
+                        "environment": {
+                            "python": "3.10.20",
+                            "torch": "2.9.1+cu130",
+                            "cuda_runtime": "13.0",
+                            "cuda_available": True,
+                            "cuda_device": "fixture",
+                        },
+                    },
+                )
+
+            manifest = plan_training(
+                layout,
+                self.config,
+                execution_mode="live",
+                training_seed=42,
+                command_runner=completed,
+            )
+            self.assertEqual(manifest["status"], "completed")
+            self.assertEqual(
+                manifest["historical_comparability"],
+                "partial_match_full_legacy_equivalence_unavailable",
+            )
+            self.assertTrue(manifest["resume"]["resumed"])
+            self.assertIn("--canonical-mode", observed_commands[-1])
+            self.assertIn("--skip-test-eval", observed_commands[-1])
+            checkpoint_manifest = layout.resolve(
+                "checkpoints/seed-42/checkpoint-manifest.json"
+            )
+            checkpoint_value = json.loads(
+                checkpoint_manifest.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                set(checkpoint_value),
+                _schema_required("model-checkpoint-manifest.schema.json"),
+            )
+            self.assertEqual(checkpoint_value["checkpoint_step"], 100)
+            self.assertFalse(
+                json.loads(
+                    layout.resolve(
+                        "audit/model-training-dataset-compatibility.json"
+                    ).read_text(encoding="utf-8")
+                )["historical_statistical_continuity_claim_permitted"]
+            )
 
     def test_train_refuses_to_overwrite(self):
         with _temporary_output_directory() as temporary:

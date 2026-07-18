@@ -224,9 +224,10 @@ class BertBackbone(nn.Module):
     the backbone is modality-agnostic.
     """
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, model_revision: str = None):
         super().__init__()
-        self.bert = AutoModel.from_pretrained(model_name)
+        kwargs = {"revision": model_revision} if model_revision else {}
+        self.bert = AutoModel.from_pretrained(model_name, **kwargs)
 
     @property
     def hidden_size(self) -> int:
@@ -258,9 +259,9 @@ class BertKGExtractor(nn.Module):
                  num_entity_types: int = None, use_span_ner: bool = False,
                  max_span_width: int = 8, bio_enrich: str = "none",
                  boundary_reg: bool = False,
-                 boundary_refine: bool = False):
+                 boundary_refine: bool = False, model_revision: str = None):
         super().__init__()
-        self.backbone = BertBackbone(model_name)
+        self.backbone = BertBackbone(model_name, model_revision=model_revision)
         hidden = self.backbone.hidden_size
 
         # Allow explicit override for multi-dataset support (train_multi.py).

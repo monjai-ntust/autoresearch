@@ -16,6 +16,8 @@ Usage:
 import argparse
 import importlib
 import json
+import os
+import platform
 import random
 import sys
 import time
@@ -39,14 +41,20 @@ DATASET_REGISTRY = {
 }
 
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("--dataset", default="scierc",
                    choices=list(DATASET_REGISTRY.keys()))
     p.add_argument("--data-dir", default=None,
                    help="Override default dataset directory. Used by ACCORD-format "
                         "datasets to point at zh-Hant silver CSVs etc.")
+    p.add_argument("--prepared-dir", default=None,
+                   help="Opt-in canonical CODE-SPLIT-1 train/development JSONL directory.")
+    p.add_argument("--canonical-mode", action="store_true",
+                   help="Require prepared split isolation and run-local restart/output controls.")
     p.add_argument("--model-name", default=None)
+    p.add_argument("--model-revision", default=None,
+                   help="Optional immutable Hugging Face model revision.")
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--max-length", type=int, default=128)
     p.add_argument("--lr", type=float, default=3e-5)
@@ -80,6 +88,16 @@ def parse_args():
     p.add_argument("--device", default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save-best-to", default=None)
+    p.add_argument("--save-last-to", default=None,
+                   help="Full restart state, atomically refreshed after each completed evaluation.")
+    p.add_argument("--resume-from", default=None,
+                   help="Resume from a full state previously written by --save-last-to.")
+    p.add_argument("--progress-log", default=None,
+                   help="Progress log path (historical default remains /tmp/train_progress.txt).")
+    p.add_argument("--run-summary-out", default=None,
+                   help="Write a machine-readable completed-training summary.")
+    p.add_argument("--skip-test-eval", action="store_true",
+                   help="Do not load or evaluate the test split during training.")
     p.add_argument("--primary-metric", default="triple_f1", choices=["triple_f1", "ner_f1"],
                    help="Metric used to determine best checkpoint. Use ner_f1 for CUAD pretraining.")
     p.add_argument("--synth-jsonl", default="",
@@ -276,13 +294,137 @@ def parse_args():
                    help="Phase B3: Number of attention heads in EvidenceGAT (default: 4).")
     p.add_argument("--evidence-gat-layers", type=int, default=2,
                    help="Phase B3: Number of EvidenceGAT layers (default: 2).")
-    args = p.parse_args()
+    args = p.parse_args(argv)
     # Resolve cycle aliases
     if args.cycle_jsonl_alias and not args.synth_jsonl:
         args.synth_jsonl = args.cycle_jsonl_alias
     if args.cycle_weight is not None:
         args.synth_weight = args.cycle_weight
     return args
+
+
+def _progress_path(args):
+    return Path(args.progress_log) if args.progress_log else Path("/tmp/train_progress.txt")
+
+
+def _total_memory_bytes():
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def _append_progress(args, message):
+    path = _progress_path(args)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(message + "\n")
+
+
+def _atomic_torch_save(value, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".partial")
+    torch.save(value, partial)
+    partial.replace(path)
+
+
+def _atomic_json_write(value, path):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    partial.replace(path)
+
+
+def _save_best_checkpoint(args, model, step, metrics):
+    payload = {"encoder": model.state_dict(), "step": step, "metrics": metrics}
+    if args.canonical_mode:
+        _atomic_torch_save(payload, args.save_best_to)
+    else:
+        save_path = Path(args.save_best_to)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(payload, save_path)
+
+
+def _canonical_sampler(train_loader):
+    sampler = getattr(train_loader, "sampler", None)
+    if not hasattr(sampler, "state_dict") or not hasattr(sampler, "load_state_dict"):
+        raise ValueError("canonical training requires a resumable train sampler")
+    return sampler
+
+
+def _restart_payload(
+    args,
+    model,
+    optimizer,
+    scheduler,
+    train_loader,
+    *,
+    next_step,
+    best_metrics,
+    best_step,
+    boost_adaptive_triggered,
+    boost_adaptive_switched,
+    re_head_finetune_active,
+):
+    return {
+        "format_version": "train-span-restart-1.0",
+        "seed": args.seed,
+        "model_name": args.model_name,
+        "model_revision": args.model_revision,
+        "max_steps": args.max_steps,
+        "encoder": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "next_step": next_step,
+        "best_metrics": dict(best_metrics),
+        "best_step": best_step,
+        "python_rng_state": random.getstate(),
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state_all": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+        "train_sampler_state": _canonical_sampler(train_loader).state_dict(),
+        "boost_adaptive_triggered": boost_adaptive_triggered,
+        "boost_adaptive_switched": boost_adaptive_switched,
+        "re_head_finetune_active": re_head_finetune_active,
+    }
+
+
+def _load_restart(args, model, optimizer, scheduler, train_loader, device):
+    state = torch.load(args.resume_from, map_location=device, weights_only=False)
+    required = {
+        "format_version", "seed", "model_name", "model_revision", "max_steps",
+        "encoder", "optimizer", "scheduler", "next_step", "best_metrics",
+        "best_step", "python_rng_state", "torch_rng_state", "cuda_rng_state_all",
+        "train_sampler_state", "boost_adaptive_triggered",
+        "boost_adaptive_switched", "re_head_finetune_active",
+    }
+    if not isinstance(state, dict) or set(state) != required:
+        raise ValueError("restart state has an invalid field contract")
+    expected = {
+        "format_version": "train-span-restart-1.0",
+        "seed": args.seed,
+        "model_name": args.model_name,
+        "model_revision": args.model_revision,
+        "max_steps": args.max_steps,
+    }
+    for field, value in expected.items():
+        if state[field] != value:
+            raise ValueError(
+                f"restart state {field} mismatch: expected {value!r}, got {state[field]!r}"
+            )
+    model.load_state_dict(state["encoder"], strict=True)
+    optimizer.load_state_dict(state["optimizer"])
+    scheduler.load_state_dict(state["scheduler"])
+    _canonical_sampler(train_loader).load_state_dict(state["train_sampler_state"])
+    random.setstate(state["python_rng_state"])
+    torch.set_rng_state(state["torch_rng_state"].cpu())
+    if torch.cuda.is_available() and state["cuda_rng_state_all"]:
+        torch.cuda.set_rng_state_all(state["cuda_rng_state_all"])
+    return state
 
 
 def _write_relation_replay_jsonl(train_dataset, ds_mod, out_path, copies=1):
@@ -1077,10 +1219,34 @@ def cycle(loader):
         yield from loader
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    args = parse_args(argv)
+    if args.canonical_mode:
+        if args.dataset != "accord":
+            raise ValueError("canonical mode is implemented only for CODE-ACCORD")
+        required = {
+            "--prepared-dir": args.prepared_dir,
+            "--model-revision": args.model_revision,
+            "--save-best-to": args.save_best_to,
+            "--save-last-to": args.save_last_to,
+            "--progress-log": args.progress_log,
+            "--run-summary-out": args.run_summary_out,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(
+                "canonical mode requires " + ", ".join(sorted(missing))
+            )
+        if not args.skip_test_eval:
+            raise ValueError("canonical mode requires --skip-test-eval")
+        if args.synth_jsonl or args.relation_replay or args.evidence_gat:
+            raise ValueError(
+                "canonical CODE-STRICT-1 training forbids synthetic/replay/GAT inputs"
+            )
     torch.manual_seed(args.seed)
     random.seed(args.seed)
+    if args.canonical_mode and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     ds_mod = importlib.import_module(DATASET_REGISTRY[args.dataset])
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -1101,6 +1267,8 @@ def main():
     tokenizer_kwargs = {}
     if "deberta" in args.model_name.lower():
         tokenizer_kwargs["add_prefix_space"] = True
+    if args.model_revision:
+        tokenizer_kwargs["revision"] = args.model_revision
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, **tokenizer_kwargs)
     # Pass seed to build_dataloaders for datasets that create dev split at runtime
     # (CODE-ACCORD, CUAD). Datasets with fixed splits (SciERC, SciER, CoNLL04, ADE)
@@ -1127,6 +1295,8 @@ def main():
             dl_kwargs["seed"] = args.seed
         if "data_dir" in dl_params and args.data_dir:
             dl_kwargs["data_dir"] = args.data_dir
+        if "prepared_dir" in dl_params and args.prepared_dir:
+            dl_kwargs["prepared_dir"] = args.prepared_dir
         _, dev_loader, test_loader = ds_mod.build_dataloaders(tokenizer, **dl_kwargs)
         print(f"  sent-level eval: dev={len(dev_loader.dataset)} test={len(test_loader.dataset)}")
     else:
@@ -1136,6 +1306,8 @@ def main():
             dl_kwargs["seed"] = args.seed
         if "data_dir" in dl_params and args.data_dir:
             dl_kwargs["data_dir"] = args.data_dir
+        if "prepared_dir" in dl_params and args.prepared_dir:
+            dl_kwargs["prepared_dir"] = args.prepared_dir
         if "doc_window_size" in dl_params:
             dl_kwargs["doc_window_size"] = args.doc_window_size
         if "doc_window_stride" in dl_params:
@@ -1144,6 +1316,10 @@ def main():
             tokenizer, **dl_kwargs,
         )
         print(f"  train: {len(train_loader.dataset)} | dev: {len(dev_loader.dataset)}")
+    if args.skip_test_eval and test_loader is not None:
+        test_loader = None
+    if args.canonical_mode and test_loader is not None:
+        raise ValueError("canonical data adapter unexpectedly loaded the test split")
 
     # Entity type mapping: type_name -> id (1-indexed, 0 = NONE)
     entity_types = ds_mod.ENTITY_TYPES
@@ -1171,6 +1347,7 @@ def main():
         bio_enrich=args.bio_enrich,
         boundary_reg=args.boundary_reg,
         boundary_refine=args.boundary_refine,
+        model_revision=args.model_revision,
     ).to(device)
 
     # A12: Context-between-spans RE enrichment.
@@ -1279,8 +1456,6 @@ def main():
         )
         print(f"  synth: {len(synth_loader.dataset)}")
 
-    gold_iter = cycle(train_loader)
-    synth_iter = cycle(synth_loader) if synth_loader else None
     best_metrics = {args.primary_metric: -1.0}
     best_step = -1
 
@@ -1326,9 +1501,31 @@ def main():
         print(f"  re_head_finetune: freeze backbone at step {re_head_finetune_start}, "
               f"boost→{args.re_head_finetune_boost:.1f}x for last {args.re_head_finetune_steps} steps")
 
+    step = 0
+    resumed_from = None
+    if args.resume_from:
+        if not args.canonical_mode:
+            raise ValueError("--resume-from is available only in canonical mode")
+        restart = _load_restart(
+            args, model, optimizer, scheduler, train_loader, device
+        )
+        step = restart["next_step"]
+        best_metrics = dict(restart["best_metrics"])
+        best_step = restart["best_step"]
+        boost_adaptive_triggered = restart["boost_adaptive_triggered"]
+        boost_adaptive_switched = restart["boost_adaptive_switched"]
+        re_head_finetune_active = restart["re_head_finetune_active"]
+        if re_head_finetune_active:
+            for name, parameter in model.named_parameters():
+                if name.startswith("backbone."):
+                    parameter.requires_grad_(False)
+        resumed_from = str(Path(args.resume_from))
+        print(f"  resumed full training state at step {step} from {args.resume_from}")
+
+    gold_iter = cycle(train_loader)
+    synth_iter = cycle(synth_loader) if synth_loader else None
     model.train()
     t0 = time.time()
-    step = 0
     while step < args.max_steps:
         optimizer.zero_grad()
         batch = next(gold_iter)
@@ -1463,10 +1660,7 @@ def main():
                     best_metrics = eval_metrics
                     best_step = step
                     if args.save_best_to:
-                        save_path = Path(args.save_best_to)
-                        save_path.parent.mkdir(parents=True, exist_ok=True)
-                        torch.save({"encoder": model.state_dict(), "step": step,
-                                    "metrics": eval_metrics}, save_path)
+                        _save_best_checkpoint(args, model, step, eval_metrics)
                 model.train()
             continue  # skip standard training path below
 
@@ -1608,8 +1802,7 @@ def main():
             print(msg)
             sys.stdout.flush()
             # Write progress to file for monitoring
-            with open("/tmp/train_progress.txt", "a") as _pf:
-                _pf.write(msg + "\n")
+            _append_progress(args, msg)
 
         if step > 0 and step % args.eval_every == 0:
             metrics = evaluate_span(
@@ -1627,21 +1820,36 @@ def main():
                 best_step = step
                 star = " *"
                 if args.save_best_to:
-                    save_path = Path(args.save_best_to)
-                    save_path.parent.mkdir(parents=True, exist_ok=True)
-                    torch.save({"encoder": model.state_dict(), "step": step,
-                                "metrics": metrics}, save_path)
+                    _save_best_checkpoint(args, model, step, metrics)
             eval_msg = (f"[Eval @ {step}] NER={metrics['ner_f1']:.4f} "
                         f"Triple={metrics['triple_f1']:.4f}{star}")
             print(eval_msg)
             sys.stdout.flush()
-            with open("/tmp/train_progress.txt", "a") as _pf:
-                _pf.write(eval_msg + "\n")
+            _append_progress(args, eval_msg)
             model.train()
+            if args.canonical_mode and args.save_last_to:
+                _atomic_torch_save(
+                    _restart_payload(
+                        args,
+                        model,
+                        optimizer,
+                        scheduler,
+                        train_loader,
+                        next_step=step + 1,
+                        best_metrics=best_metrics,
+                        best_step=best_step,
+                        boost_adaptive_triggered=boost_adaptive_triggered,
+                        boost_adaptive_switched=boost_adaptive_switched,
+                        re_head_finetune_active=re_head_finetune_active,
+                    ),
+                    args.save_last_to,
+                )
 
         step += 1
 
     for split_name, loader in [("dev", dev_loader), ("test", test_loader)]:
+        if loader is None:
+            continue
         metrics = evaluate_span(
             model, loader, device, ds_mod,
             entity_type2id, id2entity_type,
@@ -1653,19 +1861,79 @@ def main():
         if split_name == "dev" and metrics.get(args.primary_metric, 0.0) > best_metrics[args.primary_metric]:
             best_metrics = dict(metrics)
             best_step = step
+            if args.canonical_mode and args.save_best_to:
+                _save_best_checkpoint(args, model, step, metrics)
         msg = (f"\n=== {split_name.upper()} (step {step}) ===\n"
                f"  NER={metrics['ner_f1']:.4f} Triple={metrics['triple_f1']:.4f}")
         print(msg)
         sys.stdout.flush()
-        with open("/tmp/train_progress.txt", "a") as _pf:
-            _pf.write(msg + "\n")
+        _append_progress(args, msg)
+    if args.canonical_mode and args.save_last_to:
+        _atomic_torch_save(
+            _restart_payload(
+                args,
+                model,
+                optimizer,
+                scheduler,
+                train_loader,
+                next_step=step,
+                best_metrics=best_metrics,
+                best_step=best_step,
+                boost_adaptive_triggered=boost_adaptive_triggered,
+                boost_adaptive_switched=boost_adaptive_switched,
+                re_head_finetune_active=re_head_finetune_active,
+            ),
+            args.save_last_to,
+        )
+    elapsed_seconds = time.time() - t0
     final_msg = (f"=== BEST DEV (step {best_step}) ===\n"
                  f"  NER={best_metrics['ner_f1']:.4f} Triple={best_metrics['triple_f1']:.4f}\n"
-                 f"  time={time.time()-t0:.1f}s")
+                 f"  time={elapsed_seconds:.1f}s")
     print(final_msg)
     sys.stdout.flush()
-    with open("/tmp/train_progress.txt", "a") as _pf:
-        _pf.write(final_msg + "\n")
+    _append_progress(args, final_msg)
+    summary = {
+        "schema_version": "train-span-summary-1.0",
+        "status": "completed",
+        "canonical_mode": args.canonical_mode,
+        "dataset": args.dataset,
+        "seed": args.seed,
+        "model_name": args.model_name,
+        "model_revision": args.model_revision,
+        "completed_steps": step,
+        "selected_step": best_step,
+        "selection_metric": args.primary_metric,
+        "selected_metrics": best_metrics,
+        "test_evaluated": test_loader is not None,
+        "resumed_from": resumed_from,
+        "elapsed_seconds": elapsed_seconds,
+        "environment": {
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "cpu_count": os.cpu_count(),
+            "total_memory_bytes": _total_memory_bytes(),
+            "torch": torch.__version__,
+            "cuda_runtime": torch.version.cuda,
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_device": (
+                torch.cuda.get_device_name(torch.cuda.current_device())
+                if torch.cuda.is_available()
+                else None
+            ),
+            "cuda_device_memory_bytes": (
+                torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
+                if torch.cuda.is_available()
+                else None
+            ),
+            "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
+        },
+    }
+    if args.run_summary_out:
+        _atomic_json_write(summary, args.run_summary_out)
+    return summary
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 
 # ── Label vocabulary ─────────────────────────────────────────────────
 ENTITY_TYPES = ["Object", "Property", "Quality", "Value"]
@@ -40,6 +40,58 @@ NUM_RELATIONS = len(REL2ID)  # 10
 # These relations are rare (equal=51, greater=32, greater-equal=74, less=7, less-equal=41
 # out of 2200 training relations) yet have 0% evidence-path reachability.
 COMPARISON_REL_IDS = [5, 6, 7, 8, 9]  # equal, greater, greater-equal, less, less-equal
+
+
+class ResumableRandomSampler(Sampler):
+    """Canonical-mode shuffle sampler with serializable order and cursor.
+
+    The historical CSV path continues to use PyTorch's default random sampler.
+    Prepared-data mode opts into this sampler so a run-local restart state can
+    resume at the next unconsumed example without silently reshuffling the
+    remainder of the current epoch.
+    """
+
+    def __init__(self, data_source, seed: int):
+        self.data_source = data_source
+        self.generator = torch.Generator()
+        self.generator.manual_seed(seed)
+        self.order = []
+        self.cursor = 0
+
+    def __iter__(self):
+        if self.cursor >= len(self.order):
+            self.order = torch.randperm(
+                len(self.data_source), generator=self.generator
+            ).tolist()
+            self.cursor = 0
+        while self.cursor < len(self.order):
+            index = self.order[self.cursor]
+            self.cursor += 1
+            yield index
+
+    def __len__(self):
+        return len(self.data_source)
+
+    def state_dict(self):
+        return {
+            "order": list(self.order),
+            "cursor": self.cursor,
+            "generator_state": self.generator.get_state(),
+        }
+
+    def load_state_dict(self, state):
+        required = {"order", "cursor", "generator_state"}
+        if not isinstance(state, dict) or set(state) != required:
+            raise ValueError("canonical sampler state has an invalid contract")
+        order = list(state["order"])
+        if sorted(order) != list(range(len(self.data_source))):
+            raise ValueError("canonical sampler order does not match the dataset")
+        cursor = state["cursor"]
+        if not isinstance(cursor, int) or not 0 <= cursor <= len(order):
+            raise ValueError("canonical sampler cursor is out of range")
+        self.order = order
+        self.cursor = cursor
+        self.generator.set_state(state["generator_state"])
 
 
 def _doc_id_from_metadata(raw: str) -> str:
@@ -344,6 +396,82 @@ def collate_fn(batch, pad_token_id: int = 0):
 DEFAULT_DATA_DIR = Path(__file__).parent / "code_accord"
 
 
+def _load_prepared_examples(path: Path, expected_split: str) -> list:
+    """Losslessly adapt canonical prepared JSONL into the historical example shape."""
+
+    examples = []
+    seen = set()
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path.name}:{line_number} is not valid JSON") from exc
+            if record.get("split") != expected_split:
+                raise ValueError(
+                    f"{path.name}:{line_number} has split {record.get('split')!r}; "
+                    f"expected {expected_split!r}"
+                )
+            example_id = record.get("example_id")
+            if not isinstance(example_id, str) or not example_id or example_id in seen:
+                raise ValueError(
+                    f"{path.name}:{line_number} has a missing or duplicate example_id"
+                )
+            seen.add(example_id)
+            words = record.get("words")
+            if not isinstance(words, list) or not words or not all(
+                isinstance(word, str) for word in words
+            ):
+                raise ValueError(f"{path.name}:{line_number} has invalid words")
+
+            ner = []
+            entity_spans = set()
+            for entity in record.get("entities", []):
+                span = (entity.get("start"), entity.get("end"))
+                entity_type = entity.get("type")
+                if (
+                    not all(isinstance(value, int) for value in span)
+                    or not 0 <= span[0] <= span[1] < len(words)
+                    or entity_type not in ENTITY_TYPES
+                ):
+                    raise ValueError(
+                        f"{path.name}:{line_number} has an invalid entity span"
+                    )
+                entity_spans.add(span)
+                ner.append((span[0], span[1], entity_type))
+
+            relations = []
+            for relation in record.get("relations", []):
+                relation_type = relation.get("relation")
+                head = relation.get("head", {})
+                tail = relation.get("tail", {})
+                head_span = (head.get("start"), head.get("end"))
+                tail_span = (tail.get("start"), tail.get("end"))
+                if (
+                    relation_type not in REL2ID
+                    or head_span not in entity_spans
+                    or tail_span not in entity_spans
+                ):
+                    raise ValueError(
+                        f"{path.name}:{line_number} has a relation outside typed spans"
+                    )
+                relations.append((head_span, tail_span, REL2ID[relation_type]))
+
+            examples.append(
+                {
+                    "example_id": example_id,
+                    "doc_id": record.get("source_document_id", "UNKNOWN"),
+                    "seq": line_number - 1,
+                    "words": words,
+                    "ner": ner,
+                    "relations": relations,
+                }
+            )
+    if not examples:
+        raise ValueError(f"{path.name} contains no prepared examples")
+    return examples
+
+
 class DocGroupDataset(Dataset):
     """
     Phase B3: Document-level dataset for Evidence GAT training.
@@ -556,9 +684,49 @@ def build_doc_dataloaders(tokenizer, data_dir=None, batch_size: int = 1,
 def build_dataloaders(tokenizer, data_dir=None, batch_size: int = 16,
                       max_length: int = 128, num_workers: int = 0,
                       dev_ratio: float = 0.15, seed: int = 42,
-                      doc_window_size: int = 1, doc_window_stride: int = 1):
+                      doc_window_size: int = 1, doc_window_stride: int = 1,
+                      prepared_dir=None):
     data_dir = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
     pad_id = tokenizer.pad_token_id
+
+    if prepared_dir is not None:
+        prepared_dir = Path(prepared_dir)
+        train_examples = _load_prepared_examples(
+            prepared_dir / "train.jsonl", "train"
+        )
+        dev_examples = _load_prepared_examples(
+            prepared_dir / "development.jsonl", "development"
+        )
+        train_examples = _make_doc_windows(
+            train_examples, doc_window_size, doc_window_stride
+        )
+        dev_examples = _make_doc_windows(
+            dev_examples, doc_window_size, doc_window_stride
+        )
+        print(
+            f"  CODE-ACCORD prepared: train={len(train_examples)} "
+            f"dev={len(dev_examples)} test=not-loaded"
+        )
+        print(f"  Train rels: {sum(len(e['relations']) for e in train_examples)}")
+        print(f"  Dev rels:   {sum(len(e['relations']) for e in dev_examples)}")
+
+        def make_prepared_loader(examples, shuffle):
+            dataset = CodeAccordDataset(examples, tokenizer, max_length)
+            sampler = ResumableRandomSampler(dataset, seed) if shuffle else None
+            return DataLoader(
+                dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                sampler=sampler,
+                num_workers=num_workers,
+                collate_fn=lambda batch: collate_fn(batch, pad_token_id=pad_id),
+            )
+
+        return (
+            make_prepared_loader(train_examples, True),
+            make_prepared_loader(dev_examples, False),
+            None,
+        )
 
     # Load entity and relation data
     ent_train = _load_entities(data_dir / "entities" / "train.csv")

@@ -32,10 +32,10 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 114 differing paths: 72
-current-only paths, 34 baseline-only paths, and 8 modified baseline paths. The
-other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 128.
+With this document included, the comparison contains 118 differing paths: 74
+current-only paths, 34 baseline-only paths, and 10 modified baseline paths. The
+other 46 baseline paths are reused byte-for-byte. The baseline has 90 tracked
+paths and the current tree has 130.
 
 ## Current architecture and rewrite boundary
 
@@ -62,14 +62,14 @@ the active modules at the root is the current boundary for three reasons:
    enforce its contracts at every boundary.
 
 This is not yet a complete end-to-end replacement. `model.py` adds the canonical
-`model` stage: `generate-candidates` with `dry-run` and `replay` executions
-(transforming a frozen encoder prediction ledger into typed `CODE-STRICT-1`
-candidates under the output contract) and `train` with a `dry-run` execution
-(planning deterministic single-seed training against the frozen recipe and
-declaring the checkpoint-manifest contract). Live encoder inference and training,
-plus fixture parity against `inference_kg.py`/`train_span.py`, remain gated, so
-those historical scripts are not yet eligible for removal. Official data
-preparation now materializes the raw/typed-strict dual view.
+`model` stage: `generate-candidates` supports dry-run/replay/live and `train`
+supports dry-run plus accelerator-gated live execution through the original
+`train_span.py` loop. The compatibility mode consumes the prepared split,
+pins the backbone revision, preserves the historical default path, emits full
+restart/checkpoint provenance, and forbids test access during selection. Actual
+accelerator parity/smoke evidence and the eight-seed publication run remain
+gated, so the historical scripts are not yet eligible for removal. Official
+data preparation materializes the raw/typed-strict dual view.
 The root-module layout is an intermediate reviewable surface, not a claim that
 the historical model paths have been superseded.
 
@@ -78,10 +78,10 @@ The similarly named paths below are not one-to-one rewrites:
 | Baseline/current boundary | Current interpretation and reason |
 | --- | --- |
 | `prepare.py` vs `preparation.py` | The baseline script prepared FineWeb bytes-per-byte training data. The canonical module validates and materializes official CODE-ACCORD records. The old script is removed as unrelated upstream code; the new module does not inherit its behavior. |
-| `data/code_accord.py` vs canonical preparation | The unchanged loader preserves the historical fuzzy, type-agnostic experiment path. Canonical preparation uses strict typed alignment and hard-stop auditing because fuzzy recovery is unsuitable for publication scoring. |
+| `data/code_accord.py` vs canonical preparation | The historical CSV/fuzzy path is preserved as the default. An opt-in lossless prepared-JSONL adapter and resumable sampler feed the same dataset/example classes for canonical training; canonical preparation still owns strict typed alignment. |
 | `verify_triples_llm.py` vs `verifier.py` | The unchanged root verifier preserves the SciERC free-form response path. The canonical verifier uses frozen CODE prompts, structured response schemas, model identity, caching, replay, retry policy, and telemetry. |
 | `eval/triple_f1.py` vs `scoring.py` | The historical helper preserves type-agnostic exact triple scoring used by retained experiments. Canonical scoring applies directed, entity-typed `CODE-STRICT-1` matching across the frozen four-condition matrix. |
-| Root training/model modules vs canonical root modules | Model behavior remains in the retained modules. The canonical modules own surrounding contracts; thin parity-tested adapters are the intended integration mechanism. |
+| Root training/model modules vs canonical root modules | Model behavior remains in the retained modules. The canonical runner now supplies only prepared-input, revision, restart, no-test, and manifest controls around that original loop. |
 | Historical result/checkpoint locations vs `output/<run-id>/` | Historical ledgers remain evidence pending verified archival. Every canonical runtime artifact is confined to the ignored run directory so a standalone clone has one reproducible output boundary. |
 
 ## Modified baseline paths
@@ -91,10 +91,12 @@ The similarly named paths below are not one-to-one rewrites:
 | `.gitignore` | Ignores `/output/`, checkpoints, and downloaded/generated dataset directories while explicitly allowing the tracked CODE-ACCORD fixture. The obsolete ignore rule for tracked `results.tsv` is absent. This enforces the single temporary-output root without hiding retained evidence. |
 | `README.md` | Defines the repository as a standalone publication artifact, separates canonical commands from historical provenance paths, documents fresh-clone preparation without historical checkpoints, environment-version recording, datasets, execution gates, outputs, limitations, and links this inventory. The baseline upstream pretraining description did not describe the retained research implementation. |
 | `bench_gpu.py` | Places benchmark execution behind `main()` and an import guard. Benchmark behavior remains available, while importing the module no longer downloads a model or allocates accelerator memory. |
+| `data/code_accord.py` | Preserves the historical CSV loader as the default and adds an opt-in, order-preserving adapter from prepared train/development JSONL into the same example shape. Canonical-only shuffling uses a serializable sampler cursor/order so restart does not repartition or silently reshuffle the remaining epoch. |
 | `eval_graph_rag.py` | Describes retrieval as unique whitespace-token overlap instead of BM25-style retrieval. Runtime behavior is unchanged; the text now states the actual algorithm and avoids overstating the evaluation method. |
+| `models/bert_kg_encoder.py` | Adds an optional model-revision argument and forwards it to `AutoModel.from_pretrained`; callers that omit it retain the exact historical loading behavior. Canonical training/inference uses it to bind DeBERTa to the frozen revision. |
 | `pyproject.toml` | Names the publication artifact, removes unused upstream packages, and declares dependencies used by retained code (`peft`, `pytorch-crf`, and `safetensors`) while keeping the required Torch/Transformers/data stack. Torch resolves from the CUDA 13.0 index so the locked aarch64 environment can target the external GB10 (compute capability 12.1). |
 | `train_gumbel.py` | Restricts process-environment side effects to command execution under the import guard. The training command retains its environment settings, while library import remains side-effect free. |
-| `train_span.py` | Escapes literal percent signs in argument help text. Scientific behavior is unchanged; `--help` no longer fails through `argparse` percent interpolation. |
+| `train_span.py` | Keeps all historical arguments/default behavior and adds opt-in canonical controls for prepared split input, pinned model revision, no-test selection, run-local progress/summary/checkpoint paths, and full atomic restart state. The original encoder, heads, loss loop, optimizer, scheduler, recipe, and checkpoint `encoder` representation remain the implementation host. |
 | `uv.lock` | Resolves the dependency graph declared by the current `pyproject.toml`, including Torch 2.9.1 CUDA 13.0 and its CUDA-13 runtime packages. It supports repeatable installation of the current artifact and is not represented as an exact manifest of historical experiment machines. |
 
 ## Baseline-only paths
@@ -150,10 +152,11 @@ is a set relationship between the two trees, not provenance metadata.
 | --- | --- |
 | `.gitattributes` | Normalizes text to LF so hashes and machine-readable artifacts remain stable across operating systems. |
 | `configs/phase_b_experiment_matrix.json` | Freezes the four evaluated conditions (`VER-RAW`, `VER-CONFIDENCE`, `VER-SIMPLE`, and `VER-CORRECTIVE`) in one machine-validated authority. |
-| `configs/phase_b_path_a.json` | Freezes dataset, model, seed, split, training, threshold, statistics, runtime, and tracked-resource identities for the canonical protocol. |
+| `configs/phase_b_path_a.json` | Freezes dataset, model, seed, split, training, threshold, statistics, runtime, and tracked-resource identities for the canonical protocol, including the CUDA-13 lock index and compatibility-training source/schema/script hashes. |
 | `configs/phase_b_section5_evidence.json` | Registers the two historical ledgers and seven claim families as immutable secondary evidence so reconciliation cannot silently promote them to canonical results. |
-| `docs/phase_b_workflow.md` | Is the fresh-clone primary-data guide: it gives the copy/paste bootstrap, non-enforcing environment-version recording, exact prepared-data boundary, eight-seed checkpoint requirements and manifest contract, and explicitly distinguishes the unavailable canonical live-training adapter from legacy CSV/split training before describing the later candidate, verifier, score, and archival gates. |
-| `scripts/phase_b_debug.sh` | Bash recovery runner for the standalone external checkout. Its default sweep parser-checks every documented command, runs every stage whose run-local inputs exist, records output-backed completion, reports gated/missing prerequisites as `BLOCKED`, and returns nonzero if any blocks remain or an attempted command errors. When canonical checkpoint inputs are absent, an explicit `--allow-legacy-diagnostic` makes that sweep invoke the same noncanonical `train_span.py` checkpoint diagnostic; it locates the extracted CSV root dynamically and preflights the GB10/CUDA runtime. The strict publishable chain still blocks at the missing CODE-SPLIT-1 live-training adapter. |
+| `docs/phase_b_workflow.md` | Is the fresh-clone primary-data guide: it gives the bootstrap, non-enforcing environment-version recording, exact prepared-data boundary, canonical live/resume command and artifacts, partial pre–Phase A data comparison, legacy diagnostic distinction, GB10 runtime requirement, and B-07/eight-seed/verifier gates. |
+| `docs/model-training-compatibility.md` | Freezes the historical trainer/data/recipe/environment evidence, recoverable per-seed outcomes, preserved implementation invariants, necessary opt-in differences, unavailable equivalence evidence, focused validation, and external smoke gate for B-05C. |
+| `scripts/phase_b_debug.sh` | Bash recovery runner for the standalone external checkout. Its default sweep parser-checks every command and reports expensive external training as blocked; `train-live` runs/resumes the selected canonical seed, while `publishable` advances that seed through development candidates and then stops at B-07. The acknowledged legacy CSV diagnostic remains noncanonical. Completion checks are seed-specific. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
 | `docs/historical-transition-inventory.md` | B-05U family-level record of why each legacy executable family cannot remain independent, its canonical successor stage, and its raw-evidence disposition. |
@@ -167,13 +170,13 @@ is a set relationship between the two trees, not provenance metadata.
 | Path | Current role and reason |
 | --- | --- |
 | `acquisition.py` | Downloads the approved immutable archive resumably, verifies size/hash/licensing metadata, and selectively extracts it with path-safety checks. |
-| `phase_b.py` | Exposes one command surface for `doctor`, `reconcile`, `fetch`, `prepare`, verifier modes, pilot audit, and scoring, keeping stage transitions explicit. |
+| `phase_b.py` | Exposes one command surface for `doctor`, `reconcile`, `fetch`, `prepare`, dry/live model training, candidate generation, verifier modes, pilot audit, and scoring, keeping stage transitions explicit. |
 | `config.py` | Loads and strictly validates the frozen config, experiment matrix, schemas, and tracked-resource identities so protocol drift fails early. |
 | `constants.py` | Centralizes frozen entity, relation, condition, schema, and protocol identifiers to prevent spelling or ordering drift between stages. |
 | `doctor.py` | Checks checkout identity, ignore rules, resources, and worktree constraints; records configured-reference and actual Python/uv versions without enforcing an exact version; and emits a machine-readable preflight manifest. |
 | `phase_b_io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
 | `metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
-| `model.py` | Canonical `model` stage. `generate-candidates` (`dry-run` plan; `replay` of a frozen encoder prediction ledger into typed `CODE-STRICT-1` candidates; `live` runs the retained `models.bert_kg_encoder` to produce the ledger then applies the identical transform, hash-verifying the checkpoint blob) and `train` (`dry-run` plan binding the frozen recipe and declaring the checkpoint-manifest contract). All output is confined to `output/<run-id>/`; `live` inference and `live` training are externally gated on the accelerator. |
+| `model.py` | Canonical `model` stage. Candidate dry/replay/live paths use seed-specific manifests and verify checkpoint plus acquisition/preparation/split identities. Training dry-run plans a seed; live validates bootstrap/data compatibility, invokes canonical mode in the original trainer, resumes run-local state, and emits checkpoint/stage manifests without implementing a second training loop. |
 | `paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
 | `pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
 | `preparation.py` | Parses the immutable official corpus, preserves raw relation-coverage statistics separately from typed-strict eligibility, audits BIO/relation alignment, and materializes deterministic records only after validation. |
@@ -205,11 +208,11 @@ is a set relationship between the two trees, not provenance metadata.
 | `schemas/phase_b/gold-alignment-audit.schema.json` | Validates the hard-stop audit for ambiguous or missing typed BIO alignment rather than allowing silent data loss. |
 | `schemas/phase_b/input-acquisition-manifest.schema.json` | Validates archive origin, licensing acknowledgment, size, hash, extraction, and cache status. |
 | `schemas/phase_b/metrics.schema.json` | Validates machine-readable offline metric counts and precision/recall/F1 outputs. |
-| `schemas/phase_b/model-checkpoint-manifest.schema.json` | Validates the encoder checkpoint identity (seed, split, recipe, checkpoint/split hashes) that a prediction ledger and its candidates are bound to. |
+| `schemas/phase_b/model-checkpoint-manifest.schema.json` | Validates the encoder checkpoint identity and selected metric plus archive, acquisition, annotation, prepared tree/files/split, config/code, restart, source-commit, and historical-comparability bindings consumed by candidate generation. |
 | `schemas/phase_b/model-generation-manifest.schema.json` | Validates the `model generate-candidates` stage manifest for both dry-run and replay executions. |
 | `schemas/phase_b/model-generation-plan.schema.json` | Validates the per-sentence dry-run inference plan emitted without contacting a model. |
 | `schemas/phase_b/model-prediction-ledger.schema.json` | Validates the frozen per-sentence encoder span/relation scores consumed by replay candidate generation. |
-| `schemas/phase_b/model-train-manifest.schema.json` | Validates the `model train` dry-run manifest that plans single-seed training against the frozen recipe and declares the checkpoint-manifest contract. |
+| `schemas/phase_b/model-train-manifest.schema.json` | Validates dry-run plans and completed compatibility-hosted live seed manifests, including run-local input/output, resume, environment, and historical-comparability evidence. |
 | `schemas/phase_b/outcomes.schema.json` | Validates paired candidate- and sentence-level outcomes required by confidence intervals and paired tests. |
 | `schemas/phase_b/prepared-sentence.schema.json` | Validates each normalized, provenance-bearing CODE-ACCORD sentence record. |
 | `schemas/phase_b/records.schema.json` | Validates gold, candidate, and verifier record variants at stage boundaries. |
@@ -233,7 +236,8 @@ is a set relationship between the two trees, not provenance metadata.
 | Path | Current role and reason |
 | --- | --- |
 | `tests/test_artifact_contracts.py` | Protects retained historical pure functions, import safety, graph/rule behavior, and verifier contracts from cleanup regressions. |
-| `tests/test_phase_b_model.py` | Tests the candidate-generation adapter: dry-run planning, replay greedy/confidence/dedup parity, downstream round-trip, and rejection of orphan relations, oversized spans, recipe mismatch, and overwrite. Also tests the `model train` dry-run recipe/split binding. |
+| `tests/test_phase_b_model.py` | Tests candidate dry/replay identity and confidence contracts plus training dry-run, missing-bootstrap rejection, interrupted-live retry/resume command construction, partial legacy-data audit, no-test summary, and schema-bound checkpoint output with a fake trainer process. |
+| `tests/test_phase_b_training_compatibility.py` | Tests prepared-record order/span/relation adaptation, split-substitution rejection, sampler cursor/order resume, opt-in historical defaults, and optional model-revision forwarding without downloading a model. |
 | `tests/test_phase_b_threshold.py` | Tests development threshold selection: hand-derived argmax/tie-rule and false-positive curves, all-eight-seed coverage, overwrite refusal, and that the emitted file is consumable by the scorer's threshold loader. |
 | `tests/test_phase_b_pilot.py` | Exercises valid and invalid pilot selections, captures, determinism, and publication-admission barriers with synthetic data. |
 | `tests/test_phase_b_pipeline.py` | Tests config/path containment, typed records, metrics, split isolation, statistics, and offline scoring. |
@@ -243,7 +247,7 @@ is a set relationship between the two trees, not provenance metadata.
 
 ## Reused without source edits
 
-These 48 baseline paths are byte-for-byte unchanged. Their presence is
+These 46 baseline paths are byte-for-byte unchanged. Their presence is
 intentional; “historical” means their results are provenance evidence, not that
 they are canonical publication commands.
 
@@ -255,7 +259,6 @@ they are canonical publication commands.
 | `data/__init__.py` | Preserves the data package boundary used by retained loaders. |
 | `data/ade.py` | Preserves the historical ADE real-data loader and comparator path. |
 | `data/arxiv_real.py` | Preserves the historical real-arXiv loader used by retained experiments. |
-| `data/code_accord.py` | Preserves exact historical CODE-ACCORD fuzzy-loading behavior for provenance; canonical strict preparation intentionally does not reuse its matching semantics. |
 | `data/code_accord/entities/train.csv` | Preserves the tracked partial historical input needed to interpret the loader and old checkout, while documentation states that it is not the complete canonical corpus. |
 | `data/conll04.py` | Preserves the historical CoNLL04 loader and cross-dataset path. |
 | `data/cuad.py` | Preserves the historical CUAD transfer loader. |
@@ -284,7 +287,6 @@ they are canonical publication commands.
 | Path | Reason for reuse |
 | --- | --- |
 | `models/__init__.py` | Preserves the model package boundary. |
-| `models/bert_kg_encoder.py` | Preserves the direct encoder underlying the historical joint NER/RE evidence chain and is the intended target of a thin canonical adapter. |
 | `models/critic.py` | Preserves the critic used by retained generative/cooperative negative-result paths. |
 | `models/decoder_d.py` | Preserves the decoder used by retained generative comparators. |
 | `models/decoder_d_lora.py` | Preserves the LoRA decoder variant supporting a retained negative-result family. |

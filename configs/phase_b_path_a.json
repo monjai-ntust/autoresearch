@@ -186,7 +186,7 @@
     "python": "3.10.20",
     "uv": "0.11.26",
     "torch": "2.9.1",
-    "cuda_wheel_index": "https://download.pytorch.org/whl/cu128"
+    "cuda_wheel_index": "https://download.pytorch.org/whl/cu130"
   },
   "runtime_paths": {
     "sentences": "data-prepared/test.jsonl",
@@ -210,6 +210,7 @@
     "uv.lock",
     "pyproject.toml",
     "docs/phase_b_workflow.md",
+    "docs/model-training-compatibility.md",
     "docs/phase_c_migration.md",
     "docs/historical-transition-map.md",
     "configs/phase_b_section5_evidence.json",
@@ -223,6 +224,8 @@
     "schemas/phase_b/score-manifest.schema.json",
     "schemas/phase_b/input-acquisition-manifest.schema.json",
     "schemas/phase_b/data-preparation-manifest.schema.json",
+    "schemas/phase_b/model-train-manifest.schema.json",
+    "schemas/phase_b/model-checkpoint-manifest.schema.json",
     "schemas/phase_b/gold-alignment-audit.schema.json",
     "schemas/phase_b/prepared-sentence.schema.json",
     "schemas/phase_b/section5-evidence-register.schema.json",
@@ -243,6 +246,11 @@
     "prompts/phase_b/code-verifier-1-corrective.txt",
     "acquisition.py",
     "phase_b.py",
+    "model.py",
+    "train_span.py",
+    "data/code_accord.py",
+    "models/bert_kg_encoder.py",
+    "scripts/phase_b_debug.sh",
     "config.py",
     "constants.py",
     "doctor.py",
