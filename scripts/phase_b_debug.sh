@@ -22,6 +22,7 @@ SEED=42
 BRANCH="refactor"
 MODE="simple"
 ALLOW_LEGACY_DIAGNOSTIC=false
+BLOCKED_COUNT=0
 RESPONSE_LEDGER="inputs/frozen-simple-responses.jsonl"
 CAPTURE_INDEX="inputs/pilot/capture-index.json"
 CHECKPOINT_MANIFEST=""
@@ -257,6 +258,7 @@ ensure_command_check() {
 }
 
 blocked() {
+  BLOCKED_COUNT=$((BLOCKED_COUNT + 1))
   note "BLOCKED: $*"
 }
 
@@ -679,5 +681,11 @@ case "$STAGE" in
   publishable) ensure_publishable ;;
   *) die "unknown --stage: $STAGE (run with --help for the supported list)" ;;
 esac
+
+if [[ "$STAGE" == "available" && "$BLOCKED_COUNT" -gt 0 ]]; then
+  printf '\nphase_b_debug: %s stage(s) remain blocked for run %q; see the BLOCKED lines above.\n' \
+    "$BLOCKED_COUNT" "$RUN_ID" >&2
+  exit 2
+fi
 
 note "stage '$STAGE' is complete for run '$RUN_ID'"

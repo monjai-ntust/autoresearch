@@ -187,7 +187,8 @@ documented command, runs every stage whose required run-local artifacts are
 present, and exits on a new command error; after fixing the error, rerun the
 same command with the same `RUN_ID`. It reports missing external inputs and
 ungranted publication gates as `BLOCKED` and continues to test independent
-available stages. `--stage publishable` instead stops at the first missing
+available stages, then exits nonzero when any blocks remain; it never reports a
+blocked sweep as complete. `--stage publishable` instead stops at the first missing
 canonical publication gate. `--help` lists explicit stages for every later
 documented command (checkpoint planning, candidate generation, thresholding,
 verifier/pilot, score, and the retained legacy diagnostic). These stages do not
