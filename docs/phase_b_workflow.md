@@ -120,16 +120,45 @@ The checkout manifest always reports that publication execution is not yet
 admitted because B-07 approval has not occurred. A passing B-05 doctor is not
 permission to run the gated training or final-test verifier work.
 
-### Fresh clone: no checkpoints or previous run required
+### Fresh clone: run this bootstrap block, then stop
 
-Start with a new run ID and execute the first three stages in order: `doctor`,
-`fetch`, then `prepare`. Do not start with `prepare`, and do not reuse an
-`output/<run-id>/` directory from another checkout. No encoder checkpoint,
-prediction ledger, verifier record, or historical result is needed for these
-stages: `fetch` downloads the immutable CODE-ACCORD archive into the new run,
-and `prepare` derives the raw-provenance/typed-strict data from it. Checkpoints
-are required only later for `model generate-candidates`; the absent historical
-checkpoints are provenance, not a prerequisite for fresh-clone preparation.
+On a fresh external machine, clone the maintained source branch (or update an
+existing clone with `git pull --ff-only origin refactor`) and run the following
+commands from the repository root. The one `RUN_ID` is deliberately reused for
+every bootstrap stage; do not substitute a new live-verifier run ID.
+
+```bash
+git clone --branch refactor --single-branch \
+  https://github.com/monjai-ntust/autoresearch.git autoresearch-max
+cd autoresearch-max
+uv sync --frozen
+
+RUN_ID="path-a-bootstrap-$(date -u +%Y%m%dT%H%M%SZ)"
+
+uv run --frozen python -B phase_b.py doctor \
+  --config configs/phase_b_path_a.json --run-id "$RUN_ID"
+uv run --frozen python -B phase_b.py reconcile \
+  --config configs/phase_b_path_a.json --run-id "$RUN_ID"
+uv run --frozen python -B phase_b.py fetch \
+  --config configs/phase_b_path_a.json --run-id "$RUN_ID"
+uv run --frozen python -B phase_b.py prepare \
+  --config configs/phase_b_path_a.json --run-id "$RUN_ID"
+```
+
+Expected terminal statuses are `pass`, `reconciled_secondary_evidence`,
+`fetched`, and `prepared`. The final result must report `byte_identical: true`.
+This bootstrap needs no encoder checkpoint, prediction ledger, verifier record,
+Ollama model blob, or historical result: `fetch` downloads the immutable
+CODE-ACCORD archive, and `prepare` derives the raw-provenance/typed-strict data
+under `output/$RUN_ID/`.
+
+Stop after `prepare`. Do **not** run `verifier --execution live` from a fresh
+clone, including with a new ID such as `path-a-simple-live`: opening that ID
+with `doctor` creates only the empty run layout, not its prepared sentences,
+candidates, warm-up input, pilot selection, or run-local model blob. Those
+files are produced only after the externally gated checkpoint/candidate and
+development-pilot workflow. The absent historical checkpoints are provenance,
+not a prerequisite for this bootstrap.
 
 ## 3. Reconcile the frozen Section 5 ledgers
 
@@ -206,6 +235,12 @@ independently generated trees whose inventories and tree hashes must be
 identical before atomic promotion.
 
 ## 6. Plan, execute, or replay the frozen verifier
+
+This section is a later-stage interface reference, not the next command after
+fresh-clone preparation. A live verifier call requires prepared sentences and
+canonical candidates in its **same** run plus the pinned run-local model blob;
+the development-pilot rules below impose further prerequisites. Do not create
+or copy placeholder inputs merely to make this command start.
 
 The tracked UTF-8 prompt files and response schemas define
 `CODE-VERIFIER-1`. A dry run validates prepared sentences and candidates and
