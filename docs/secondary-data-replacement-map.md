@@ -55,21 +55,36 @@ its contracts are implemented (train dry-run and candidate replay/dry-run) and
 only live execution is gated, so it needs an execution authorization (**D-TRAIN**),
 not a disposition decision.
 
-## Open decisions (blocking the secondary sub-workflows)
+## Resolved dispositions (user decision, 2026-07-18)
 
-- **D-RAG** — Graph RAG: approve redesign + frozen question set, keep
-  diagnostic-only, or mark unsupported.
-- **D-BENCH** — Cross-dataset: record noncomparability or authorize an external
-  same-protocol benchmark.
-- **D-AUG** — Augmentation: qualify per DISC-004 (retain provenance) or
-  regenerate.
-- **D-TRAIN / D-CUI** — Encoder recipe: authorize external training/inference (and
-  the Cui ablation) or keep historical values as provenance with DISC corrections.
-- **D-FOOTPRINT** — Resources: mark as estimates per DISC-011 or authorize an
-  external instrumentation run.
-- **D-ZH** — Traditional-Chinese: retain constrained provenance or authorize
-  external regeneration.
+The user resolved every open decision toward **retain-as-provenance + paper-owner
+correction**; no secondary claim is regenerated, no `secondary` stage is built,
+and no historical executable is deleted.
 
-Until these are resolved, the historical executables mapped in
-`historical-transition-map.md` remain **retain/demote**, not delete: no secondary
-paper claim is regenerated or removed, and no historical command is deleted.
+- **D-RAG → mark A-CLAIM-022 unsupported.** The Graph RAG claim is recorded as
+  unsupported/removed for the paper owner (reinforcing DISC-007/008). Historical
+  numbers are retained only as leakage-prone diagnostics; `build_kg.py`,
+  `eval_graph_rag.py`, and `diagnose_evidence_paths.py` remain provenance and are
+  **not** rebuilt as a canonical stage.
+- **D-BENCH → record noncomparability.** SciERC/CoNLL04/ADE remain
+  metric-noncomparable to `CODE-STRICT-1`; DISC-009 correction stands.
+  `train_multi.py` and the downloaders stay provenance.
+- **D-AUG → qualify per DISC-004, retain provenance.** The augmentation
+  generators stay provenance; the "38 variants" framing is a paper-owner
+  correction.
+- **D-FOOTPRINT → mark as estimates per DISC-011.** Only the 40/77 s verifier
+  latency is auditable; the rest are estimates for the paper owner. Verifier
+  telemetry already covers latency canonically.
+- **D-ZH → retain constrained provenance.** DISC-012–016 corrections stand; the
+  absent zh engine/normalizer keeps the family provenance-only.
+- **D-TRAIN/D-CUI → provenance-only for now.** Historical encoder results stay
+  provenance with DISC-001/002/003/016 corrections. The `model` chain
+  (`train` dry-run, `generate-candidates` dry-run/replay) stays ready for a later
+  externally authorized live run; the Cui ablation is not implemented this cycle.
+
+Consequently the historical executables mapped in
+`historical-transition-map.md` are **retained as provenance evidence**, their
+paper claims are corrected or marked unsupported through the discrepancy ledger,
+and none is regenerated or deleted. The remaining Phase B execution (canonical
+verifier Precision/Recall/F1, the real B-07 pilot, and any live `model` run) is
+externally gated on the accelerator, pinned Ollama/Qwen runtime, and gold labels.

@@ -33,6 +33,23 @@ is complete, this map is a **retain/demote** record, not a deletion list.
 | `bench_gpu.py`, `eval_checkpoint.py` — environment/checkpoint diagnostics | Smoke-only utility and absent historical checkpoint; neither emits a paper metric. | `phase_b.py doctor` plus optional `secondary inspect-checkpoint`. | A bounded no-download diagnostic stage or removal after README command retirement. | Retain only while documented diagnostic remains useful. |
 | `results.tsv`, `results_stage2.tsv`, `run_a19_cosine_probe.sh` — Section 5 experiment/command evidence | Ledgers are generated evidence with known structural gaps; shell record is DGX-specific. | `phase_b.py reconcile`, later canonical report/archive stages. | B-10 verified byte/hash archive move; historical shell record either normalized into an auditable command manifest or removed after source-inventory review. | Preserve bytes and Git lineage; not executable canonical inputs. |
 
+## Resolved secondary dispositions (user decision, 2026-07-18)
+
+The user resolved every secondary-family disposition toward
+retain-as-provenance + paper-owner correction (see
+[`secondary-data-replacement-map.md`](secondary-data-replacement-map.md)).
+Accordingly, the Graph RAG (`build_kg.py`, `eval_graph_rag.py`,
+`diagnose_evidence_paths.py`), cross-dataset (`train_multi.py`, downloaders),
+augmentation (`generate_*`), cooperative-pretraining, closed-loop
+(`train_stage2*`, `train_gan.py`, `train_gumbel.py`), and zh-Hant
+(`zh_translate_project.py`, `dapt_zh.py`) rows are **retained as provenance
+evidence**: their paper claims are corrected or marked unsupported through the
+discrepancy ledger, no canonical `secondary` stage is built, and none is
+regenerated or deleted this cycle. `train_span.py`/`inference_kg.py` likewise stay
+provenance behind the ready-but-gated `model` chain. Deletion therefore remains
+out of scope until a future finalization pass satisfies the invariant below for a
+specific file.
+
 ## Command-surface invariant
 
 Before any row changes from retain/demote to delete, `README.md`, Python
