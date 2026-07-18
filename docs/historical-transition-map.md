@@ -9,8 +9,10 @@ is complete, this map is a **retain/demote** record, not a deletion list.
 
 ## Scope and reading rules
 
-- The source tree has 29 non-test Python command entry points; the README
-  exposes 20 historical invocations plus the canonical command and test command.
+- The source tree has 28 non-test Python command entry points; the README
+  exposes 19 historical invocations plus the canonical command and test command.
+  (`eval_checkpoint.py` was removed once its checkpoint-evaluation function was
+  superseded by `model generate-candidates` → `score`.)
 - `phase_b.py` is the only paper-facing command now. Its replacement stages
   must write only below `output/<run-id>/`, bind data/split/config identities,
   and be tested from a standalone clone.
@@ -30,7 +32,8 @@ is complete, this map is a **retain/demote** record, not a deletion list.
 | `generate_entity_masks.py`, `train_pretrain_cooperative.py`, `data/download_arxiv_real.py` — cooperative masking/pretraining negative result | Requires mutable arXiv input and historical checkpoint; writes arbitrary checkpoints/results. | `phase_b.py secondary cooperative-pretrain` or unsupported claim. | Reacquirable licensed input manifest, adapter parity, or discrepancy entry removing/qualifying the claim. | Retain as secondary provenance. |
 | `train_stage2b.py`, `train_stage2c.py`, `train_stage2d.py`, `train_stage2e.py`, `train_gan.py`, `train_gumbel.py` and transitive decoder/critic modules — closed-loop negative-result families | Multiple unavailable checkpoints/models and direct writes; GAN/Gumbel import `train_span`; ledgers do not provide a complete replayable matrix. | `phase_b.py secondary closed-loop` with blocked/unsupported matrix rows. | Each claimed intervention mapped to an evidence bundle; valid fixture parity or explicit noncomparability; no orphan README command. | Retain pending claim-by-claim disposition. |
 | `zh_translate_project.py`, `dapt_zh.py` — Traditional-Chinese transfer/ablation claims | Uses incomplete CODE inputs, mutable law sources/model caches, and distinct split/normalization rules. | `phase_b.py secondary zh-data`. | Licensed acquisition/normalization manifests, fixed holdout isolation, typed record adapter, and external-machine validation. | Retain pending standalone-data contract; current paper claim constrained by DISC-013–DISC-016. |
-| `bench_gpu.py`, `eval_checkpoint.py` — environment/checkpoint diagnostics | Smoke-only utility and absent historical checkpoint; neither emits a paper metric. | `phase_b.py doctor` plus optional `secondary inspect-checkpoint`. | A bounded no-download diagnostic stage or removal after README command retirement. | Retain only while documented diagnostic remains useful. |
+| `bench_gpu.py` — environment diagnostic | Smoke-only utility; emits no paper metric. | `phase_b.py doctor`. | A bounded no-download diagnostic stage or removal after README command retirement. | Retain only while the documented smoke diagnostic remains useful. |
+| `eval_checkpoint.py` — historical checkpoint evaluation (removed) | Loaded a legacy SciERC token-model checkpoint and scored it; emitted no paper metric. | `phase_b.py model generate-candidates` → `score`. | — | **Removed** on 2026-07-18: its checkpoint-evaluation function is superseded by the canonical `model generate-candidates` → `score` chain and its README command was retired; its only consumer was the import-safety test. Behavior remains in Git history. |
 | `results.tsv`, `results_stage2.tsv`, `run_a19_cosine_probe.sh` — Section 5 experiment/command evidence | Ledgers are generated evidence with known structural gaps; shell record is DGX-specific. | `phase_b.py reconcile`, later canonical report/archive stages. | B-10 verified byte/hash archive move; historical shell record either normalized into an auditable command manifest or removed after source-inventory review. | Preserve bytes and Git lineage; not executable canonical inputs. |
 
 ## Resolved secondary dispositions (user decision, 2026-07-18)

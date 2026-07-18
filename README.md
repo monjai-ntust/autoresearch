@@ -249,13 +249,7 @@ uv run python bench_gpu.py
 
 This fixed BERT forward/backward smoke is useful for detecting CPU fallback and gross environment problems. Its timings are not the paper's encoder, verifier, or full-pipeline measurements.
 
-Evaluate a legacy SciERC token-model checkpoint whose dictionary contains an `encoder` state:
-
-```bash
-uv run python eval_checkpoint.py checkpoints/cast2500_seed44_best.pt
-```
-
-The named checkpoint is historical and not included. For the retained Graph RAG diagnostic, first build a KG and retain inference JSONL with `gold_triples`, then run:
+For the retained Graph RAG diagnostic, first build a KG and retain inference JSONL with `gold_triples`, then run:
 
 ```bash
 uv run python eval_graph_rag.py \

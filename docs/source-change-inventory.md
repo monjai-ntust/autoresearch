@@ -32,8 +32,8 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 112 differing paths: 70
-current-only paths, 33 baseline-only paths, and 9 modified baseline paths. The
+With this document included, the comparison contains 113 differing paths: 71
+current-only paths, 34 baseline-only paths, and 8 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
 paths and the current tree has 127.
 
@@ -91,7 +91,6 @@ The similarly named paths below are not one-to-one rewrites:
 | `.gitignore` | Ignores `/output/`, checkpoints, and downloaded/generated dataset directories while explicitly allowing the tracked CODE-ACCORD fixture. The obsolete ignore rule for tracked `results.tsv` is absent. This enforces the single temporary-output root without hiding retained evidence. |
 | `README.md` | Defines the repository as a standalone publication artifact, separates canonical commands from historical provenance paths, documents datasets, execution gates, outputs, limitations, and links this inventory. The baseline upstream pretraining description did not describe the retained research implementation. |
 | `bench_gpu.py` | Places benchmark execution behind `main()` and an import guard. Benchmark behavior remains available, while importing the module no longer downloads a model or allocates accelerator memory. |
-| `eval_checkpoint.py` | Places checkpoint evaluation behind `main()` and an import guard. The evaluation behavior is retained, while tests and tooling can import the module without executing a full evaluation. |
 | `eval_graph_rag.py` | Describes retrieval as unique whitespace-token overlap instead of BM25-style retrieval. Runtime behavior is unchanged; the text now states the actual algorithm and avoids overstating the evaluation method. |
 | `pyproject.toml` | Names the publication artifact, removes unused upstream packages, and declares dependencies used by retained code (`peft`, `pytorch-crf`, and `safetensors`) while keeping the required Torch/Transformers/data stack. This makes installation reflect reachable code. |
 | `train_gumbel.py` | Restricts process-environment side effects to command execution under the import guard. The training command retains its environment settings, while library import remains side-effect free. |
@@ -108,6 +107,7 @@ content and lineage.
 | `Task_done.md` | Duplicated project history whose authoritative, read-only copy lives outside the standalone source artifact; implementation provenance is represented by retained code, result ledgers, Git, and the parent research state. |
 | `analysis.ipynb` | Belonged to the disconnected FineWeb/bytes-per-byte upstream workflow and had no reachable role in the paper's entity/relation pipeline. |
 | `data/accord_entigraph_5pairs.jsonl` | Was a generated data artifact with unresolved redistribution and input status. The generator and result evidence preserve the method without shipping an ambiguous runtime prerequisite. |
+| `eval_checkpoint.py` | Removed after its historical checkpoint-evaluation function was superseded by the canonical `model generate-candidates` → `score` chain and its README command was retired; its only consumer was the import-safety test. Behavior remains recoverable from Git history. |
 | `generate_pseudo_labels.py` | Implemented an early pseudo-label exploration not used by the retained claim-bearing configuration or the canonical evaluation design. |
 | `generate_pseudo_labels_cast.py` | Implemented an obsolete cross-dataset pseudo-label variant with no current paper statistic or canonical input role. |
 | `generate_pseudo_labels_multi.py` | Implemented an obsolete multi-source pseudo-label variant with no retained result row requiring execution. |
@@ -157,6 +157,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
 | `docs/historical-transition-inventory.md` | B-05U family-level record of why each legacy executable family cannot remain independent, its canonical successor stage, and its raw-evidence disposition. |
 | `docs/secondary-data-replacement-map.md` | B-05U data-item-level map assigning every draft Section 5 secondary result family a disposition (canonical stage, retained input, corrected/unsupported, or external) and recording the open user decisions that gate each `secondary` sub-workflow. |
+| `docs/claim-disposition.md` | Dispositions every Phase A inventory claim (`A-CLAIM-001`…`029`) as Extends / Superseded / Retained-provenance / Removed against the canonical workflow, with the `output/<run-id>/` path where each extended or superseded claim's new data is produced. |
 | `docs/phase_b_root_module_mapping.md` | Maps every former package module to its root host, records the two standard-library collision renames, and states the package-removal parity gates. |
 | `docs/source-change-inventory.md` | Maintains this exhaustive, reasoned comparison with the fixed baseline and prevents future source edits from losing their deletion/reuse/rewrite rationale. |
 

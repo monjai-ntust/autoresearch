@@ -148,7 +148,6 @@ class ImportSafetyTests(unittest.TestCase):
     def test_retained_utilities_do_not_execute_on_import(self):
         for module_name in (
             "bench_gpu",
-            "eval_checkpoint",
         ):
             with self.subTest(module=module_name):
                 importlib.import_module(module_name)
