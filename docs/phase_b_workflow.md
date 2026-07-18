@@ -170,6 +170,25 @@ explicit about what this revision can and cannot generate, so a fresh clone
 does not silently train on a different split and label it as Path A primary
 data.
 
+### Bash debug/resume runner
+
+On the external Linux machine, use the tracked runner to pull the latest
+`refactor` commit, synchronize the locked environment, and resume the bootstrap
+from its first incomplete run-local artifact:
+
+```bash
+scripts/phase_b_debug.sh --run-id "$RUN_ID"
+```
+
+It treats a passing checkout manifest, reconciliation audit, verified
+acquisition manifest/archive, and byte-identical preparation manifest plus
+prepared split as completed. It skips only those completed stages, runs the
+first incomplete command, and exits on a new error; after fixing the error,
+rerun the same command with the same `RUN_ID`. `--help` lists explicit stages
+for every later documented command (checkpoint planning, candidate generation,
+thresholding, verifier/pilot, and score). Those stages remain gated by their
+documented inputs and do not fabricate or copy missing artifacts.
+
 ## 3. Reconcile the frozen Section 5 ledgers
 
 This stage is read-only with respect to the ledgers and does not require the

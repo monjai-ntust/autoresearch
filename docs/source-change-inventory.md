@@ -32,10 +32,10 @@ The maintained classification has these invariants:
 - a moved or renamed path is described explicitly instead of being presented as
   an unrelated deletion and creation.
 
-With this document included, the comparison contains 113 differing paths: 71
+With this document included, the comparison contains 114 differing paths: 72
 current-only paths, 34 baseline-only paths, and 8 modified baseline paths. The
 other 48 baseline paths are reused byte-for-byte. The baseline has 90 tracked
-paths and the current tree has 127.
+paths and the current tree has 128.
 
 ## Current architecture and rewrite boundary
 
@@ -153,6 +153,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `configs/phase_b_path_a.json` | Freezes dataset, model, seed, split, training, threshold, statistics, runtime, and tracked-resource identities for the canonical protocol. |
 | `configs/phase_b_section5_evidence.json` | Registers the two historical ledgers and seven claim families as immutable secondary evidence so reconciliation cannot silently promote them to canonical results. |
 | `docs/phase_b_workflow.md` | Is the fresh-clone primary-data guide: it gives the copy/paste bootstrap, non-enforcing environment-version recording, exact prepared-data boundary, eight-seed checkpoint requirements and manifest contract, and explicitly distinguishes the unavailable canonical live-training adapter from legacy CSV/split training before describing the later candidate, verifier, score, and archival gates. |
+| `scripts/phase_b_debug.sh` | Bash recovery runner for the standalone external checkout. It pulls `refactor`, synchronizes the lockfile, detects completed run-local output contracts, resumes only at the first incomplete selected command, and stops at the first new error without manufacturing gated inputs. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
 | `docs/historical-transition-inventory.md` | B-05U family-level record of why each legacy executable family cannot remain independent, its canonical successor stage, and its raw-evidence disposition. |
