@@ -198,6 +198,15 @@ documented command (checkpoint planning, candidate generation, thresholding,
 verifier/pilot, score, and the retained legacy diagnostic). These stages do not
 fabricate or copy missing artifacts.
 
+For a new run ID on the same checkout, the runner avoids another network
+download when any earlier `output/<other-run-id>/` contains the immutable
+CODE-ACCORD archive. It checks that candidate's configured byte size and MD5,
+hard-links it into the new run where the filesystem permits (otherwise copies
+it), and then invokes `fetch` so the new run still receives an independently
+verified acquisition manifest. It downloads only when no valid local cache is
+available. The reused archive is an immutable input, not a checkpoint,
+prediction, or verifier result; every other artifact remains run-local.
+
 ## 3. Reconcile the frozen Section 5 ledgers
 
 This stage is read-only with respect to the ledgers and does not require the

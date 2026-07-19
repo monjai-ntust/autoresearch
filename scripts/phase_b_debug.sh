@@ -45,6 +45,13 @@ Then it skips only stages whose run-local completion artifacts are present and
 runs from the first incomplete selected stage. It exits immediately on a new
 error; rerun the same command after fixing the cause.
 
+For a new run ID, `fetch` first searches other local `output/<run-id>/` trees
+for the configured immutable CODE-ACCORD archive. A matching size-and-MD5
+archive is hard-linked into the new run when possible (copied only when the
+filesystem does not support hard links), then `fetch` verifies it and writes
+the new run's own acquisition manifest. A network download occurs only when
+no verified local run cache exists.
+
 Stages:
   available          parser-check every command and run every available stage (default)
   publishable        run the canonical chain until its first publication gate
@@ -186,6 +193,65 @@ except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
     good = False
 raise SystemExit(0 if good else 1)
 PY
+}
+
+find_verified_archive_cache() {
+  uv run --frozen python -B - "$RUN_ROOT" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+from acquisition import archive_contract_from_config
+from config import load_pipeline_config
+
+run_root = Path(sys.argv[1]).resolve(strict=False)
+source_root = Path.cwd().resolve()
+contract = archive_contract_from_config(
+    load_pipeline_config(source_root, "configs/phase_b_path_a.json")
+)
+relative = Path("inputs") / "cache" / f"md5-{contract.expected_md5}" / contract.name
+
+for candidate_run in sorted((source_root / "output").glob("*")):
+    candidate = candidate_run / relative
+    if (
+        candidate_run.resolve(strict=False) == run_root
+        or candidate.is_symlink()
+        or not candidate.is_file()
+        or candidate.stat().st_size != contract.expected_bytes
+    ):
+        continue
+    digest = hashlib.md5(usedforsecurity=False)
+    with candidate.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() == contract.expected_md5:
+        print(f"{candidate}\t{relative.as_posix()}")
+        break
+PY
+}
+
+seed_archive_from_local_cache() {
+  local cache_entry
+  local cached_archive
+  local cache_relative
+  local cached_display
+  local destination
+  cache_entry="$(find_verified_archive_cache)"
+  [[ -n "$cache_entry" ]] || return 0
+  IFS=$'\t' read -r cached_archive cache_relative <<<"$cache_entry"
+
+  destination="$RUN_ROOT/$cache_relative"
+  [[ ! -e "$destination" ]] || return 0
+  cached_display="${cached_archive#"$SOURCE_ROOT/"}"
+  mkdir -p -- "$(dirname -- "$destination")"
+  if ln -- "$cached_archive" "$destination"; then
+    note "reusing verified CODE-ACCORD archive from $cached_display (hard link)"
+  elif cp --reflink=auto -- "$cached_archive" "$destination" 2>/dev/null \
+      || cp -- "$cached_archive" "$destination"; then
+    note "reusing verified CODE-ACCORD archive from $cached_display (copy fallback)"
+  else
+    die "could not materialize verified local archive cache from $cached_archive"
+  fi
 }
 
 skip_or_run() {
@@ -362,6 +428,9 @@ ensure_reconcile() {
 }
 
 ensure_fetch() {
+  if ! fetch_complete; then
+    seed_archive_from_local_cache
+  fi
   skip_or_run fetch fetch_complete \
     uv run --frozen python -B phase_b.py fetch \
       --config configs/phase_b_path_a.json --run-id "$RUN_ID"
