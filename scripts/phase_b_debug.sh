@@ -242,7 +242,7 @@ last_failed_mode() {
   local stage_id="$1"
   local manifest="$RUN_ROOT/manifests/debug-recovery.jsonl"
   [[ -f "$manifest" ]] || return 1
-  uv run --frozen python -B - "$manifest" "$stage_id" <<'PY'
+  uv run --frozen --no-sync python -B - "$manifest" "$stage_id" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -374,7 +374,7 @@ PY
 }
 
 find_verified_archive_cache() {
-  uv run --frozen python -B - "$RUN_ROOT" "$CONFIG" <<'PY'
+  uv run --frozen --no-sync python -B - "$RUN_ROOT" "$CONFIG" <<'PY'
 import hashlib
 import sys
 from pathlib import Path
@@ -1584,7 +1584,7 @@ note "synchronizing the locked environment"
 uv sync --frozen
 
 mapfile -t CONFIG_VALUES < <(
-  uv run --frozen python -B - "$CONFIG" <<'PY'
+  uv run --frozen --no-sync python -B - "$CONFIG" <<'PY'
 import json
 import sys
 from pathlib import Path

@@ -50,6 +50,9 @@ class DebugScriptContractTests(unittest.TestCase):
         self.assertIn("git pull --ff-only", SCRIPT)
         self.assertIn('value["training_seeds"]', SCRIPT)
         self.assertIn('value["verifier"]["model"]', SCRIPT)
+        self.assertIn(
+            'uv run --frozen --no-sync python -B - "$CONFIG" <<\'PY\'', SCRIPT
+        )
         self.assertIn('ollama show --modelfile "$OLLAMA_MODEL"', SCRIPT)
         self.assertNotIn('BRANCH="refactor"', SCRIPT)
         self.assertNotIn('SEED=42', SCRIPT)
