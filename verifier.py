@@ -547,14 +547,16 @@ def _verify_live_model(
     ollama_url: str,
     model_blob: Path,
     transport: HttpTransport,
+    artifact_base: str | None = None,
 ) -> dict[str, Any]:
     verifier = config.value["verifier"]
+    artifact_base = artifact_base or f"verifier/{mode}"
     if sha256_file(model_blob) != verifier["model_blob_sha256"]:
         raise DataContractError("the run-local Ollama model blob hash differs from the protocol")
     tags_result = transport("GET", f"{ollama_url}/api/tags", None, 30)
     if tags_result.json_body is not None:
         atomic_write_json(
-            layout.resolve(f"verifier/{mode}/model/tags.json"),
+            layout.resolve(f"{artifact_base}/model/tags.json"),
             tags_result.json_body,
         )
     if tags_result.status_code != 200 or tags_result.json_body is None:
@@ -578,7 +580,7 @@ def _verify_live_model(
     )
     if show_result.json_body is not None:
         atomic_write_json(
-            layout.resolve(f"verifier/{mode}/model/show.json"),
+            layout.resolve(f"{artifact_base}/model/show.json"),
             show_result.json_body,
         )
     if show_result.status_code != 200 or show_result.json_body is None:
@@ -605,7 +607,7 @@ def _verify_live_model(
     )
     if cli_modelfile["stdout"] is not None:
         atomic_write_text(
-            layout.resolve(f"verifier/{mode}/model/ollama-modelfile.txt"),
+            layout.resolve(f"{artifact_base}/model/ollama-modelfile.txt"),
             cli_modelfile["stdout"] + "\n",
         )
     if (
@@ -1008,6 +1010,7 @@ def run_verifier(
     response_ledger_path: Path | None = None,
     cache_ledger_path: Path | None = None,
     pilot_selection_path: Path | None = None,
+    artifact_prefix: str = "",
     ollama_url: str = "http://localhost:11434",
     model_blob_path: Path | None = None,
     transport: HttpTransport | None = None,
@@ -1052,7 +1055,9 @@ def run_verifier(
             "live execution requires one frozen development warm-up candidate and its sentences"
         )
     condition = MODE_CONDITIONS[mode]
-    base = f"verifier/{mode}"
+    prefix = artifact_prefix.strip("/")
+    base = f"verifier/{prefix}/{mode}" if prefix else f"verifier/{mode}"
+    manifest_name = f"verifier-{prefix.replace('/', '-') + '-' if prefix else ''}{mode}-{execution_mode}.json"
     paths = {
         "requests": layout.resolve(f"{base}/requests.jsonl"),
         "responses": layout.resolve(f"{base}/responses.jsonl"),
@@ -1061,10 +1066,10 @@ def run_verifier(
         "model_tags": layout.resolve(f"{base}/model/tags.json"),
         "model_show": layout.resolve(f"{base}/model/show.json"),
         "model_modelfile": layout.resolve(f"{base}/model/ollama-modelfile.txt"),
-        "verdicts": layout.resolve(config.paths[f"{mode}_verdicts"]),
+        "verdicts": layout.resolve(f"{base}/verdicts.jsonl"),
         "environment": layout.resolve(f"{base}/environment-manifest.json"),
         "log": layout.resolve(f"{base}/run-log.jsonl"),
-        "manifest": layout.resolve(f"manifests/verifier-{mode}-{execution_mode}.json"),
+        "manifest": layout.resolve(f"manifests/{manifest_name}"),
     }
     planned = [paths["requests"], paths["environment"], paths["log"], paths["manifest"]]
     if execution_mode != "dry-run":
@@ -1169,6 +1174,7 @@ def run_verifier(
                 endpoint,
                 model_blob_path,
                 active_transport,
+                artifact_base=base,
             )
             environment["model"].update(model_evidence)
             environment["ollama"]["origin"] = endpoint

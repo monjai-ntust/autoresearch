@@ -27,7 +27,8 @@
       "type": "object",
       "minProperties": 3,
       "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-    }
+    },
+    "nonpublication_smoke": {"type": "boolean"}
   },
   "additionalProperties": false
 }

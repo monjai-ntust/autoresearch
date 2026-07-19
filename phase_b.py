@@ -101,6 +101,10 @@ def _parser() -> argparse.ArgumentParser:
         "--pilot-selection",
         help="Run-relative predeclared development-pilot selection bound by live execution",
     )
+    verifier.add_argument(
+        "--artifact-prefix",
+        help="Optional run-relative namespace for noncanonical verifier artifacts",
+    )
 
     pilot = subparsers.add_parser(
         "pilot-verifier",
@@ -204,6 +208,15 @@ def _parser() -> argparse.ArgumentParser:
     score.add_argument("--corrective-verdicts", help="Run-relative corrective-verdict JSONL path")
     score.add_argument(
         "--threshold-selection", help="Run-relative development threshold JSON path"
+    )
+    score.add_argument(
+        "--nonpublication-smoke",
+        action="store_true",
+        help="Mark a pseudo-seed smoke score as non-publication evidence",
+    )
+    score.add_argument(
+        "--output-prefix",
+        help="Optional run-relative namespace for noncanonical score artifacts",
     )
     return parser
 
@@ -318,6 +331,7 @@ def main(argv: list[str] | None = None) -> int:
                     if args.pilot_selection
                     else None
                 ),
+                artifact_prefix=args.artifact_prefix or "",
             )
             print(
                 json.dumps(
@@ -492,6 +506,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.threshold_selection or configured["threshold_selection"],
                 must_exist=True,
             ),
+            nonpublication_smoke=args.nonpublication_smoke,
+            output_prefix=args.output_prefix or "",
         )
         metrics = score_run(layout, config, inputs)
         print(

@@ -22,6 +22,7 @@ SEED=42
 BRANCH="refactor"
 MODE="simple"
 ALLOW_LEGACY_DIAGNOSTIC=false
+ALLOW_LIVE_SMOKE=false
 BLOCKED_COUNT=0
 RESPONSE_LEDGER="inputs/frozen-simple-responses.jsonl"
 CAPTURE_INDEX="inputs/pilot/capture-index.json"
@@ -32,6 +33,7 @@ SENTENCES=""
 CANDIDATES_OUT=""
 CANDIDATES="predictions/dev/development-candidates.jsonl"
 MODEL_BLOB="inputs/ollama/blobs/sha256-3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312"
+MODEL_BLOB_SOURCE=""
 PILOT_CANDIDATES="predictions/dev/pilot-candidates.jsonl"
 PILOT_SELECTION="predictions/dev/pilot-selection.json"
 
@@ -54,6 +56,7 @@ no verified local run cache exists.
 
 Stages:
   available          parser-check every command and run every available stage (default)
+  smoke              non-publication one-candidate real GPU/Ollama end-to-end smoke
   publishable        run the canonical chain until its first publication gate
   bootstrap          doctor -> reconcile -> fetch -> prepare only
   plan               record the implemented seed-specific model-train dry-run
@@ -74,6 +77,7 @@ Options:
   --stage NAME                One stage from the list above
   --seed N                    Checkpoint seed (default: 42)
   --allow-legacy-diagnostic   Required acknowledgement for legacy-train
+  --allow-live-smoke          Required acknowledgement before real Ollama smoke calls
   --mode simple|corrective    Verifier mode (default: simple)
   --checkpoint-manifest PATH  Run-relative checkpoint identity manifest
   --checkpoint-blob PATH      Run-relative checkpoint weights for generate-live
@@ -83,6 +87,7 @@ Options:
   --candidates PATH           Run-relative development candidate JSONL for threshold
   --response-ledger PATH      Run-relative response ledger for verifier-replay
   --model-blob PATH           Run-relative Ollama blob for verifier-live
+  --model-blob-source PATH    Existing local blob to hard-link/copy into --model-blob
   --pilot-candidates PATH     Run-relative pilot candidate JSONL for pilot-live
   --pilot-selection PATH      Run-relative pilot-selection JSON for pilot-live
   --capture-index PATH        Run-relative four-capture index for pilot-audit
@@ -92,6 +97,8 @@ Options:
 Examples:
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage plan --seed 42
+  scripts/phase_b_debug.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
+    --allow-live-smoke --model-blob-source ~/.ollama/models/blobs/<locked-blob>
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage train-live --seed 42
   scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z \
     --stage legacy-train --seed 42 --allow-legacy-diagnostic
@@ -107,6 +114,13 @@ legacy-train stage remains diagnostic-only and is never fed into publication.
 The default available sweep treats missing checkpoint/candidate/verifier/pilot
 inputs and ungranted publication gates as BLOCKED, not as errors. Any command
 whose prerequisites are present is run and still stops the script on failure.
+
+The smoke stage reuses a completed seed checkpoint and development candidates
+in this same run, creates real test candidates, and sends one real candidate
+plus one development warm-up through each verifier mode. It clones only those
+smoke records into pseudo-seeds 43-49 to exercise the strict downstream
+threshold/scoring contracts. Its output is marked non-publication and must
+never be used for a paper result or B-07 approval.
 EOF
 }
 
@@ -125,6 +139,7 @@ while (($#)); do
     --stage) STAGE="${2:-}"; shift 2 ;;
     --seed) SEED="${2:-}"; shift 2 ;;
     --allow-legacy-diagnostic) ALLOW_LEGACY_DIAGNOSTIC=true; shift ;;
+    --allow-live-smoke) ALLOW_LIVE_SMOKE=true; shift ;;
     --mode) MODE="${2:-}"; shift 2 ;;
     --checkpoint-manifest) CHECKPOINT_MANIFEST="${2:-}"; shift 2 ;;
     --checkpoint-blob) CHECKPOINT_BLOB="${2:-}"; shift 2 ;;
@@ -134,6 +149,7 @@ while (($#)); do
     --candidates) CANDIDATES="${2:-}"; shift 2 ;;
     --response-ledger) RESPONSE_LEDGER="${2:-}"; shift 2 ;;
     --model-blob) MODEL_BLOB="${2:-}"; shift 2 ;;
+    --model-blob-source) MODEL_BLOB_SOURCE="${2:-}"; shift 2 ;;
     --pilot-candidates) PILOT_CANDIDATES="${2:-}"; shift 2 ;;
     --pilot-selection) PILOT_SELECTION="${2:-}"; shift 2 ;;
     --capture-index) CAPTURE_INDEX="${2:-}"; shift 2 ;;
@@ -317,6 +333,7 @@ run_command_check() {
   uv run --frozen python -B phase_b.py pilot-verifier --help >/dev/null
   uv run --frozen python -B phase_b.py score --help >/dev/null
   uv run --frozen --python 3.10.20 python -B train_span.py --help >/dev/null
+  uv run --frozen python -B smoke.py --help >/dev/null
   write_command_check_marker
 }
 
@@ -390,8 +407,18 @@ legacy_train_complete() {
 candidate_complete() {
   local execution="$1"
   local output="$2"
-  json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED.json" status '"completed"' \
-    && [[ -f "$RUN_ROOT/$output" ]]
+  local split
+  if json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED.json" status '"completed"' \
+    && [[ -f "$RUN_ROOT/$output" ]]; then
+    return 0
+  fi
+  for split in development test; do
+    if json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED-$split.json" status '"completed"' \
+      && [[ -f "$RUN_ROOT/$output" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 threshold_complete() {
@@ -646,6 +673,26 @@ ensure_verifier_live() {
 
 verifier_live_complete() { verifier_complete live completed; }
 
+smoke_verifier_live_complete() {
+  json_equals "$RUN_ROOT/manifests/verifier-smoke-$MODE-live.json" status '"completed"' \
+    && [[ -f "$RUN_ROOT/verifier/smoke/$MODE/verdicts.jsonl" ]]
+}
+
+materialize_model_blob() {
+  [[ -f "$RUN_ROOT/$MODEL_BLOB" ]] && return 0
+  [[ -n "$MODEL_BLOB_SOURCE" ]] \
+    || die "smoke requires the locked run-local --model-blob: $MODEL_BLOB; provide --model-blob-source /path/to/the-existing-Ollama-blob to materialize it"
+  [[ -f "$MODEL_BLOB_SOURCE" && ! -L "$MODEL_BLOB_SOURCE" ]] \
+    || die "--model-blob-source must name a regular existing file: $MODEL_BLOB_SOURCE"
+  mkdir -p "$(dirname "$RUN_ROOT/$MODEL_BLOB")"
+  if ln "$MODEL_BLOB_SOURCE" "$RUN_ROOT/$MODEL_BLOB" 2>/dev/null; then
+    note "hard-linked locked model blob into this run"
+  else
+    note "copying locked model blob into this run (hard link unavailable)"
+    cp -p -- "$MODEL_BLOB_SOURCE" "$RUN_ROOT/$MODEL_BLOB"
+  fi
+}
+
 ensure_pilot_live() {
   ensure_doctor
   [[ -n "$PILOT_CANDIDATES" ]] || die "pilot-live requires --pilot-candidates"
@@ -809,6 +856,66 @@ ensure_publishable() {
   die "seed-$SEED canonical training and development candidate generation are complete. The seed-42 smoke/restart evidence must be reviewed at B-07 before running and aggregating seeds 42-49 or executing the live verifier. Re-run completed stages with the same run ID after that decision."
 }
 
+ensure_smoke() {
+  ensure_bootstrap
+  [[ "$ALLOW_LIVE_SMOKE" == true ]] \
+    || die "smoke sends four real Ollama calls; pass --allow-live-smoke to acknowledge"
+  [[ -f "$RUN_ROOT/checkpoints/seed-$SEED/checkpoint-manifest.json" ]] \
+    || die "smoke requires completed canonical seed-$SEED checkpoint inputs in this run"
+  [[ -f "$RUN_ROOT/checkpoints/seed-$SEED/checkpoint.pt" ]] \
+    || die "smoke requires completed canonical seed-$SEED checkpoint inputs in this run"
+  [[ -f "$RUN_ROOT/predictions/dev/seed-$SEED-candidates.jsonl" ]] \
+    || die "smoke requires seed-$SEED development candidates from publishable smoke training"
+  materialize_model_blob
+  if [[ ! -f "$RUN_ROOT/predictions/smoke/test-seed-$SEED-candidates.jsonl" ]]; then
+    uv run --frozen --python 3.10.20 python -B phase_b.py model generate-candidates \
+      --config configs/phase_b_path_a.json --run-id "$RUN_ID" --execution live \
+      --sentences data-prepared/test.jsonl \
+      --checkpoint-manifest "checkpoints/seed-$SEED/checkpoint-manifest.json" \
+      --checkpoint-blob "checkpoints/seed-$SEED/checkpoint.pt" \
+      --candidates-out "predictions/smoke/test-seed-$SEED-candidates.jsonl"
+  fi
+  if [[ ! -f "$RUN_ROOT/predictions/smoke/test-candidates.jsonl" ]]; then
+    uv run --frozen python -B smoke.py prepare \
+      --source-dev "$RUN_ROOT/predictions/dev/seed-$SEED-candidates.jsonl" \
+      --generated-test "$RUN_ROOT/predictions/smoke/test-seed-$SEED-candidates.jsonl" \
+      --destination-run "$RUN_ROOT"
+  fi
+  for MODE in simple corrective; do
+    if ! smoke_verifier_live_complete; then
+      uv run --frozen --python 3.10.20 python -B phase_b.py verifier \
+        --config configs/phase_b_path_a.json --run-id "$RUN_ID" --mode "$MODE" --execution live \
+        --artifact-prefix smoke \
+        --sentences data-prepared/test.jsonl \
+        --candidates predictions/smoke/test-live-candidate.jsonl \
+        --warmup-sentences data-prepared/development.jsonl \
+        --warmup-candidates predictions/smoke/warmup-candidate.jsonl \
+        --model-blob "$MODEL_BLOB"
+    fi
+    if [[ ! -f "$RUN_ROOT/verifier/smoke/$MODE/pseudo-seed-verdicts.jsonl" ]]; then
+      uv run --frozen python -B smoke.py clone-verdicts \
+        --source "$RUN_ROOT/verifier/smoke/$MODE/verdicts.jsonl" \
+        --candidates "$RUN_ROOT/predictions/smoke/test-candidates.jsonl" \
+        --destination "$RUN_ROOT/verifier/smoke/$MODE/pseudo-seed-verdicts.jsonl"
+    fi
+  done
+  if [[ ! -f "$RUN_ROOT/predictions/smoke/threshold-selection.json" ]]; then
+    uv run --frozen --python 3.10.20 python -B phase_b.py select-threshold \
+      --config configs/phase_b_path_a.json --run-id "$RUN_ID" \
+      --candidates predictions/smoke/development-candidates.jsonl \
+      --out predictions/smoke/threshold-selection.json
+  fi
+  if ! json_equals "$RUN_ROOT/smoke/score/metrics/metrics.json" nonpublication_smoke true; then
+    uv run --frozen --python 3.10.20 python -B phase_b.py score \
+      --config configs/phase_b_path_a.json --run-id "$RUN_ID" \
+      --candidates predictions/smoke/test-candidates.jsonl \
+      --simple-verdicts verifier/smoke/simple/pseudo-seed-verdicts.jsonl \
+      --corrective-verdicts verifier/smoke/corrective/pseudo-seed-verdicts.jsonl \
+      --threshold-selection predictions/smoke/threshold-selection.json \
+      --nonpublication-smoke --output-prefix smoke/score
+  fi
+}
+
 note "updating source checkout from origin/$BRANCH"
 git pull --ff-only origin "$BRANCH"
 note "synchronizing the locked environment"
@@ -816,6 +923,7 @@ uv sync --frozen
 
 case "$STAGE" in
   available) ensure_available ;;
+  smoke) ensure_smoke ;;
   bootstrap) ensure_bootstrap ;;
   plan) ensure_plan ;;
   train-live) ensure_train_live ;;

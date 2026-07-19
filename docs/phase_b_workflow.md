@@ -363,6 +363,43 @@ approval, repeat the seed-specific training and development-candidate commands
 for seeds `42` through `49`; final-test inference and live verification remain
 separately gated.
 
+### Non-publication end-to-end smoke lane
+
+After `--stage publishable` has completed seed 42 for a run such as
+`path-a-simple-live-8`, the following opt-in diagnostic checks the remaining
+model-inference, both live verifier modes, threshold-selection, and scoring
+code paths without overwriting the seed-42 checkpoint, development candidates,
+or any canonical verifier/score location:
+
+```bash
+scripts/phase_b_debug.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
+  --allow-live-smoke \
+  --model-blob-source ~/.ollama/models/blobs/sha256-3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312
+```
+
+It performs real GPU inference over the prepared test split, chooses one
+deterministically ordered real test candidate, and sends that candidate plus a
+development warm-up through the pinned Ollama model in both `simple` and
+`corrective` modes: four live calls total. The runner then copies only the
+resulting *smoke candidate and verdict identities* to pseudo-seeds 43--49 so
+that the strict eight-seed threshold and scoring contracts execute. All such
+artifacts live under `predictions/smoke/`, `verifier/smoke/`, and
+`smoke/score/`; the normal `verifier/<mode>/`, `metrics/`, and `outcomes/`
+locations remain untouched for a later real run.
+
+`--model-blob-source` is needed only when the run does not already contain the
+required blob. It materializes the immutable blob beneath the selected run by
+hard link when possible (copy fallback otherwise); the live verifier still
+hash-verifies it before making a request. Replace the example path if the
+external machine stores Ollama blobs elsewhere.
+
+This is a code-path and environment smoke test, not scientific evidence. Its
+score manifest and metrics contain `nonpublication_smoke: true`, suppress
+publication seed coverage and uncertainty/statistical output, and are never
+eligible for B-07 approval, a paper table, or an eight-seed claim. The fake
+seed copies are permitted only in this explicitly namespaced diagnostic lane;
+the publishable workflow must independently train and infer every seed 42--49.
+
 ### Legacy trainer: debug only, never publishable
 
 The runner also exposes the retained `train_span.py` command for diagnosing the

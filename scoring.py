@@ -38,6 +38,8 @@ class ScoreInputs:
     simple_verdicts: Path
     corrective_verdicts: Path
     threshold_selection: Path
+    nonpublication_smoke: bool = False
+    output_prefix: str = ""
 
 
 def _load_gold(path: Path, expected_split: str) -> dict[str, GoldRecord]:
@@ -256,11 +258,13 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
     """Validate all inputs, score all four conditions, then write atomic outputs."""
 
     layout.require_existing()
+    prefix = inputs.output_prefix.strip("/")
+    output_root = f"{prefix}/" if prefix else ""
     planned_outputs = (
-        "outcomes/candidate-outcomes.jsonl",
-        "outcomes/sentence-outcomes.jsonl",
-        "metrics/metrics.json",
-        "manifests/score-manifest.json",
+        f"{output_root}outcomes/candidate-outcomes.jsonl",
+        f"{output_root}outcomes/sentence-outcomes.jsonl",
+        f"{output_root}metrics/metrics.json",
+        f"{output_root}manifests/score-manifest.json",
     )
     existing = [relative for relative in planned_outputs if layout.resolve(relative).exists()]
     if existing:
@@ -456,7 +460,10 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
             },
         }
 
-    seed_coverage_complete = observed_seeds == config.value["training_seeds"]
+    seed_coverage_complete = (
+        observed_seeds == config.value["training_seeds"]
+        and not inputs.nonpublication_smoke
+    )
     data_coverage_complete = len(gold) == config.value["split"]["test_sentences"]
     if seed_coverage_complete and data_coverage_complete:
         clustered_counts = {
@@ -540,6 +547,7 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
         "required_training_seeds": config.value["training_seeds"],
         "publication_seed_coverage_complete": seed_coverage_complete,
         "publication_data_coverage_complete": data_coverage_complete,
+        "nonpublication_smoke": inputs.nonpublication_smoke,
         "n_gold_examples": len(gold),
         "n_raw_candidates": len(candidates),
         "conditions": conditions,
@@ -575,6 +583,7 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
             )
         },
         "outputs": output_hashes,
+        "nonpublication_smoke": inputs.nonpublication_smoke,
     }
     manifest_path = layout.resolve(planned_outputs[3])
     atomic_write_json(manifest_path, manifest)

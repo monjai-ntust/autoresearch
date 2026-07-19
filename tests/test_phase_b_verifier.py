@@ -163,6 +163,7 @@ class VerifierReplayTests(unittest.TestCase):
                 candidates_path=candidates,
             )
             self.assertEqual(manifest["candidate_count"], 1)
+
             self.assertEqual(manifest["verdict_count"], 0)
             request = json.loads(
                 layout.resolve("verifier/simple/requests.jsonl").read_text(
@@ -212,6 +213,27 @@ class VerifierReplayTests(unittest.TestCase):
             for path in Path(temporary).rglob("*"):
                 if path.is_file():
                     self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))
+
+    def test_noncanonical_artifact_prefix_isolated_from_canonical_paths(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "prefixed-simple")
+            layout.create()
+            sentences, candidates = _write_inputs(layout)
+            manifest = run_verifier(
+                layout,
+                self.config,
+                mode="simple",
+                execution_mode="dry-run",
+                sentences_path=sentences,
+                candidates_path=candidates,
+                artifact_prefix="smoke",
+            )
+            self.assertEqual(manifest["status"], "planned")
+            self.assertTrue(layout.resolve("verifier/smoke/simple/requests.jsonl").is_file())
+            self.assertTrue(
+                layout.resolve("manifests/verifier-smoke-simple-dry-run.json").is_file()
+            )
+            self.assertFalse(layout.resolve("verifier/simple/requests.jsonl").exists())
 
     def test_replay_retries_malformed_then_emits_schema_valid_simple_verdict(self):
         request = self._planned_request("simple")

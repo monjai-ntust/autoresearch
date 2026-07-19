@@ -744,9 +744,13 @@ def generate_candidates(
     live_ledger_path = candidates_out_path.parent / (
         f"seed-{checkpoint.training_seed}-prediction-ledger.jsonl"
     )
+    sentence_splits = {sentence.split for sentence in sentences.values()}
+    if len(sentence_splits) != 1:
+        raise DataContractError("candidate generation requires one prepared split per invocation")
+    sentence_split = sentence_splits.pop()
     manifest_path = layout.resolve(
         f"manifests/model-generate-candidates-{execution_mode}-"
-        f"seed-{checkpoint.training_seed}.json"
+        f"seed-{checkpoint.training_seed}-{sentence_split}.json"
     )
     planned_outputs = [manifest_path]
     planned_outputs.append(plan_path if execution_mode == "dry-run" else candidates_out_path)
