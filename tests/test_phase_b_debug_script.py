@@ -50,9 +50,12 @@ class DebugScriptContractTests(unittest.TestCase):
         self.assertIn("git pull --ff-only", SCRIPT)
         self.assertIn('value["training_seeds"]', SCRIPT)
         self.assertIn('value["verifier"]["model"]', SCRIPT)
-        self.assertIn(
-            'uv run --frozen --no-sync python -B - "$CONFIG" <<\'PY\'', SCRIPT
-        )
+        self.assertIn('uv run --frozen --no-sync python -B - "$CONFIG" <<\'PY\'', SCRIPT)
+        self.assertIn('PHASE_B_CONFIG=', SCRIPT)
+        self.assertIn('case "$config_line" in', SCRIPT)
+        self.assertIn('PHASE_B_CONFIG=*) CONFIG_RECORD=', SCRIPT)
+        self.assertNotIn('mapfile -t CONFIG_VALUES', SCRIPT)
+        self.assertIn("IFS=' ' read -r -a TRAINING_SEEDS", SCRIPT)
         self.assertIn('ollama show --modelfile "$OLLAMA_MODEL"', SCRIPT)
         self.assertNotIn('BRANCH="refactor"', SCRIPT)
         self.assertNotIn('SEED=42', SCRIPT)

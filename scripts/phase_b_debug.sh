@@ -1583,29 +1583,37 @@ git pull --ff-only
 note "synchronizing the locked environment"
 uv sync --frozen
 
-mapfile -t CONFIG_VALUES < <(
+CONFIG_RECORD=""
+while IFS= read -r config_line; do
+  case "$config_line" in
+    PHASE_B_CONFIG=*) CONFIG_RECORD="${config_line#PHASE_B_CONFIG=}" ;;
+  esac
+done < <(
   uv run --frozen --no-sync python -B - "$CONFIG" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(" ".join(str(seed) for seed in value["training_seeds"]))
-print(value["verifier"]["model"])
-print(value["verifier"]["model_blob_sha256"])
-print(value["protocol_id"])
-print(value["workflow_id"])
+fields = (
+    " ".join(str(seed) for seed in value["training_seeds"]),
+    value["verifier"]["model"],
+    value["verifier"]["model_blob_sha256"],
+    value["protocol_id"],
+    value["workflow_id"],
+)
+print("PHASE_B_CONFIG=" + "\t".join(fields))
 PY
 )
-read -r -a TRAINING_SEEDS <<<"${CONFIG_VALUES[0]}"
+[[ -n "$CONFIG_RECORD" ]] || die "could not read the tagged Phase B configuration record"
+IFS=$'\t' read -r CONFIG_SEEDS OLLAMA_MODEL_CONFIG MODEL_BLOB_SHA256 PROTOCOL_ID WORKFLOW_ID \
+  <<<"$CONFIG_RECORD"
+IFS=' ' read -r -a TRAINING_SEEDS <<<"$CONFIG_SEEDS"
 [[ "${#TRAINING_SEEDS[@]}" -gt 0 ]] || die "config has no training seeds"
 SEED="${SEED:-${TRAINING_SEEDS[0]}}"
 [[ "$SEED" =~ ^[0-9]+$ ]] || die "--seed must be an integer"
-OLLAMA_MODEL="${OLLAMA_MODEL:-${CONFIG_VALUES[1]}}"
-MODEL_BLOB_SHA256="${CONFIG_VALUES[2]}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-${OLLAMA_MODEL_CONFIG}}"
 MODEL_BLOB="${MODEL_BLOB:-inputs/ollama/blobs/sha256-$MODEL_BLOB_SHA256}"
-PROTOCOL_ID="${CONFIG_VALUES[3]}"
-WORKFLOW_ID="${CONFIG_VALUES[4]}"
 
 case "$STAGE" in
   available) ensure_available ;;
