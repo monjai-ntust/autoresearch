@@ -1,7 +1,7 @@
 """Canonical encoder candidate-generation adapter for ``CODE-STRICT-1``.
 
 This B-05U slice adds the ``phase_b.py model generate-candidates`` stage. It is
-the canonical successor to the historical ``inference_kg.py`` script named in
+the canonical successor to the historical ``provenance/inference_kg.py`` script named in
 ``docs/historical-transition-map.md``. The historical script loaded an arbitrary
 checkpoint, ran span NER plus relation extraction over a runtime-selected
 dataset, and wrote a free-form ``results/kg_inference.jsonl`` outside the output
@@ -26,7 +26,7 @@ The stage has three implemented executions:
   frozen recipe) over the prepared sentences to produce that prediction ledger,
   then applies the same deterministic ledger->candidate transform as ``replay``.
   Its forward outputs cannot be validated offline, so live execution remains
-  externally gated on the accelerator + real checkpoint, and ``inference_kg.py``
+  externally gated on the accelerator + real checkpoint, and ``provenance/inference_kg.py``
   stays retained as provenance until external output parity is confirmed (see
   ``docs/historical-transition-map.md``).
 """
@@ -467,7 +467,7 @@ def _live_inference_records(
 
     This is the externally gated `live` execution. It reuses the retained
     ``models.bert_kg_encoder.BertKGExtractor`` and the exact
-    ``inference_kg.py`` forward logic (greedy non-overlapping span selection, then
+    ``provenance/inference_kg.py`` forward logic (greedy non-overlapping span selection, then
     relation extraction over the selected pairs with a softmax-product
     confidence), but binds the CODE label space and writes the canonical
     prediction-ledger schema. Torch and the model are imported lazily so the

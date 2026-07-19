@@ -16,6 +16,7 @@ from phase_b_io import DataContractError
 from paths import PathContractError, RunLayout, discover_source_root
 from pilot import PilotInputs, run_verifier_pilot
 from preparation import prepare_run
+from publication import assemble_seed_candidates, prepare_verifier_pilot
 from reconciliation import reconcile_section5_evidence
 from scoring import ScoreInputs, score_run
 from verifier import run_verifier
@@ -32,9 +33,10 @@ def _parser() -> argparse.ArgumentParser:
             "development slice implements "
             "doctor, secondary Section 5 evidence reconciliation, immutable "
             "CODE-ACCORD fetch/preparation, model train planning and candidate "
-            "generation (dry-run/replay/live), development threshold selection, "
-            "frozen verifier request/replay instrumentation, development-pilot "
-            "auditing, and offline CODE-STRICT-1 scoring."
+            "generation (dry-run/replay/live), eight-seed candidate assembly, "
+            "development threshold and label-blind pilot selection, frozen "
+            "verifier request/replay instrumentation, development-pilot auditing, "
+            "and offline CODE-STRICT-1 scoring."
         ),
     )
     parser.add_argument(
@@ -140,6 +142,21 @@ def _parser() -> argparse.ArgumentParser:
         help="Run-relative index of four copied complete live-run evidence bundles",
     )
 
+    assemble = subparsers.add_parser(
+        "assemble-candidates",
+        help="Validate and combine the eight seed-specific candidate ledgers",
+    )
+    assemble.add_argument("--config", default=DEFAULT_CONFIG)
+    assemble.add_argument("--run-id", required=True)
+    assemble.add_argument("--split", required=True, choices=["development", "test"])
+
+    prepare_pilot = subparsers.add_parser(
+        "prepare-pilot",
+        help="Freeze the label-blind B-07 development pilot inputs",
+    )
+    prepare_pilot.add_argument("--config", default=DEFAULT_CONFIG)
+    prepare_pilot.add_argument("--run-id", required=True)
+
     model = subparsers.add_parser(
         "model", help="Canonical encoder candidate-generation adapter"
     )
@@ -197,6 +214,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     threshold.add_argument("--gold", help="Run-relative development gold JSONL")
     threshold.add_argument("--split-manifest", help="Run-relative split manifest")
+    threshold.add_argument(
+        "--candidate-index",
+        help="Run-relative full development candidate index bound into the selection",
+    )
     threshold.add_argument("--out", help="Run-relative threshold-selection.json output")
 
     score = subparsers.add_parser("score", help="Offline score frozen candidates and verdicts")
@@ -277,6 +298,34 @@ def main(argv: list[str] | None = None) -> int:
                         "byte_identical": manifest[
                             "byte_identical_independent_materializations"
                         ],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if args.stage == "assemble-candidates":
+            result = assemble_seed_candidates(layout, config, split=args.split)
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": "assembled",
+                        **result,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if args.stage == "prepare-pilot":
+            result = prepare_verifier_pilot(layout, config)
+            print(
+                json.dumps(
+                    {
+                        "run_id": args.run_id,
+                        "status": "prepared_pilot",
+                        **result,
                     },
                     sort_keys=True,
                 )
@@ -474,6 +523,11 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 split_manifest_path=layout.resolve(
                     args.split_manifest or configured["split_manifest"], must_exist=True
+                ),
+                candidate_index_path=(
+                    layout.resolve(args.candidate_index, must_exist=True)
+                    if args.candidate_index
+                    else None
                 ),
                 out_path=layout.resolve(args.out or configured["threshold_selection"]),
             )

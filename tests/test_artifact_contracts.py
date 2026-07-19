@@ -4,7 +4,7 @@ import importlib
 import math
 import unittest
 
-from build_kg import (
+from provenance.build_kg import (
     build_entity_clusters,
     filter_triple,
     is_substring_match,
@@ -13,10 +13,10 @@ from build_kg import (
     string_similarity,
 )
 from data.scierc import BIO_TAG2ID
-from diagnose_evidence_paths import build_adjacency, norm, path_candidates, sim
+from provenance.diagnose_evidence_paths import build_adjacency, norm, path_candidates, sim
 from eval.triple_f1 import _bio_to_spans, _is_valid_bio_transition, _prf
-from rule_engine import filter_triples, is_valid_triple
-from verify_triples_llm import parse_verdict_correct, parse_verdict_simple
+from provenance.rule_engine import filter_triples, is_valid_triple
+from provenance.verify_triples_llm import parse_verdict_correct, parse_verdict_simple
 
 
 class MetricContractTests(unittest.TestCase):
@@ -147,7 +147,7 @@ class VerifierContractTests(unittest.TestCase):
 class ImportSafetyTests(unittest.TestCase):
     def test_retained_utilities_do_not_execute_on_import(self):
         for module_name in (
-            "bench_gpu",
+            "provenance.bench_gpu",
         ):
             with self.subTest(module=module_name):
                 importlib.import_module(module_name)

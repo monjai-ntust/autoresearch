@@ -25,13 +25,13 @@ root discovery, and the public command spelling.
 | `phase_b_pipeline/scoring.py` | `scoring.py` | No baseline host | Whole-file move; canonical matcher and score symbols retained. |
 | `phase_b_pipeline/split.py` | `split.py` | No baseline host | Whole-file move; deterministic split symbols retained. |
 | `phase_b_pipeline/statistics.py` | `phase_b_statistics.py` | No baseline host | Whole-file move renamed to avoid collision with Python standard-library `statistics`; paired statistics symbols retained. |
-| `phase_b_pipeline/verifier.py` | `verifier.py` | `verify_triples_llm.py` is incompatible SciERC provenance | Whole-file move; frozen CODE verifier symbols retained. |
+| `phase_b_pipeline/verifier.py` | `verifier.py` | `provenance/verify_triples_llm.py` is incompatible SciERC provenance | Whole-file move; frozen CODE verifier symbols retained. |
 | `phase_b_pipeline/__init__.py` | none | No baseline host | Removed after package deletion; it contained only package metadata. |
 | `phase_b_pipeline/__main__.py` | none | No baseline host | Removed after package deletion; `phase_b.py` supplies the direct executable entry point. |
 
 The active root command is `python -B phase_b.py`. Historical root scripts
 remain separate provenance paths. In particular, `prepare.py` and
-`verify_triples_llm.py` were not overwritten because their data/model contracts
+`provenance/verify_triples_llm.py` was not overwritten because its data/model contracts
 are incompatible with approved Path A semantics.
 
 ## Parity checks

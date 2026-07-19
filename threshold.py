@@ -67,6 +67,7 @@ def select_threshold(
     gold_path: Path,
     split_manifest_path: Path,
     out_path: Path,
+    candidate_index_path: Path | None = None,
 ) -> dict[str, Any]:
     """Compute and write the frozen development confidence-threshold selection."""
 
@@ -121,7 +122,9 @@ def select_threshold(
         "grid": list(grid),
         "selected_threshold": selected,
         "used_test_labels": False,
-        "development_candidate_index_sha256": sha256_file(candidates_path),
+        "development_candidate_index_sha256": sha256_file(
+            candidate_index_path or candidates_path
+        ),
         "development_gold_sha256": sha256_file(gold_path),
         "split_manifest_sha256": sha256_file(split_manifest_path),
         "per_threshold": per_threshold,

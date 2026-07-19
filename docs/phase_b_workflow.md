@@ -10,7 +10,8 @@ data.
 ## Current implementation boundary
 
 The B-05/B-06, development-only B-07, and B-05U slice implements one public
-module entry point with nine stages and focused contract tests:
+module entry point with canonical lifecycle, assembly, pilot, and scoring
+stages plus focused contract tests:
 
 - `doctor` validates the direct source checkout, Git cleanliness, root-anchored
   output ignore behavior, configuration/matrix identities, and tracked artifact
@@ -34,7 +35,7 @@ module entry point with nine stages and focused contract tests:
   mode with `--execution live`. Live mode reads only the prepared train and
   development JSONL, pins the DeBERTa revision, writes a resumable full state,
   never loads test data, and emits a schema-bound checkpoint under the run.
-- `model generate-candidates` is the canonical successor to `inference_kg.py`.
+- `model generate-candidates` is the canonical successor to `provenance/inference_kg.py`.
   Its `dry-run` execution validates prepared sentences plus an encoder
   checkpoint identity and writes a per-sentence inference plan without calling a
   model; its `replay` execution transforms a frozen encoder prediction ledger
@@ -74,18 +75,19 @@ typed-strict gold: nine of 6,658 positive-relation marker arguments cannot
 resolve to one authoritative typed BIO span. `prepare` inventories all nine in
 `data-prepared/gold-alignment-audit.json`, preserves every raw row, and makes
 only those nine rows ineligible for typed strict gold; it does not project,
-expand, or manually type an endpoint. The canonical checkpoint adapter and live
-candidate inference are implemented; their accelerator results, eight-seed
-aggregation, threshold selection, the actual model-backed development pilot,
-publication rendering, and parent-side archival are not completed by this
-source-only slice. Historical standalone scripts remain provenance paths and
+expand, or manually type an endpoint. The canonical checkpoint adapter, live
+candidate inference, eight-seed assembly, threshold selection, pilot
+preparation, and recovery orchestration are implemented; their accelerator
+results, actual model-backed development pilot, publication rendering, and
+parent-side archival have not yet been executed for a completed publication
+run. Historical standalone scripts remain provenance paths and
 are not publication commands for Path A. Direct `train_span.py` execution still
 reads legacy annotation CSVs and creates its old random development split; only
 `phase_b.py model train --execution live` opts it into the prepared
 `CODE-SPLIT-1` contract.
-Expensive publication training and final-test Qwen execution remain blocked
-until the B-07 evidence exists and the user makes the required go/no-go
-decision.
+Final-test inference and full Qwen execution remain blocked until the newly
+captured B-07 evidence passes and the user has supplied the full runner's
+explicit conditional approval.
 
 [`Phase C migration plan`](phase_c_migration.md) records the raw/typed design
 lineage and its remaining execution gates. B-05C approves the compatibility
@@ -176,12 +178,12 @@ data.
 
 ### Bash debug/resume runner
 
-On the external Linux machine, use the tracked runner to pull the latest
-`refactor` commit, synchronize the locked environment, and run every
+On the external Linux machine, use the tracked runner to pull the current
+branch's configured upstream, synchronize the locked environment, and run every
 implemented canonical prerequisite from its first incomplete run-local artifact:
 
 ```bash
-scripts/phase_b_debug.sh --run-id "$RUN_ID"
+scripts/phase_b_debug.sh
 ```
 
 It treats a passing checkout manifest, reconciliation audit, verified
@@ -189,7 +191,7 @@ acquisition manifest/archive, and byte-identical preparation manifest plus
 prepared split as completed. The default `available` target parser-checks every
 documented command, runs every stage whose required run-local artifacts are
 present, and exits on a new command error; after fixing the error, rerun the
-same command with the same `RUN_ID`. It reports missing external inputs and
+exact command it prints with the generated or supplied `RUN_ID`. It reports missing external inputs and
 ungranted publication gates as `BLOCKED` and continues to test independent
 available stages, then exits nonzero when any blocks remain; it never reports a
 blocked sweep as complete. `--stage publishable` instead stops at the first missing
@@ -197,6 +199,15 @@ canonical publication gate. `--help` lists explicit stages for every later
 documented command (checkpoint planning, candidate generation, thresholding,
 verifier/pilot, score, and the retained legacy diagnostic). These stages do not
 fabricate or copy missing artifacts.
+
+Every invoked stage is fail-fast and transactional. Training resumes from its
+CPU-loaded full restart state. Full live verification preserves each completely
+written response as a run-local recovery cache. A nonresumable or repeatedly
+failing resume is removed only from that stage's declared subtree and rerun
+from the latest validated upstream artifacts; the runner validates the resolved
+target beneath the selected run before deletion and records failure, cleanup,
+and completion events in `manifests/debug-recovery.jsonl`. It never deletes an
+upstream completed stage, another run, or an undeclared path.
 
 For a new run ID on the same checkout, the runner avoids another network
 download when any earlier `output/<other-run-id>/` contains the immutable
@@ -350,6 +361,40 @@ Matching the dataset name is not accepted as stronger evidence.
 The complete invariant/difference table and historical per-seed evidence are in
 [`model-training compatibility contract`](model-training-compatibility.md).
 
+### Complete conditional publication run
+
+After the seed-42 restart and nonpublication smoke have been reviewed, the
+complete external-machine command is:
+
+```bash
+bash scripts/phase_b_debug.sh --stage full --approve-b07
+```
+
+No run ID, branch, seed list, Python patch version, model digest, or Ollama blob
+path is hard-coded by this command. The runner generates a UTC run ID, pulls the
+checked-out branch's upstream, reads seeds/model/blob identity from the tracked
+config, and resolves the local blob with
+`ollama show --modelfile <configured-model>`. Supply `--run-id` only to resume a printed
+run identity or deliberately name a new run.
+
+`full` performs dry planning, independent training and development inference
+for every configured seed, candidate assembly/indexing, development-only
+threshold selection, a label-blind one-candidate-per-seed pilot selection, four
+fresh live pilot captures, and the B-07 audit. `--approve-b07` is conditional
+user authorization to continue into test inference and the two complete live
+verifier passes only when that newly produced pilot reports `pilot_status=pass`
+and `material_protocol_review_required=false`; any other pilot result stops the
+run. It then independently infers the test split for all seeds, assembles the
+test universe, runs simple and corrective Qwen verification, and scores the
+four frozen conditions. The full command writes an append-only console log to
+`output/<run-id>/logs/phase-b-debug.log` and records all derived settings in
+`manifests/debug-full-run.json`.
+
+The command stays attached to the invoking shell. Run it in an existing
+`tmux`/`screen` session if the SSH connection may close. On any new error it
+stops and prints an exact resume command. Do not start a second concurrent
+launcher for the same run ID.
+
 ### Debug runner and B-07 boundary
 
 Run or resume the selected seed with:
@@ -376,8 +421,7 @@ or any canonical verifier/score location:
 
 ```bash
 scripts/phase_b_debug.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
-  --allow-live-smoke \
-  --model-blob-source ~/.ollama/models/blobs/sha256-3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312
+  --allow-live-smoke --ollama-model qwen3:32b
 ```
 
 It performs real GPU inference over the prepared test split, chooses one
@@ -390,11 +434,11 @@ artifacts live under `predictions/smoke/`, `verifier/smoke/`, and
 `smoke/score/`; the normal `verifier/<mode>/`, `metrics/`, and `outcomes/`
 locations remain untouched for a later real run.
 
-`--model-blob-source` is needed only when the run does not already contain the
-required blob. It materializes the immutable blob beneath the selected run by
-hard link when possible (copy fallback otherwise); the live verifier still
-hash-verifies it before making a request. Replace the example path if the
-external machine stores Ollama blobs elsewhere.
+When `--model-blob-source` is omitted, the runner discovers it from the frozen
+Ollama tag. It materializes the immutable blob beneath the selected run by hard
+link when possible (copy fallback otherwise); the live verifier still
+hash-verifies it before making a request. An explicit source path remains
+available for nonstandard Ollama installations.
 
 This is a code-path and environment smoke test, not scientific evidence. Its
 score manifest and metrics contain `nonpublication_smoke: true`, suppress
@@ -494,7 +538,7 @@ manifest, append-only run log, and stage manifest without contacting Ollama or
 writing a verdict:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example \
@@ -508,7 +552,7 @@ materialized request exactly. Replay performs no HTTP request and emits the
 schema-valid verdict file consumed by `score`:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-simple-replay \
@@ -530,7 +574,7 @@ the Ollama tag manifest, Qwen3/32.8B/Q4_K_M details, and CLI modelfile reference
 then retains the warm-up separately and excludes its latency from observations:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-simple-live \
@@ -556,18 +600,38 @@ external handoff surfaces, not permission to inspect or call the final test set.
 
 ## 8. Audit the development-only verifier pilot
 
-This stage consumes, but does not create, the B-07 pilot evidence. The full
-eight-file development candidate index is distinct from the small pilot
-candidate subset. Freeze `candidate-index.json`, select the pilot subset without
-test labels, and write `pilot-selection.json` before any live call. The selection
-manifest binds the authoritative split, full index, exact subset hash, candidate
-IDs, examples, seed coverage, and selection rule.
+After all eight development ledgers exist, assemble and freeze the B-07 inputs
+before any live call:
+
+```bash
+uv run --frozen python -B phase_b.py assemble-candidates \
+  --config configs/phase_b_path_a.json \
+  --run-id "$RUN_ID" \
+  --split development
+
+uv run --frozen python -B phase_b.py select-threshold \
+  --config configs/phase_b_path_a.json \
+  --run-id "$RUN_ID" \
+  --candidates predictions/dev/development-candidates.jsonl \
+  --candidate-index predictions/dev/candidate-index.json
+
+uv run --frozen python -B phase_b.py prepare-pilot \
+  --config configs/phase_b_path_a.json \
+  --run-id "$RUN_ID"
+```
+
+The full eight-file development candidate index is distinct from the small
+pilot subset. `prepare-pilot` deterministically selects the lexicographically
+smallest canonical candidate ID independently within each seed, without reading
+test data or development labels, and freezes one warm-up candidate. The
+selection manifest binds the authoritative split, full index, exact subset
+hash, candidate IDs, examples, seed coverage, and selection rule.
 
 Use four distinct clean run IDs to execute two live calls per mode. Each call
 must receive the same predeclared selection manifest as an explicit input:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-pilot-simple-1 \
@@ -593,7 +657,7 @@ and verdict evidence against the source manifests; a response ledger alone is
 not pilot evidence.
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   pilot-verifier \
   --config configs/phase_b_path_a.json \
   --run-id path-a-development-pilot \
@@ -643,7 +707,7 @@ claim that the actual B-07 pilot has run.
 ledger and checkpoint manifest, rather than supplied externally:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   model generate-candidates \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example \
@@ -684,11 +748,12 @@ run by the `select-threshold` stage from the eight-seed development candidate
 universe and development gold, rather than supplied externally:
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   select-threshold \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example \
-  --candidates predictions/dev/development-candidates.jsonl
+  --candidates predictions/dev/development-candidates.jsonl \
+  --candidate-index predictions/dev/candidate-index.json
 ```
 
 The threshold file must conform to
@@ -707,7 +772,7 @@ noncanonical identities rather than accepting an unrelated model run.
 ## 10. Reproduce offline strict scoring
 
 ```bash
-uv run --frozen --python 3.10.20 python -B phase_b.py \
+uv run --frozen python -B phase_b.py \
   score \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example

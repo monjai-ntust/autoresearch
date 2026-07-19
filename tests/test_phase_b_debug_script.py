@@ -1,0 +1,100 @@
+"""Static contracts for the external-machine Phase B recovery launcher.
+
+The repository's supported launcher is Bash, while the focused local validation
+environment may be Windows-only.  These tests therefore protect the important
+orchestration and source-layout invariants without pretending to execute GPU,
+Ollama, Git-pull, or Bash process-substitution behavior locally.
+"""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from paths import discover_source_root
+
+
+SOURCE_ROOT = discover_source_root(Path(__file__))
+SCRIPT = (SOURCE_ROOT / "scripts" / "phase_b_debug.sh").read_text(encoding="utf-8")
+
+MOVED_PROVENANCE_MODULES = (
+    "bench_gpu.py",
+    "build_kg.py",
+    "dapt_zh.py",
+    "diagnose_evidence_paths.py",
+    "eval_graph_rag.py",
+    "generate_accord_llm_aug.py",
+    "generate_cycle_data.py",
+    "generate_entigraph.py",
+    "generate_entity_masks.py",
+    "generate_paraphrase_dataset.py",
+    "generate_synth_dataset.py",
+    "inference_kg.py",
+    "rule_engine.py",
+    "train_gan.py",
+    "train_gumbel.py",
+    "train_multi.py",
+    "train_pretrain_cooperative.py",
+    "train_stage2b.py",
+    "train_stage2c.py",
+    "train_stage2d.py",
+    "train_stage2e.py",
+    "verify_triples_llm.py",
+    "zh_translate_project.py",
+)
+
+
+class DebugScriptContractTests(unittest.TestCase):
+    def test_full_run_derives_machine_specific_values(self):
+        self.assertIn('RUN_ID=""', SCRIPT)
+        self.assertIn("git pull --ff-only", SCRIPT)
+        self.assertIn('value["training_seeds"]', SCRIPT)
+        self.assertIn('value["verifier"]["model"]', SCRIPT)
+        self.assertIn('ollama show --modelfile "$OLLAMA_MODEL"', SCRIPT)
+        self.assertNotIn('BRANCH="refactor"', SCRIPT)
+        self.assertNotIn('SEED=42', SCRIPT)
+        self.assertNotIn("--python 3.10.20", SCRIPT)
+        self.assertNotIn(
+            "3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
+            SCRIPT,
+        )
+
+    def test_full_run_orders_publication_stages_and_keeps_b07_gate(self):
+        full = SCRIPT[SCRIPT.index("ensure_full() {") : SCRIPT.index("ensure_smoke() {")]
+        ordered_tokens = (
+            "ensure_train_live",
+            "ensure_assemble_candidates development",
+            "ensure_threshold",
+            "ensure_prepare_pilot",
+            "ensure_pilot_captures",
+            "ensure_pilot_audit",
+            'pilot_status \'"pass"\'',
+            "ensure_assemble_candidates test",
+            "ensure_verifier_live",
+            "ensure_score",
+        )
+        positions = [full.index(token) for token in ordered_tokens]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('[[ "$APPROVE_B07" == true ]]', full)
+
+    def test_recovery_is_run_scoped_and_records_exact_resume(self):
+        self.assertIn('[[ "$run_abs" == "$SOURCE_ROOT"/output/* ]]', SCRIPT)
+        self.assertIn('[[ "$target_abs" == "$run_abs"/* ]]', SCRIPT)
+        self.assertIn('[[ ! -L "$target" ]]', SCRIPT)
+        self.assertIn("rm -rf -- \"$target\"", SCRIPT)
+        self.assertIn("debug-recovery.jsonl", SCRIPT)
+        self.assertIn("print_resume_command", SCRIPT)
+        self.assertIn("resume-from-response-cache", SCRIPT)
+        self.assertIn("restart-state.pt", SCRIPT)
+
+    def test_secondary_entry_points_are_namespaced_as_provenance(self):
+        for name in MOVED_PROVENANCE_MODULES:
+            with self.subTest(name=name):
+                self.assertFalse((SOURCE_ROOT / name).exists())
+                self.assertTrue((SOURCE_ROOT / "provenance" / name).is_file())
+        self.assertTrue((SOURCE_ROOT / "train_span.py").is_file())
+        self.assertTrue((SOURCE_ROOT / "phase_b.py").is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()

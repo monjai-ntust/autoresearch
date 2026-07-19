@@ -259,6 +259,7 @@
     "paths.py",
     "pilot.py",
     "preparation.py",
+    "publication.py",
     "records.py",
     "reconciliation.py",
     "scoring.py",

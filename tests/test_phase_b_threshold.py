@@ -9,7 +9,7 @@ from pathlib import Path
 
 from config import load_pipeline_config
 from constants import PROTOCOL_ID, TRAINING_SEEDS
-from phase_b_io import DataContractError, atomic_write_json, atomic_write_jsonl
+from phase_b_io import DataContractError, atomic_write_json, atomic_write_jsonl, sha256_file
 from paths import RunLayout, discover_source_root
 from records import EntitySpan, StrictTriple, candidate_id_for
 from scoring import _load_threshold
@@ -192,6 +192,29 @@ class ThresholdSelectionTests(unittest.TestCase):
                     split_manifest_path=split_manifest,
                     out_path=out,
                 )
+
+    def test_binds_explicit_candidate_index_when_supplied(self):
+        rows = [_candidate(seed, T_GOLD, 0.8) for seed in TRAINING_SEEDS]
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "thresh-index")
+            layout.create()
+            candidates, gold, split_manifest = _write_inputs(layout, rows)
+            candidate_index = layout.resolve("predictions/dev/candidate-index.json")
+            atomic_write_json(candidate_index, {"identity": "full-eight-seed-index"})
+            out = layout.resolve("predictions/dev/threshold-selection.json")
+            document = select_threshold(
+                layout,
+                self.config,
+                candidates_path=candidates,
+                gold_path=gold,
+                split_manifest_path=split_manifest,
+                out_path=out,
+                candidate_index_path=candidate_index,
+            )
+            self.assertEqual(
+                document["development_candidate_index_sha256"],
+                sha256_file(candidate_index),
+            )
 
 
 if __name__ == "__main__":

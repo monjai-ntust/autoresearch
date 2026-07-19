@@ -20,7 +20,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-import rule_engine
+from provenance import rule_engine
 
 
 # Pronouns and stopword entities to filter

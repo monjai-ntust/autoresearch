@@ -25,11 +25,15 @@ records preserved trainer invariants, necessary opt-in differences, and the
 limit on historical statistical comparison.
 Every workflow-created file is confined to ignored `output/<run-id>/`.
 
-The repository also retains the historical `train_span.py -> inference_kg.py ->
-verify_triples_llm.py -> build_kg.py` chain, reported baselines, ablations,
+The repository also retains the historical `train_span.py ->
+provenance/inference_kg.py -> provenance/verify_triples_llm.py ->
+provenance/build_kg.py` chain, reported baselines, ablations,
 closed-loop attempts, cross-dataset transfer, and negative results. Those paths
 are provenance evidence; they are not publication commands for approved Path A
 until their claim-bearing behavior is migrated behind the canonical runner.
+All secondary historical entry points are grouped under `provenance/` and run
+as modules from the repository root; `train_span.py` remains at root because it
+is also the compatibility-hosted canonical encoder trainer.
 
 `phase_b.py` and its root-module collaborators are a protocol and orchestration layer, not a second encoder
 implementation. It owns the contracts that the historical root scripts do not
@@ -42,11 +46,11 @@ live` invokes an opt-in compatibility mode in the original `train_span.py`
 loop: prepared train/development input, revision pinning, full restart state,
 no test access, and schema-bound provenance are added without a second encoder
 or loss loop. Actual accelerator smoke/parity evidence and the eight-seed run
-remain gated, so `train_span.py`/`inference_kg.py` are retained as provenance.
+remain gated, so `train_span.py` and `provenance/inference_kg.py` are retained.
 The new verifier caller is necessarily canonical-specific because the retained
-root verifier hard-codes the SciERC ontology, parses free-form line responses,
-and lacks the approved prompt/schema/digest/cache/telemetry contract. The root
-script remains unchanged as provenance rather than being silently repurposed.
+historical verifier hard-codes the SciERC ontology, parses free-form line
+responses, and lacks the approved prompt/schema/digest/cache/telemetry contract.
+That script remains under `provenance/` rather than being silently repurposed.
 
 This creates an explicit two-tier authority boundary. Canonical Path A data,
 manifests, typed matching, splits, checkpoints, and scores are authoritative for
@@ -192,7 +196,7 @@ must not be used to generate Path A publication results. First extract triples
 from a compatible checkpoint:
 
 ```bash
-uv run python inference_kg.py \
+uv run python -m provenance.inference_kg \
   --checkpoint checkpoints/scierc_span_best.pt \
   --dataset scierc \
   --split test \
@@ -202,7 +206,7 @@ uv run python inference_kg.py \
 Optionally verify and correct the predicted triples with Ollama:
 
 ```bash
-uv run python verify_triples_llm.py \
+uv run python -m provenance.verify_triples_llm \
   --input results/scierc_inference.jsonl \
   --output results/scierc_verified.jsonl \
   --ollama-url http://localhost:11434 \
@@ -213,14 +217,14 @@ uv run python verify_triples_llm.py \
 Build the graph, optionally applying the retained neuro-symbolic rules:
 
 ```bash
-uv run python build_kg.py \
+uv run python -m provenance.build_kg \
   --input results/scierc_verified.jsonl \
   --output results/scierc_kg.json \
   --filter-mode verified \
   --use-rules
 ```
 
-`verify_triples_llm.py` requests `temperature=0` with thinking disabled and has
+`provenance/verify_triples_llm.py` requests `temperature=0` with thinking disabled and has
 timeout/retry controls, but it does not implement the approved B-06 JSON-schema,
 model-digest, cache, telemetry, seed, or prompt-hash contract. Temperature zero
 alone is not proof of deterministic replay.
@@ -245,7 +249,7 @@ The canonical `phase_b.py` does not reuse that type-agnostic historical
 key. Its approved `CODE-STRICT-1` matcher requires example ID, typed head span,
 directed relation, and typed tail span to match exactly.
 
-The historical `eval_graph_rag.py` script is a diagnostic, not a leakage-free downstream benchmark: it derives questions and reference answers from the same gold-bearing source. `diagnose_evidence_paths.py` reports structural evidence-path coverage and likewise should not be interpreted as task accuracy.
+The historical `provenance/eval_graph_rag.py` script is a diagnostic, not a leakage-free downstream benchmark: it derives questions and reference answers from the same gold-bearing source. `provenance/diagnose_evidence_paths.py` reports structural evidence-path coverage and likewise should not be interpreted as task accuracy.
 
 ## Retained evaluation and historical reproduction steps
 
@@ -265,7 +269,7 @@ evidence without an approved migration.
 Run the installation smoke benchmark after model download/cache setup:
 
 ```bash
-uv run python bench_gpu.py
+uv run python -m provenance.bench_gpu
 ```
 
 This fixed BERT forward/backward smoke is useful for detecting CPU fallback and gross environment problems. Its timings are not the paper's encoder, verifier, or full-pipeline measurements.
@@ -273,7 +277,7 @@ This fixed BERT forward/backward smoke is useful for detecting CPU fallback and 
 For the retained Graph RAG diagnostic, first build a KG and retain inference JSONL with `gold_triples`, then run:
 
 ```bash
-uv run python eval_graph_rag.py \
+uv run python -m provenance.eval_graph_rag \
   --kg results/scierc_kg.json \
   --gold-jsonl results/scierc_inference.jsonl \
   --max-questions 10 \
@@ -287,7 +291,7 @@ This reproduces the diagnostic protocol behind the draft table, not a leakage-fr
 The older token-BIO runner is retained for the SciERC/CoNLL04/ADE comparator and NER/RE/full-Triple decomposition lineage:
 
 ```bash
-uv run python train_multi.py \
+uv run python -m provenance.train_multi \
   --dataset scierc \
   --max-steps 1500 \
   --seed 42 \
@@ -301,7 +305,7 @@ Repeat with `--dataset conll04` or `--dataset ade` only after running the corres
 Generate bounded schema-aware CODE-ACCORD examples with the local Ollama service:
 
 ```bash
-uv run python generate_accord_llm_aug.py \
+uv run python -m provenance.generate_accord_llm_aug \
   --dataset accord \
   --max-examples 120 \
   --out-jsonl results/accord_llm_aug_s42.jsonl
@@ -310,7 +314,7 @@ uv run python generate_accord_llm_aug.py \
 Generate the EntiGraph continued-pretraining corpus from the included, incomplete entity CSV:
 
 ```bash
-uv run python generate_entigraph.py \
+uv run python -m provenance.generate_entigraph \
   --input data/code_accord/entities/train.csv \
   --output results/accord_entigraph.jsonl \
   --max-pairs-per-doc 5
@@ -319,7 +323,7 @@ uv run python generate_entigraph.py \
 Generate CycleGT data from SciERC, using either the local Hugging Face decoder or Ollama:
 
 ```bash
-uv run python generate_cycle_data.py \
+uv run python -m provenance.generate_cycle_data \
   --backend ollama \
   --max-triples 20 \
   --out-jsonl results/scierc_cycle_s42.jsonl
@@ -330,16 +334,16 @@ The generated JSONL is consumed by the primary runner's `--synth-jsonl` and `--s
 The adjacent Stage 2e paraphrase experiment is retained separately from the closed-loop count. Generate base-Qwen paraphrases and run matched synthetic/gold-only training:
 
 ```bash
-uv run python generate_paraphrase_dataset.py \
+uv run python -m provenance.generate_paraphrase_dataset \
   --out-jsonl results/stage2e_paraphrase_s42.jsonl
 
-uv run python train_stage2e.py \
+uv run python -m provenance.train_stage2e \
   --synth-jsonl results/stage2e_paraphrase_s42.jsonl \
   --max-steps 1500 \
   --gold-only-steps 250 \
   --seed 42
 
-uv run python train_stage2e.py \
+uv run python -m provenance.train_stage2e \
   --synth-jsonl "" \
   --max-steps 1500 \
   --seed 42
@@ -348,7 +352,7 @@ uv run python train_stage2e.py \
 To reproduce the LoRA-decoder version instead, supply the separately generated Stage 2c/d adapter:
 
 ```bash
-uv run python generate_synth_dataset.py \
+uv run python -m provenance.generate_synth_dataset \
   --lora-dir checkpoints/stage2_009_lora_final \
   --max-triples 20 \
   --out-jsonl results/stage2e_lora_synth.jsonl
@@ -359,12 +363,12 @@ uv run python generate_synth_dataset.py \
 After acquiring a JSONL text corpus and a compatible span checkpoint, generate entity masks and run the cooperative ELECTRA treatment:
 
 ```bash
-uv run python generate_entity_masks.py \
+uv run python -m provenance.generate_entity_masks \
   --checkpoint checkpoints/scierc_span_best.pt \
   --input data/arxiv_real/cs_validation.jsonl \
   --output results/arxiv_entity_masks.jsonl
 
-uv run python train_pretrain_cooperative.py \
+uv run python -m provenance.train_pretrain_cooperative \
   --entity-mask-jsonl results/arxiv_entity_masks.jsonl \
   --max-steps 1000 \
   --save-to checkpoints/electra_entity_mask_s42.pt
@@ -377,29 +381,29 @@ uv run python train_pretrain_cooperative.py \
 Acquire `data/arxiv_real/cs_validation.jsonl` first. The retained runners expose the final configurable surfaces for Stage 2b/c/d, GAN, and Gumbel:
 
 ```bash
-uv run python train_stage2b.py \
+uv run python -m provenance.train_stage2b \
   --arxiv-jsonl data/arxiv_real/cs_validation.jsonl \
   --max-steps 1500 \
   --save-best-to checkpoints/stage2_007_best.pt
 
-uv run python train_stage2c.py \
+uv run python -m provenance.train_stage2c \
   --stage2b-ckpt checkpoints/stage2_007_best.pt \
   --arxiv-jsonl data/arxiv_real/cs_validation.jsonl \
   --max-steps 3000 \
   --save-adapters-to checkpoints/stage2_008_lora
 
-uv run python train_stage2d.py \
+uv run python -m provenance.train_stage2d \
   --stage2b-ckpt checkpoints/stage2_007_best.pt \
   --arxiv-jsonl data/arxiv_real/cs_validation.jsonl \
   --variant-tag v4
 
-uv run python train_gan.py \
+uv run python -m provenance.train_gan \
   --dataset scierc \
   --max-steps 2500 \
   --n-critic 3 \
   --save-best-to checkpoints/stage2_gan_s42.pt
 
-uv run python train_gumbel.py \
+uv run python -m provenance.train_gumbel \
   --dataset scierc \
   --max-steps 2500 \
   --tau 1.0 \
@@ -416,7 +420,7 @@ The paper's "38 variants" wording is not validated by file retention: the audit 
 Translation projection requires the complete CODE-ACCORD entity/relation CSVs. A bounded marker-survival check is:
 
 ```bash
-uv run python zh_translate_project.py \
+uv run python -m provenance.zh_translate_project \
   --stage1 20 \
   --rel-path data/code_accord/relations/train.csv
 ```
@@ -426,7 +430,7 @@ The full projection uses `--project`, `--ent-path`, `--out-dir`, and optionally 
 DAPT can download and normalize a bounded sample, then perform its built-in 50-step smoke:
 
 ```bash
-uv run python dapt_zh.py --stage1 20
+uv run python -m provenance.dapt_zh --stage1 20
 ```
 
 For the reported full treatment, first run `--prep-data data/dapt_zh_laws`, then `--train --corpus data/dapt_zh_laws/corpus.txt --steps 3000` with the recorded starting checkpoint. Network access, model caches, law-source availability, and a suitable GPU are required.

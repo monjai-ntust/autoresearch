@@ -63,12 +63,12 @@ and no historical executable is deleted.
 
 - **D-RAG → mark A-CLAIM-022 unsupported.** The Graph RAG claim is recorded as
   unsupported/removed for the paper owner (reinforcing DISC-007/008). Historical
-  numbers are retained only as leakage-prone diagnostics; `build_kg.py`,
-  `eval_graph_rag.py`, and `diagnose_evidence_paths.py` remain provenance and are
+  numbers are retained only as leakage-prone diagnostics; `provenance/build_kg.py`,
+  `provenance/eval_graph_rag.py`, and `provenance/diagnose_evidence_paths.py` remain provenance and are
   **not** rebuilt as a canonical stage.
 - **D-BENCH → record noncomparability.** SciERC/CoNLL04/ADE remain
   metric-noncomparable to `CODE-STRICT-1`; DISC-009 correction stands.
-  `train_multi.py` and the downloaders stay provenance.
+  `provenance/train_multi.py` and the downloaders stay provenance.
 - **D-AUG → qualify per DISC-004, retain provenance.** The augmentation
   generators stay provenance; the "38 variants" framing is a paper-owner
   correction.
