@@ -479,6 +479,20 @@ ensure_bootstrap() {
   ensure_prepare
 }
 
+smoke_doctor_complete() {
+  [[ -z "$(git status --porcelain --untracked-files=all)" ]] \
+    && json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" status '"pass"'
+}
+
+ensure_smoke_bootstrap() {
+  smoke_doctor_complete \
+    || die "smoke can reuse only an existing clean run with a passing checkout manifest; run --stage publishable first or choose a completed canonical seed run"
+  note "reusing the existing source-locked checkout manifest for non-publication smoke"
+  ensure_reconcile
+  ensure_fetch
+  ensure_prepare
+}
+
 ensure_plan() {
   ensure_bootstrap
   skip_or_run "model train dry-run (seed $SEED)" plan_complete \
@@ -857,7 +871,7 @@ ensure_publishable() {
 }
 
 ensure_smoke() {
-  ensure_bootstrap
+  ensure_smoke_bootstrap
   [[ "$ALLOW_LIVE_SMOKE" == true ]] \
     || die "smoke sends four real Ollama calls; pass --allow-live-smoke to acknowledge"
   [[ -f "$RUN_ROOT/checkpoints/seed-$SEED/checkpoint-manifest.json" ]] \

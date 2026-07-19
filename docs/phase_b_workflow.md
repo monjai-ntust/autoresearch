@@ -400,6 +400,13 @@ eligible for B-07 approval, a paper table, or an eight-seed claim. The fake
 seed copies are permitted only in this explicitly namespaced diagnostic lane;
 the publishable workflow must independently train and infer every seed 42--49.
 
+Unlike normal stages, `smoke` deliberately reuses the existing run's passing
+checkout manifest rather than requiring a new `doctor` manifest for the latest
+source commit. A completed checkpoint is bound to that original manifest; a
+new `doctor` cannot overwrite it. This narrow exception is available only to
+the nonpublication smoke stage, still requires a clean current checkout, and
+does not loosen ordinary bootstrap or publishable-run provenance checks.
+
 ### Legacy trainer: debug only, never publishable
 
 The runner also exposes the retained `train_span.py` command for diagnosing the
