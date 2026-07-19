@@ -394,7 +394,11 @@ def _restart_payload(
 
 
 def _load_restart(args, model, optimizer, scheduler, train_loader, device):
-    state = torch.load(args.resume_from, map_location=device, weights_only=False)
+    # Restart payloads include CPU-only torch.Generator and RNG byte tensors.
+    # Loading the entire payload onto CUDA turns the sampler state into a CUDA
+    # tensor, which torch.Generator.set_state rejects.  Model and optimizer
+    # load_state_dict calls place parameter state on their current devices.
+    state = torch.load(args.resume_from, map_location="cpu", weights_only=False)
     required = {
         "format_version", "seed", "model_name", "model_revision", "max_steps",
         "encoder", "optimizer", "scheduler", "next_step", "best_metrics",

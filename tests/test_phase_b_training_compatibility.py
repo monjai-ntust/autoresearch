@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import random
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+import torch
 
 from data.code_accord import ResumableRandomSampler, _load_prepared_examples
 from models.bert_kg_encoder import BertBackbone
-from train_span import parse_args
+from train_span import _load_restart, parse_args
 
 
 def _prepared_record(example_id: str, split: str) -> dict:
@@ -91,6 +95,43 @@ class PreparedAdapterTests(unittest.TestCase):
         self.assertEqual(list(iter(resumed)), expected_remainder)
         self.assertEqual(
             sorted(consumed + expected_remainder), list(range(8))
+        )
+
+    def test_restart_loads_rng_payload_on_cpu_before_restoring_sampler(self):
+        sampler = ResumableRandomSampler(list(range(4)), seed=42)
+        next(iter(sampler))
+        loader = SimpleNamespace(sampler=sampler)
+        state = {
+            "format_version": "train-span-restart-1.0",
+            "seed": 42,
+            "model_name": "microsoft/deberta-large",
+            "model_revision": "revision-a",
+            "max_steps": 3500,
+            "encoder": {},
+            "optimizer": {},
+            "scheduler": {},
+            "next_step": 100,
+            "best_metrics": {"triple_f1": 0.1},
+            "best_step": 100,
+            "python_rng_state": random.getstate(),
+            "torch_rng_state": torch.get_rng_state(),
+            "cuda_rng_state_all": [],
+            "train_sampler_state": sampler.state_dict(),
+            "boost_adaptive_triggered": False,
+            "boost_adaptive_switched": False,
+            "re_head_finetune_active": False,
+        }
+        args = SimpleNamespace(
+            resume_from="restart-state.pt",
+            seed=42,
+            model_name="microsoft/deberta-large",
+            model_revision="revision-a",
+            max_steps=3500,
+        )
+        with patch("train_span.torch.load", return_value=state) as loader_mock:
+            _load_restart(args, Mock(), Mock(), Mock(), loader, torch.device("cuda"))
+        loader_mock.assert_called_once_with(
+            "restart-state.pt", map_location="cpu", weights_only=False
         )
 
 

@@ -325,6 +325,9 @@ Every completed development evaluation atomically refreshes
 `checkpoints/seed-42/restart-state.pt`, including model, optimizer, scheduler,
 Python/Torch/CUDA RNG, and train-sampler order/cursor. After a machine or command
 failure, rerun the identical live command; it resumes from that full state.
+Restart payloads load CPU-first before model/optimizer restoration so the
+serialized CPU sampler-generator and RNG byte tensors cannot be relocated to
+CUDA and rejected by `torch.Generator.set_state`.
 
 Completion creates the selected checkpoint, restart state, training summary,
 checkpoint manifest, seed-specific stage manifest, progress log, and dataset
