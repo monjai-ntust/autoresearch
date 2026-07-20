@@ -1305,7 +1305,6 @@ if path.exists():
         "run_id",
         "config",
         "config_sha256",
-        "source_commit",
         "ollama_model",
         "run_local_model_blob",
         "conditional_b07_approval",
@@ -1322,6 +1321,24 @@ if path.exists():
     ):
         if previous.get(field) != document[field]:
             raise SystemExit(f"existing full-run manifest differs at {field}")
+    if previous.get("source_commit") != document["source_commit"]:
+        recovery_commits = previous.get("recovery_source_commits", [])
+        if (
+            not isinstance(recovery_commits, list)
+            or any(
+                not isinstance(commit, str) or len(commit) != 40
+                for commit in recovery_commits
+            )
+        ):
+            raise SystemExit("existing full-run recovery_source_commits is invalid")
+        if document["source_commit"] not in recovery_commits:
+            recovery_commits.append(document["source_commit"])
+            previous["recovery_source_commits"] = recovery_commits
+            path.write_text(
+                json.dumps(previous, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
 else:
     path.write_text(
         json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",

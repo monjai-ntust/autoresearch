@@ -56,6 +56,8 @@ class DebugScriptContractTests(unittest.TestCase):
         self.assertIn('PHASE_B_CONFIG=*) CONFIG_RECORD=', SCRIPT)
         self.assertNotIn('mapfile -t CONFIG_VALUES', SCRIPT)
         self.assertIn("IFS=' ' read -r -a TRAINING_SEEDS", SCRIPT)
+        self.assertIn('"recovery_source_commits"', SCRIPT)
+        self.assertIn('existing full-run recovery_source_commits is invalid', SCRIPT)
         self.assertIn('ollama show --modelfile "$OLLAMA_MODEL"', SCRIPT)
         self.assertNotIn('BRANCH="refactor"', SCRIPT)
         self.assertNotIn('SEED=42', SCRIPT)

@@ -141,6 +141,8 @@ def _load_split_manifest(path: Path) -> tuple[dict[str, Any], set[str]]:
             "test_ids",
             "label_counts",
             "overlap_count",
+            "labels",
+            "tie_break",
         },
         path.name,
     )
@@ -152,6 +154,12 @@ def _load_split_manifest(path: Path) -> tuple[dict[str, Any], set[str]]:
         "development_count": 103,
         "test_count": 173,
         "overlap_count": 0,
+        "labels": [
+            "entity_type_presence",
+            "positive_relation_type_presence",
+            "source_country",
+        ],
+        "tie_break": "seeded_generator_then_ascending_uuid",
     }
     for field, expected in expected_scalars.items():
         if value[field] != expected:

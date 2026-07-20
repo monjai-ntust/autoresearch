@@ -173,6 +173,12 @@ class VerifierPilotTests(unittest.TestCase):
                 "test_ids": sorted(test_ids),
                 "label_counts": {},
                 "overlap_count": 0,
+                "labels": [
+                    "entity_type_presence",
+                    "positive_relation_type_presence",
+                    "source_country",
+                ],
+                "tie_break": "seeded_generator_then_ascending_uuid",
             },
         )
         indexed_files = []
