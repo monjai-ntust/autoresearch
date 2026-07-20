@@ -414,10 +414,12 @@ class VerifierPilotTests(unittest.TestCase):
                             "registry_manifest_sha256": self.config.value["verifier"][
                                 "registry_manifest_sha256"
                             ],
-                            "model_blob_sha256": self.config.value["verifier"][
-                                "model_blob_sha256"
-                            ],
-                            "tag_digest": self.config.value["verifier"][
+                        "model_blob_sha256": self.config.value["verifier"][
+                            "model_blob_sha256"
+                        ],
+                        "tags_response_sha256": "a" * 64,
+                        "show_response_sha256": "a" * 64,
+                        "tag_digest": self.config.value["verifier"][
                                 "registry_manifest_sha256"
                             ],
                             "blob_sha256": self.config.value["verifier"][
@@ -712,6 +714,26 @@ class VerifierPilotTests(unittest.TestCase):
                 )
             )
             self.assertEqual(failure["error_category"], "DataContractError")
+
+    def test_volatile_ollama_response_hashes_do_not_split_runtime_identity(self):
+        with _temporary_output_directory() as temporary:
+            layout, inputs = self._fixture(temporary)
+            root = layout.resolve("inputs/pilot/captures/simple-repeat-2")
+            environment_path = root / "verifier/simple/environment-manifest.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["model"]["tags_response_sha256"] = "b" * 64
+            environment["model"]["show_response_sha256"] = "b" * 64
+            atomic_write_json(environment_path, environment)
+            manifest_path = root / "manifests/verifier-simple-live.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["outputs"]["verifier/simple/environment-manifest.json"] = (
+                sha256_file(environment_path)
+            )
+            atomic_write_json(manifest_path, manifest)
+            audit = run_verifier_pilot(
+                layout, self.config, inputs, evidence_class="synthetic-fixture"
+            )
+            self.assertEqual(audit["pilot_status"], "pass")
 
     def test_development_evidence_rejects_incomplete_official_partition(self):
         with _temporary_output_directory() as temporary:

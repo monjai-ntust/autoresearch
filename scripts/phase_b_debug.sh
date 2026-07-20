@@ -218,7 +218,7 @@ record_recovery_event() {
   local status="$1"
   local detail="$2"
   mkdir -p -- "$RUN_ROOT/manifests"
-  uv run --frozen python -B - \
+  uv run --frozen --no-sync python -B - \
     "$RUN_ROOT/manifests/debug-recovery.jsonl" "$ACTIVE_STAGE_ID" \
     "$ACTIVE_RECOVERY_MODE" "$status" "$detail" <<'PY'
 import datetime
@@ -338,7 +338,7 @@ json_equals() {
   local dotted_key="$2"
   local expected_json="$3"
   [[ -f "$path" ]] || return 1
-  uv run --frozen python -B - "$path" "$dotted_key" "$expected_json" <<'PY'
+  uv run --frozen --no-sync python -B - "$path" "$dotted_key" "$expected_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -358,7 +358,7 @@ PY
 archive_ready() {
   local manifest="$RUN_ROOT/manifests/02-input-acquisition-manifest.json"
   [[ -f "$manifest" ]] || return 1
-  uv run --frozen python -B - "$RUN_ROOT" "$manifest" <<'PY'
+  uv run --frozen --no-sync python -B - "$RUN_ROOT" "$manifest" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -463,7 +463,7 @@ write_command_check_marker() {
   local commit
   marker="$(command_check_marker)"
   commit="$(git rev-parse HEAD)"
-  uv run --frozen python -B - "$marker" "$commit" <<'PY'
+  uv run --frozen --no-sync python -B - "$marker" "$commit" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -483,23 +483,23 @@ PY
 }
 
 run_command_check() {
-  uv run --frozen python -B phase_b.py --help >/dev/null
-  uv run --frozen python -B phase_b.py doctor --help >/dev/null
-  uv run --frozen python -B phase_b.py reconcile --help >/dev/null
-  uv run --frozen python -B phase_b.py fetch --help >/dev/null
-  uv run --frozen python -B phase_b.py prepare --help >/dev/null
-  uv run --frozen python -B phase_b.py assemble-candidates --help >/dev/null
-  uv run --frozen python -B phase_b.py prepare-pilot --help >/dev/null
-  uv run --frozen python -B phase_b.py model --help >/dev/null
-  uv run --frozen python -B phase_b.py model train --help >/dev/null
-  uv run --frozen python -B phase_b.py model generate-candidates --help >/dev/null
-  uv run --frozen python -B phase_b.py select-threshold --help >/dev/null
-  uv run --frozen python -B phase_b.py verifier --help >/dev/null
-  uv run --frozen python -B phase_b.py pilot-verifier --help >/dev/null
-  uv run --frozen python -B phase_b.py score --help >/dev/null
-  uv run --frozen python -B train_span.py --help >/dev/null
-  uv run --frozen python -B smoke.py --help >/dev/null
-  uv run --frozen python -B -c \
+  uv run --frozen --no-sync python -B phase_b.py --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py doctor --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py reconcile --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py fetch --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py prepare --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py assemble-candidates --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py prepare-pilot --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py model --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py model train --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py model generate-candidates --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py select-threshold --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py verifier --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py pilot-verifier --help >/dev/null
+  uv run --frozen --no-sync python -B phase_b.py score --help >/dev/null
+  uv run --frozen --no-sync python -B train_span.py --help >/dev/null
+  uv run --frozen --no-sync python -B smoke.py --help >/dev/null
+  uv run --frozen --no-sync python -B -c \
     'import provenance.build_kg, provenance.diagnose_evidence_paths, provenance.rule_engine, provenance.verify_triples_llm'
   write_command_check_marker
 }
@@ -615,13 +615,13 @@ ensure_doctor() {
     return 0
   fi
   skip_or_run doctor doctor_complete \
-    uv run --frozen python -B phase_b.py doctor \
+    uv run --frozen --no-sync python -B phase_b.py doctor \
       --config "$CONFIG" --run-id "$RUN_ID"
 }
 
 ensure_reconcile() {
   skip_or_run reconcile reconcile_complete \
-    uv run --frozen python -B phase_b.py reconcile \
+    uv run --frozen --no-sync python -B phase_b.py reconcile \
       --config "$CONFIG" --run-id "$RUN_ID"
 }
 
@@ -630,7 +630,7 @@ ensure_fetch() {
     seed_archive_from_local_cache
   fi
   skip_or_run fetch fetch_complete \
-    uv run --frozen python -B phase_b.py fetch \
+    uv run --frozen --no-sync python -B phase_b.py fetch \
       --config "$CONFIG" --run-id "$RUN_ID"
 }
 
@@ -639,7 +639,7 @@ ensure_prepare() {
     die "prepared tree is incomplete or from an older artifact contract; do not mix it with this run. Start a new --run-id so prepare can materialize a complete fresh tree."
   fi
   skip_or_run prepare prepare_complete \
-    uv run --frozen python -B phase_b.py prepare \
+    uv run --frozen --no-sync python -B phase_b.py prepare \
       --config "$CONFIG" --run-id "$RUN_ID"
 }
 
@@ -667,7 +667,7 @@ ensure_smoke_bootstrap() {
 ensure_plan() {
   ensure_bootstrap
   skip_or_run "model train dry-run (seed $SEED)" plan_complete \
-    uv run --frozen python -B phase_b.py model train \
+    uv run --frozen --no-sync python -B phase_b.py model train \
       --config "$CONFIG" --run-id "$RUN_ID" \
       --execution dry-run --seed "$SEED"
 }
@@ -696,7 +696,7 @@ ensure_train_live() {
     begin_stage "$stage_id" "fresh"
   fi
   note "running canonical model training (seed $SEED; $ACTIVE_RECOVERY_MODE)"
-  uv run --frozen python -B phase_b.py model train \
+  uv run --frozen --no-sync python -B phase_b.py model train \
     --config "$CONFIG" --run-id "$RUN_ID" \
     --execution live --seed "$SEED"
   finish_stage "canonical seed-$SEED training completed"
@@ -707,7 +707,7 @@ write_legacy_completion_marker() {
   local marker
   checkpoint="$(legacy_checkpoint_path)"
   marker="$(legacy_completion_marker)"
-  uv run --frozen python -B - "$checkpoint" "$marker" "$SEED" <<'PY'
+  uv run --frozen --no-sync python -B - "$checkpoint" "$marker" "$SEED" <<'PY'
 import hashlib
 import json
 import sys
@@ -748,7 +748,7 @@ run_legacy_train() {
   checkpoint="$(legacy_checkpoint_path)"
   [[ -d "$data_dir/entities" && -d "$data_dir/relations" ]] \
     || die "legacy-train requires sibling entities/ and relations/ directories under $data_dir"
-  uv run --frozen python -B - <<'PY'
+  uv run --frozen --no-sync python -B - <<'PY'
 import torch
 
 if not torch.cuda.is_available():
@@ -772,7 +772,7 @@ print(
     f"torch {torch.__version__}; CUDA {torch.version.cuda}"
 )
 PY
-  uv run --frozen python -B train_span.py \
+  uv run --frozen --no-sync python -B train_span.py \
     --dataset accord --data-dir "$data_dir" \
     --model-name microsoft/deberta-large \
     --batch-size 16 --max-length 128 --lr 3e-5 \
@@ -825,7 +825,7 @@ ensure_generate_live() {
   fi
   begin_stage "$stage_id" "fresh"
   note "running model generate-candidates live ($split, seed $SEED)"
-  uv run --frozen python -B phase_b.py model generate-candidates \
+  uv run --frozen --no-sync python -B phase_b.py model generate-candidates \
     --config "$CONFIG" --run-id "$RUN_ID" --execution live \
     --sentences "$sentences" --checkpoint-manifest "$checkpoint_manifest" \
     --checkpoint-blob "$checkpoint_blob" --candidates-out "$output"
@@ -873,7 +873,7 @@ ensure_assemble_candidates() {
   done
   begin_stage "$stage_id" "fresh"
   note "assembling validated $split candidates across configured seeds"
-  uv run --frozen python -B phase_b.py assemble-candidates \
+  uv run --frozen --no-sync python -B phase_b.py assemble-candidates \
     --config "$CONFIG" --run-id "$RUN_ID" --split "$split"
   finish_stage "$split candidate assembly completed"
 }
@@ -905,7 +905,7 @@ ensure_prepare_pilot() {
   done
   begin_stage "$stage_id" "fresh"
   note "freezing label-blind development pilot inputs"
-  uv run --frozen python -B phase_b.py prepare-pilot \
+  uv run --frozen --no-sync python -B phase_b.py prepare-pilot \
     --config "$CONFIG" --run-id "$RUN_ID"
   finish_stage "development pilot inputs completed"
 }
@@ -922,7 +922,7 @@ ensure_generate_replay() {
   local output="${CANDIDATES_OUT:-predictions/test/candidates.jsonl}"
   skip_or_run "model generate-candidates replay" \
     "candidate_replay_complete" \
-    uv run --frozen python -B phase_b.py model generate-candidates \
+    uv run --frozen --no-sync python -B phase_b.py model generate-candidates \
       --config "$CONFIG" --run-id "$RUN_ID" --execution replay \
       --sentences "$sentences" --checkpoint-manifest "$checkpoint_manifest" \
       --prediction-ledger "$prediction_ledger" --candidates-out "$output"
@@ -949,7 +949,7 @@ ensure_threshold() {
   if [[ -f "$RUN_ROOT/predictions/dev/candidate-index.json" ]]; then
     candidate_index_args=(--candidate-index predictions/dev/candidate-index.json)
   fi
-  uv run --frozen python -B phase_b.py select-threshold \
+  uv run --frozen --no-sync python -B phase_b.py select-threshold \
     --config "$CONFIG" --run-id "$RUN_ID" --candidates "$CANDIDATES" \
     "${candidate_index_args[@]}"
   finish_stage "development threshold selected"
@@ -958,7 +958,7 @@ ensure_threshold() {
 ensure_verifier_dry() {
   ensure_bootstrap
   skip_or_run "verifier dry-run ($MODE)" verifier_dry_complete \
-    uv run --frozen python -B phase_b.py verifier \
+    uv run --frozen --no-sync python -B phase_b.py verifier \
       --config "$CONFIG" --run-id "$RUN_ID" \
       --mode "$MODE" --execution dry-run
 }
@@ -968,7 +968,7 @@ verifier_dry_complete() { verifier_complete dry-run planned; }
 ensure_verifier_replay() {
   ensure_bootstrap
   skip_or_run "verifier replay ($MODE)" verifier_replay_complete \
-    uv run --frozen python -B phase_b.py verifier \
+    uv run --frozen --no-sync python -B phase_b.py verifier \
       --config "$CONFIG" --run-id "$RUN_ID" \
       --mode "$MODE" --execution replay --response-ledger "$RESPONSE_LEDGER"
 }
@@ -1010,7 +1010,7 @@ ensure_verifier_live() {
     begin_stage "$stage_id" "fresh"
   fi
   note "running verifier live ($MODE; $ACTIVE_RECOVERY_MODE)"
-  uv run --frozen python -B phase_b.py verifier \
+  uv run --frozen --no-sync python -B phase_b.py verifier \
     --config "$CONFIG" --run-id "$RUN_ID" \
     --mode "$MODE" --execution live --model-blob "$MODEL_BLOB" \
     "${cache_args[@]}"
@@ -1079,7 +1079,7 @@ ensure_pilot_live() {
   fi
   begin_stage "$stage_id" "fresh-no-cache"
   note "running development-pilot live verifier ($MODE)"
-  uv run --frozen python -B phase_b.py verifier \
+  uv run --frozen --no-sync python -B phase_b.py verifier \
     --config "$CONFIG" --run-id "$RUN_ID" \
     --mode "$MODE" --execution live --sentences "$sentences" \
     --candidates "$PILOT_CANDIDATES" --pilot-selection "$PILOT_SELECTION" \
@@ -1099,7 +1099,7 @@ ensure_pilot_audit() {
   fi
   begin_stage "$stage_id" "fresh"
   note "running pilot-verifier audit"
-  uv run --frozen python -B phase_b.py pilot-verifier \
+  uv run --frozen --no-sync python -B phase_b.py pilot-verifier \
     --config "$CONFIG" --run-id "$RUN_ID" \
     --evidence-class development-pilot --capture-index "$CAPTURE_INDEX"
   finish_stage "development pilot audit completed"
@@ -1119,7 +1119,7 @@ ensure_score() {
   fi
   begin_stage "$stage_id" "fresh"
   note "running score"
-  uv run --frozen python -B phase_b.py score \
+  uv run --frozen --no-sync python -B phase_b.py score \
     --config "$CONFIG" --run-id "$RUN_ID"
   finish_stage "publication scoring completed"
 }
@@ -1269,7 +1269,7 @@ write_full_run_manifest() {
   branch="$(git branch --show-current)"
   upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')"
   uv_version="$(uv --version)"
-  uv run --frozen python -B - \
+  uv run --frozen --no-sync python -B - \
     "$path" "$RUN_ID" "$CONFIG" "$commit" "$OLLAMA_MODEL" "$MODEL_BLOB" \
     "$APPROVE_B07" "${TRAINING_SEEDS[*]}" "$PROTOCOL_ID" "$WORKFLOW_ID" \
     "$MODEL_BLOB_SHA256" "$branch" "$upstream" "$uv_version" <<'PY'
@@ -1426,7 +1426,7 @@ write_capture_index() {
   if [[ -e "$path" ]]; then
     safe_cleanup_stage "index-pilot-captures" "$CAPTURE_INDEX"
   fi
-  uv run --frozen python -B - "$path" "$PROTOCOL_ID" "$WORKFLOW_ID" \
+  uv run --frozen --no-sync python -B - "$path" "$PROTOCOL_ID" "$WORKFLOW_ID" \
     "$simple1" "$simple2" "$corrective1" "$corrective2" <<'PY'
 import json
 import sys
@@ -1551,7 +1551,7 @@ ensure_smoke() {
     || die "smoke requires seed-$SEED development candidates from publishable smoke training"
   materialize_model_blob
   if [[ ! -f "$RUN_ROOT/predictions/smoke/test-seed-$SEED-candidates.jsonl" ]]; then
-    uv run --frozen python -B phase_b.py model generate-candidates \
+    uv run --frozen --no-sync python -B phase_b.py model generate-candidates \
       --config "$CONFIG" --run-id "$RUN_ID" --execution live \
       --sentences data-prepared/test.jsonl \
       --checkpoint-manifest "checkpoints/seed-$SEED/checkpoint-manifest.json" \
@@ -1559,14 +1559,14 @@ ensure_smoke() {
       --candidates-out "predictions/smoke/test-seed-$SEED-candidates.jsonl"
   fi
   if [[ ! -f "$RUN_ROOT/predictions/smoke/test-candidates.jsonl" ]]; then
-    uv run --frozen python -B smoke.py prepare \
+    uv run --frozen --no-sync python -B smoke.py prepare \
       --source-dev "$RUN_ROOT/predictions/dev/seed-$SEED-candidates.jsonl" \
       --generated-test "$RUN_ROOT/predictions/smoke/test-seed-$SEED-candidates.jsonl" \
       --destination-run "$RUN_ROOT"
   fi
   for MODE in simple corrective; do
     if ! smoke_verifier_live_complete; then
-      uv run --frozen python -B phase_b.py verifier \
+      uv run --frozen --no-sync python -B phase_b.py verifier \
         --config "$CONFIG" --run-id "$RUN_ID" --mode "$MODE" --execution live \
         --artifact-prefix smoke \
         --sentences data-prepared/test.jsonl \
@@ -1576,20 +1576,20 @@ ensure_smoke() {
         --model-blob "$MODEL_BLOB"
     fi
     if [[ ! -f "$RUN_ROOT/verifier/smoke/$MODE/pseudo-seed-verdicts.jsonl" ]]; then
-      uv run --frozen python -B smoke.py clone-verdicts \
+      uv run --frozen --no-sync python -B smoke.py clone-verdicts \
         --source "$RUN_ROOT/verifier/smoke/$MODE/verdicts.jsonl" \
         --candidates "$RUN_ROOT/predictions/smoke/test-candidates.jsonl" \
         --destination "$RUN_ROOT/verifier/smoke/$MODE/pseudo-seed-verdicts.jsonl"
     fi
   done
   if [[ ! -f "$RUN_ROOT/predictions/smoke/threshold-selection.json" ]]; then
-    uv run --frozen python -B phase_b.py select-threshold \
+    uv run --frozen --no-sync python -B phase_b.py select-threshold \
       --config "$CONFIG" --run-id "$RUN_ID" \
       --candidates predictions/smoke/development-candidates.jsonl \
       --out predictions/smoke/threshold-selection.json
   fi
   if ! json_equals "$RUN_ROOT/smoke/score/metrics/metrics.json" nonpublication_smoke true; then
-    uv run --frozen python -B phase_b.py score \
+    uv run --frozen --no-sync python -B phase_b.py score \
       --config "$CONFIG" --run-id "$RUN_ID" \
       --candidates predictions/smoke/test-candidates.jsonl \
       --simple-verdicts verifier/smoke/simple/pseudo-seed-verdicts.jsonl \

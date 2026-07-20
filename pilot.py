@@ -1009,7 +1009,30 @@ def _validate_capture(
             raise DataContractError(
                 f"capture {capture.capture_id} lacks completion provenance for {candidate_id}"
             )
-    runtime_identity = {field: environment[field] for field in runtime_fields}
+    # Raw /api/tags and /api/show response hashes remain retained in each
+    # environment manifest, but Ollama may update non-semantic metadata in
+    # those responses between uncached captures.  Compare the pinned model
+    # identity fields already validated above rather than those volatile
+    # transport-response digests.
+    runtime_model = {
+        field: model.get(field)
+        for field in (
+            "name",
+            "registry_manifest_sha256",
+            "model_blob_sha256",
+            "architecture",
+            "parameters",
+            "quantization",
+            "identity_verified",
+            "tag_digest",
+            "blob_sha256",
+            "details",
+        )
+    }
+    runtime_identity = {
+        **{field: environment[field] for field in runtime_fields if field != "model"},
+        "model": runtime_model,
+    }
     runtime_identity_sha256 = hashlib.sha256(
         canonical_json_bytes(runtime_identity)
     ).hexdigest()
