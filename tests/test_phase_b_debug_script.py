@@ -58,6 +58,10 @@ class DebugScriptContractTests(unittest.TestCase):
         self.assertIn("IFS=' ' read -r -a TRAINING_SEEDS", SCRIPT)
         self.assertIn('"recovery_source_commits"', SCRIPT)
         self.assertIn('existing full-run recovery_source_commits is invalid', SCRIPT)
+        self.assertIn('ALLOW_FULL_RUN_RECOVERY_DOCTOR=true', SCRIPT)
+        self.assertIn(
+            'reusing the existing passing checkout manifest for full-run recovery', SCRIPT
+        )
         self.assertIn('ollama show --modelfile "$OLLAMA_MODEL"', SCRIPT)
         self.assertNotIn('BRANCH="refactor"', SCRIPT)
         self.assertNotIn('SEED=42', SCRIPT)

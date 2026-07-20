@@ -47,6 +47,7 @@ TRAINING_SEEDS=()
 PROTOCOL_ID=""
 WORKFLOW_ID=""
 MODEL_BLOB_SHA256=""
+ALLOW_FULL_RUN_RECOVERY_DOCTOR=false
 
 usage() {
   cat <<'EOF'
@@ -609,6 +610,10 @@ score_complete() {
 }
 
 ensure_doctor() {
+  if [[ "$ALLOW_FULL_RUN_RECOVERY_DOCTOR" == true ]] && smoke_doctor_complete; then
+    note "reusing the existing passing checkout manifest for full-run recovery"
+    return 0
+  fi
   skip_or_run doctor doctor_complete \
     uv run --frozen python -B phase_b.py doctor \
       --config "$CONFIG" --run-id "$RUN_ID"
@@ -1482,6 +1487,7 @@ ensure_pilot_captures() {
 ensure_full() {
   [[ "$APPROVE_B07" == true ]] \
     || die "full requires --approve-b07 as conditional authorization after a passing pilot"
+  ALLOW_FULL_RUN_RECOVERY_DOCTOR=true
   ensure_bootstrap
   mkdir -p -- "$RUN_ROOT/logs"
   exec > >(tee -a "$RUN_ROOT/logs/phase-b-debug.log") 2>&1
