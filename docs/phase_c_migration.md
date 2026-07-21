@@ -8,9 +8,11 @@ result-producing execution. The canonical
 publication path remains Phase B Path A, protocol `B04-PATH-A-1.3`, workflow
 `PATH-A-WORKFLOW-1.3`, invoked through:
 
-```text
-python -B phase_b.py
+```bash
+bash phase_b.sh --stage full
 ```
+
+The launcher uses `phase_b.py` only as its internal stage dispatcher.
 
 Official CODE-ACCORD v1.0.0 preparation must retain the exhaustive alignment
 audit before materializing gold. The approved dual-view workflow preserves raw
@@ -119,8 +121,9 @@ one run directory.
    raw-corpus and strict-view counts separate in all publication output.
 9. **Validate from a clean source-only clone.** Re-fetch prerequisites,
    recreate all intermediates, and compare the documented same-seed hashes.
-   Archive all complete and failed output runs through the parent repository's
-   verified-move procedure only after writers stop.
+   Archive all complete and failed output runs through the surrounding research
+   workflow's verified external-storage procedure only after writers stop. The
+   standalone source artifact neither locates nor requires that storage.
 
 ## Secondary historical material policy
 

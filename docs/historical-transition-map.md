@@ -13,13 +13,14 @@ is complete, this map is a **retain/demote** record, not a deletion list.
   exposes 19 historical invocations plus the canonical command and test command.
   (`eval_checkpoint.py` was removed once its checkpoint-evaluation function was
   superseded by `model generate-candidates` → `score`.)
-- `phase_b.py` is the only paper-facing command now. Its replacement stages
+- `phase_b.sh --stage full` is the only paper-facing command now.
+  Its internal `phase_b.py` replacement stages
   must write only below `output/<run-id>/`, bind data/split/config identities,
   and be tested from a standalone clone.
 - Historical measurements and the two TSV ledgers are immutable secondary
   provenance. A canonical rerun is a new measurement, never an in-place repair.
 - “Unsupported” means the paper claim must be qualified or removed through the
-  parent discrepancy process; it never means its result is discarded.
+  paper-owner discrepancy process; it never means its result is discarded.
 
 | Historical path(s) and draft claim family | Existing contract / current consumer | Canonical successor | Required proof before removal | Current disposition |
 | --- | --- | --- | --- | --- |
@@ -34,7 +35,7 @@ is complete, this map is a **retain/demote** record, not a deletion list.
 | `provenance/zh_translate_project.py`, `provenance/dapt_zh.py` — Traditional-Chinese transfer/ablation claims | Uses incomplete CODE inputs, mutable law sources/model caches, and distinct split/normalization rules. | `phase_b.py secondary zh-data`. | Licensed acquisition/normalization manifests, fixed holdout isolation, typed record adapter, and external-machine validation. | Retain pending standalone-data contract; current paper claim constrained by DISC-013–DISC-016. |
 | `provenance/bench_gpu.py` — environment diagnostic | Smoke-only utility; emits no paper metric. | `phase_b.py doctor`. | A bounded no-download diagnostic stage or removal after README command retirement. | Retain only while the documented smoke diagnostic remains useful. |
 | `eval_checkpoint.py` — historical checkpoint evaluation (removed) | Loaded a legacy SciERC token-model checkpoint and scored it; emitted no paper metric. | `phase_b.py model generate-candidates` → `score`. | — | **Removed** on 2026-07-18: its checkpoint-evaluation function is superseded by the canonical `model generate-candidates` → `score` chain and its README command was retired; its only consumer was the import-safety test. Behavior remains in Git history. |
-| `results.tsv`, `results_stage2.tsv`, `run_a19_cosine_probe.sh` — Section 5 experiment/command evidence | Ledgers are generated evidence with known structural gaps; shell record is DGX-specific. | `phase_b.py reconcile`, later canonical report/archive stages. | B-10 verified byte/hash archive move; historical shell record either normalized into an auditable command manifest or removed after source-inventory review. | Preserve bytes and Git lineage; not executable canonical inputs. |
+| `results.tsv`, `results_stage2.tsv`, `run_a19_cosine_probe.sh` — Section 5 experiment/command evidence | Ledgers are generated evidence with known structural gaps; shell record is DGX-specific. | Archived-evidence `phase_b.py reconcile` register plus canonical report stages. | Ledger move completed with source/destination hashes and Git blobs; historical shell record remains provenance. | Ledgers removed from source after verified external archival; frozen facts remain noncanonical. |
 
 ## Resolved secondary dispositions (user decision, 2026-07-18)
 
@@ -57,7 +58,8 @@ specific file.
 
 Before any row changes from retain/demote to delete, `README.md`, Python
 entry-point enumeration, imports, tests, configs, and docs must show that the
-row's supported behavior is reachable only through `python -B phase_b.py`.
+row's supported behavior is reachable through the primary launcher and its
+internal `python -B phase_b.py` stages.
 The deletion commit must update this map, `source-change-inventory.md`, the
-Phase B progress log, and the parent discrepancy record when a paper claim is
+Phase B progress record, and the external discrepancy record when a paper claim is
 unsupported or non-comparable.

@@ -18,7 +18,7 @@ _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def discover_source_root(start: Path | None = None) -> Path:
-    """Find the direct ``src`` checkout without consulting its parent repository."""
+    """Find the standalone source checkout without consulting outside paths."""
 
     current = (start or Path.cwd()).resolve()
     if current.is_file():

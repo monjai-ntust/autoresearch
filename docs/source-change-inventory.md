@@ -45,8 +45,9 @@ has 90 tracked paths and the current tree has 136.
 
 ## Current architecture and rewrite boundary
 
-The publication-facing command is `python -B phase_b.py`. The canonical root
-modules are a protocol and orchestration layer, not a replacement encoder. They
+The publication-facing command is `bash phase_b.sh --stage full`.
+It uses `phase_b.py` and the canonical root modules as an internal protocol and
+orchestration layer, not a replacement encoder. They
 centralize contracts that the historical scripts under `provenance/` do not share:
 immutable input and model identities, a frozen experiment matrix, strict typed
 matching, leakage-safe splits, deterministic records, replay, output
@@ -163,9 +164,11 @@ is a set relationship between the two trees, not provenance metadata.
 | `configs/phase_b_experiment_matrix.json` | Freezes the four evaluated conditions (`VER-RAW`, `VER-CONFIDENCE`, `VER-SIMPLE`, and `VER-CORRECTIVE`) in one machine-validated authority. |
 | `configs/phase_b_path_a.json` | Freezes dataset, model, seed, split, training, threshold, statistics, runtime, and tracked-resource identities for the canonical protocol, including the CUDA-13 lock index and compatibility-training source/schema/script hashes. |
 | `configs/phase_b_section5_evidence.json` | Registers the two historical ledgers and seven claim families as immutable secondary evidence so reconciliation cannot silently promote them to canonical results. |
+| `hf_cache.py` | Freezes and verifies the run-local Hugging Face model/tokenizer file tree, excluding transient lock files, so later seeds and inference can reject drift and run local-only. |
 | `docs/phase_b_workflow.md` | Is the fresh-clone primary-data guide: it gives the bootstrap, non-enforcing environment-version recording, exact prepared-data boundary, canonical live/resume command and artifacts, partial pre–Phase A data comparison, legacy diagnostic distinction, GB10 runtime requirement, B-07/eight-seed/verifier gates, and an isolated non-publication real GPU/Ollama smoke lane. |
+| `docs/runner-interface-inventory.md` | Classifies every launcher stage, records the retained full-run equivalence evidence, and distinguishes public, diagnostic/recovery, and provenance-only surfaces. |
 | `docs/model-training-compatibility.md` | Freezes the historical trainer/data/recipe/environment evidence, recoverable per-seed outcomes, preserved implementation invariants, necessary opt-in differences, unavailable equivalence evidence, focused validation, and external smoke gate for B-05C. |
-| `scripts/phase_b_debug.sh` | Bash recovery runner for the standalone external checkout. It derives a run ID, upstream, seeds, Python environment, Ollama model, and blob identity instead of pinning machine-local values. Its `full` stage runs the independent eight-seed development/pilot/test/verifier/score chain only under conditional B-07 approval, stops at the first new error, resumes training or partial final-verifier responses, and otherwise performs validated stage-scoped cleanup recorded in a recovery manifest. The default availability sweep, isolated smoke, verified archive reuse, seed-specific completion checks, and acknowledged legacy CSV diagnostic remain available. |
+| `phase_b.sh` (moved from `scripts/phase_b_debug.sh`) | Primary publication and recovery launcher for the standalone external checkout. It derives a run ID, upstream, seeds, Python environment, Ollama model, and blob identity instead of pinning machine-local values. Its `full` stage runs the independent eight-seed development/pilot/test/verifier/score chain with implicit invocation authorization but a mandatory passing B-07 pilot audit, stops at the first new error, resumes training or partial final-verifier responses, and otherwise performs validated stage-scoped cleanup recorded in a recovery manifest. Availability, smoke, replay, verified archive reuse, seed-specific completion checks, and acknowledged legacy CSV modes remain additional diagnostic/recovery features. |
 | `provenance/README.md` | Defines the relocated secondary/historical command boundary and the module-style invocation contract without promoting any retained script into the publication workflow. |
 | `docs/phase_c_migration.md` | Records a design-only raw/typed migration boundary and the evidence required before model adapters can become canonical. |
 | `docs/historical-transition-map.md` | B-05U file- and claim-level retention/deletion gate for every historical executable family, README command, secondary claim, and canonical successor. |
@@ -180,20 +183,20 @@ is a set relationship between the two trees, not provenance metadata.
 | Path | Current role and reason |
 | --- | --- |
 | `acquisition.py` | Downloads the approved immutable archive resumably, verifies size/hash/licensing metadata, and selectively extracts it with path-safety checks. |
-| `phase_b.py` | Exposes one command surface for `doctor`, `reconcile`, `fetch`, `prepare`, dry/live model training, eight-seed candidate assembly, label-blind pilot preparation, verifier modes, pilot audit, and scoring, keeping stage transitions explicit. |
+| `phase_b.py` | Internal dispatcher used by the primary Bash launcher for `doctor`, `reconcile`, `fetch`, `prepare`, dry/live model training, eight-seed candidate assembly, label-blind pilot preparation, verifier modes, pilot audit, and scoring. |
 | `config.py` | Loads and strictly validates the frozen config, experiment matrix, schemas, and tracked-resource identities so protocol drift fails early. |
 | `constants.py` | Centralizes frozen entity, relation, condition, schema, and protocol identifiers to prevent spelling or ordering drift between stages. |
 | `doctor.py` | Checks checkout identity, ignore rules, resources, and worktree constraints; records configured-reference and actual Python/uv versions without enforcing an exact version; and emits a machine-readable preflight manifest. |
 | `phase_b_io.py` | Supplies canonical JSON/JSONL serialization, atomic writes, hashing, and explicit data-contract errors shared across stages. |
 | `metrics.py` | Implements zero-safe precision, recall, and F1 primitives so edge cases have a deterministic definition. |
-| `model.py` | Canonical `model` stage. Candidate dry/replay/live paths use seed-specific manifests and verify checkpoint plus acquisition/preparation/split identities. Training dry-run plans a seed; live validates bootstrap/data compatibility, invokes canonical mode in the original trainer, resumes run-local state, and emits checkpoint/stage manifests without implementing a second training loop. |
+| `model.py` | Canonical `model` stage. Candidate dry/replay/live paths use seed-specific manifests and verify checkpoint, acquisition/preparation/split, and run-local model-cache identities. Training dry-run plans a seed; live validates bootstrap/data compatibility, invokes canonical mode in the original trainer, freezes/reuses the pinned Hugging Face cache, resumes run-local state, and emits checkpoint/stage manifests without implementing a second training loop. |
 | `paths.py` | Discovers the standalone repository and proves every generated path remains beneath `output/<run-id>/`. |
 | `pilot.py` | Implements the development-only four-capture verifier audit with predeclared subset/seeds, determinism checks, and an explicit publication-admission barrier. |
 | `preparation.py` | Parses the immutable official corpus, preserves raw relation-coverage statistics separately from typed-strict eligibility, audits BIO/relation alignment, and materializes deterministic records only after validation. |
 | `publication.py` | Validates and assembles seed-specific development/test candidates, writes the full development candidate index, and freezes one label-blind pilot candidate per seed plus a warm-up before any live call. |
 | `reconciliation.py` | Verifies historical ledger identity and physical defects while keeping those ledgers secondary to canonical evidence. |
 | `records.py` | Defines typed immutable sentence, gold, candidate, and verdict records so stages exchange validated objects instead of ad hoc dictionaries. |
-| `scoring.py` | Scores all frozen conditions offline with directed entity-typed matching and emits paired outcomes plus provenance; an explicit namespaced nonpublication-smoke output mode suppresses publication coverage/statistics. |
+| `scoring.py` | Scores all frozen conditions offline with directed entity-typed matching and emits paired outcomes plus provenance; it also renders deterministic TSV/Markdown publication views from the already-computed metrics. An explicit namespaced nonpublication-smoke output mode suppresses publication coverage/statistics. |
 | `smoke.py` | Creates deterministic one-candidate, pseudo-seed diagnostic inputs and verdict clones solely for the isolated nonpublication end-to-end smoke lane. |
 | `split.py` | Implements the deterministic seed-42 `586/103/173` split and isolation checks needed to prevent evaluation leakage. |
 | `threshold.py` | Canonical `select-threshold` producer of the frozen development confidence threshold (VER-CONFIDENCE): computes per-seed development strict Triple F1 over the grid, averages across eight seeds, selects the argmax with the higher-threshold tie rule, and binds the emitted selection to the full candidate-index hash used by B-07. It never inspects test labels. |
@@ -220,7 +223,8 @@ is a set relationship between the two trees, not provenance metadata.
 | `schemas/phase_b/gold-alignment-audit.schema.json` | Validates the hard-stop audit for ambiguous or missing typed BIO alignment rather than allowing silent data loss. |
 | `schemas/phase_b/input-acquisition-manifest.schema.json` | Validates archive origin, licensing acknowledgment, size, hash, extraction, and cache status. |
 | `schemas/phase_b/metrics.schema.json` | Validates machine-readable offline metric counts and precision/recall/F1 outputs. |
-| `schemas/phase_b/model-checkpoint-manifest.schema.json` | Validates the encoder checkpoint identity and selected metric plus archive, acquisition, annotation, prepared tree/files/split, config/code, restart, source-commit, and historical-comparability bindings consumed by candidate generation. |
+| `schemas/phase_b/model-checkpoint-manifest.schema.json` | Validates the encoder checkpoint identity and selected metric plus archive, acquisition, annotation, prepared tree/files/split, config/code, run-local model cache, restart, source-commit, and historical-comparability bindings consumed by candidate generation. |
+| `schemas/phase_b/huggingface-cache.schema.json` | Validates the pinned run-local model/tokenizer cache inventory and offline-replay declaration. |
 | `schemas/phase_b/model-generation-manifest.schema.json` | Validates the `model generate-candidates` stage manifest for both dry-run and replay executions. |
 | `schemas/phase_b/model-generation-plan.schema.json` | Validates the per-sentence dry-run inference plan emitted without contacting a model. |
 | `schemas/phase_b/model-prediction-ledger.schema.json` | Validates the frozen per-sentence encoder span/relation scores consumed by replay candidate generation. |
@@ -248,13 +252,14 @@ is a set relationship between the two trees, not provenance metadata.
 | Path | Current role and reason |
 | --- | --- |
 | `tests/test_artifact_contracts.py` | Protects retained historical pure functions, import safety, graph/rule behavior, and verifier contracts from cleanup regressions. |
-| `tests/test_phase_b_debug_script.py` | Statically protects the external Bash launcher's config-derived defaults, full-stage ordering/B-07 gate, run-scoped recovery safeguards, exact-resume contract, and canonical-root/provenance layout when Bash/GPU/Ollama execution is unavailable locally. |
+| `tests/test_phase_b_script.py` (moved from `tests/test_phase_b_debug_script.py`) | Statically protects the primary Bash launcher's config-derived defaults, implicit invocation authorization, mandatory full-stage B-07 audit/order, run-scoped recovery safeguards, exact-resume contract, and canonical-root/provenance layout when Bash/GPU/Ollama execution is unavailable locally. |
 | `tests/test_phase_b_model.py` | Tests candidate dry/replay identity and confidence contracts plus training dry-run, missing-bootstrap rejection, interrupted-live retry/resume command construction, partial legacy-data audit, no-test summary, and schema-bound checkpoint output with a fake trainer process. |
+| `tests/test_phase_b_hf_cache.py` | Tests run-local model/tokenizer cache freezing, offline-ready identity, and fail-closed content-drift detection. |
 | `tests/test_phase_b_publication.py` | Tests eight-seed candidate assembly, index identity, threshold binding, label-blind pilot selection, and wrong-seed rejection. |
 | `tests/test_phase_b_training_compatibility.py` | Tests prepared-record order/span/relation adaptation, split-substitution rejection, sampler cursor/order resume, CPU-first restart loading, opt-in historical defaults, and optional model-revision forwarding without downloading a model. |
 | `tests/test_phase_b_threshold.py` | Tests development threshold selection: hand-derived argmax/tie-rule and false-positive curves, all-eight-seed coverage, overwrite refusal, and that the emitted file is consumable by the scorer's threshold loader. |
 | `tests/test_phase_b_pilot.py` | Exercises valid and invalid pilot selections, captures, determinism, and publication-admission barriers with synthetic data. |
-| `tests/test_phase_b_pipeline.py` | Tests config/path containment, typed records, metrics, split isolation, statistics, and offline scoring. |
+| `tests/test_phase_b_pipeline.py` | Tests config/path containment, typed records, metrics, split isolation, statistics, offline scoring, and deterministic publication-product emission. |
 | `tests/test_phase_b_preparation.py` | Tests acquisition safety, official CSV/BIO parsing, alignment auditing, and deterministic materialization. |
 | `tests/test_phase_b_reconciliation.py` | Tests historical ledger identities, drift detection, physical-defect preservation, and secondary-evidence classification. |
 | `tests/test_phase_b_smoke.py` | Tests the isolated nonpublication smoke-input selection and pseudo-seed cloning contracts without performing accelerator or Ollama execution. |
@@ -331,12 +336,12 @@ not canonical publication commands.
 | `provenance/dapt_zh.py` (moved from `dapt_zh.py`) | Preserves the Traditional-Chinese domain-adaptive pretraining comparator. |
 | `provenance/zh_translate_project.py` (moved from `zh_translate_project.py`) | Preserves the Traditional-Chinese translation comparator. |
 
-### Historical result evidence
+### Removed historical generated outputs
 
-| Path | Reason for reuse |
+| Path | Disposition |
 | --- | --- |
-| `results.tsv` | Preserves the original physical ledger, including known blank/concatenated rows, as immutable secondary evidence pending verified archival. |
-| `results_stage2.tsv` | Preserves the Stage-2 ledger as immutable secondary evidence pending verified archival. |
+| `results.tsv` | Removed from source after a 27,373-byte hash-verified move to external archival storage; SHA-256 and Git blob remain frozen in the evidence register. |
+| `results_stage2.tsv` | Removed from source after a 3,955-byte hash-verified move to external archival storage; SHA-256 and Git blob remain frozen in the evidence register. |
 
 ## Checklist for subsequent source edits
 

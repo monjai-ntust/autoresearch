@@ -1,4 +1,4 @@
-"""One public command surface for implemented Phase B lifecycle stages."""
+"""Internal stage dispatcher used by the primary Phase B launcher."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python phase_b.py",
         description=(
-            "Canonical standalone Phase B workflow. This B-05/B-06/B-07 and B-05U "
+            "Internal dispatcher for phase_b.sh. This B-05/B-06/B-07 and B-05U "
             "development slice implements "
             "doctor, secondary Section 5 evidence reconciliation, immutable "
             "CODE-ACCORD fetch/preparation, model train planning and candidate "

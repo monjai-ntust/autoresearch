@@ -225,6 +225,7 @@
     "schemas/phase_b/input-acquisition-manifest.schema.json",
     "schemas/phase_b/data-preparation-manifest.schema.json",
     "schemas/phase_b/model-train-manifest.schema.json",
+    "schemas/phase_b/huggingface-cache.schema.json",
     "schemas/phase_b/model-checkpoint-manifest.schema.json",
     "schemas/phase_b/gold-alignment-audit.schema.json",
     "schemas/phase_b/prepared-sentence.schema.json",
@@ -250,12 +251,13 @@
     "train_span.py",
     "data/code_accord.py",
     "models/bert_kg_encoder.py",
-    "scripts/phase_b_debug.sh",
+    "phase_b.sh",
     "config.py",
     "constants.py",
     "doctor.py",
     "phase_b_io.py",
     "metrics.py",
+    "hf_cache.py",
     "paths.py",
     "pilot.py",
     "preparation.py",
@@ -265,8 +267,6 @@
     "scoring.py",
     "split.py",
     "phase_b_statistics.py",
-    "verifier.py",
-    "results.tsv",
-    "results_stage2.tsv"
+    "verifier.py"
   ]
 }

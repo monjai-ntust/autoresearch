@@ -70,6 +70,7 @@ comparison is interpreted that way.
 | Prepared `train.jsonl`/`development.jsonl` adapter | Prevents the historical per-model-seed random repartition and relation-task overlap. It deliberately changes membership from the historical experiment, so numeric equality is not assumed. |
 | No test loader/evaluation in canonical mode | Prevents final-test access during training and checkpoint selection. Direct historical invocation retains its final test evaluation. |
 | Immutable model revision | Removes upstream model-repository drift without changing architecture. Callers that omit it retain historical behavior. |
+| Run-local frozen Hugging Face cache | Canonical mode downloads the same pinned revision beneath `output/<run-id>/inputs/huggingface`, freezes a file/tree manifest, and forces later seeds/inference to local-only loading. Historical callers that omit the cache controls retain their defaults. |
 | Serializable shuffle sampler | Preserves canonical random-shuffle semantics while storing current order/cursor for exact next-batch resume with zero data-loader workers. The historical CSV path still uses PyTorch's default sampler. |
 | Full atomic restart state | Adds optimizer, scheduler, RNG, sampler, adaptive-gate, and best-selection state beside the unchanged inference checkpoint. It affects recovery, not the loss objective. |
 | Run-local logs/summary/manifests | Replaces `/tmp` and ad hoc checkpoint provenance only in canonical mode; all writes stay under `output/<run-id>/`. |

@@ -1,13 +1,12 @@
 # Draft claim disposition against the canonical workflow
 
-This document dispositions every claim enumerated in the parent Phase A
-inventory (`project-state/phases/phase-a/claim-inventory.md`, `A-CLAIM-001`…
-`A-CLAIM-029`) against the canonical `phase_b.py` workflow and the user's
-2026-07-18 secondary-data decisions (recorded in
+This document dispositions every claim enumerated in the external Phase A
+inventory (`A-CLAIM-001`…`A-CLAIM-029`) against the canonical `phase_b.sh`
+workflow and the user's 2026-07-18 secondary-data decisions (recorded in
 [`secondary-data-replacement-map.md`](secondary-data-replacement-map.md) and the
-parent discrepancy ledger). It is a source-artifact reading aid; it does not edit
-the read-only draft, and paper corrections remain the paper owner's `DISC-*`
-responsibility.
+external discrepancy ledger). It is a source-artifact reading aid, not a runtime
+dependency on that external research record. Paper corrections remain the paper
+owner's `DISC-*` responsibility.
 
 ## Categories
 
@@ -50,7 +49,7 @@ model-backed stages remain externally gated on the accelerator + pinned Ollama.
 | A-CLAIM-016 | Traditional-Chinese silver-data engine; 84.8% keep+correct | **Retained (provenance)** | — | D-ZH: the zh engine/normalizer are absent from `src` (DISC-013); retained scripts (`provenance/zh_translate_project.py`, `provenance/dapt_zh.py`) are provenance. |
 | A-CLAIM-017 | zh-Hant results/backbones (XLM-R/CKIP/silver/schedule) | **Retained (provenance)** | — | D-ZH; stale final row is a paper-owner correction (DISC-012). |
 | A-CLAIM-018 | zh-Hant ablations (NLLB projection, DAPT, typed markers, scale) | **Retained (provenance)** | — | D-ZH: negative/ablation provenance; not reproduced in the canonical workflow. |
-| A-CLAIM-019 | CODE verifier verified-vs-unverified gold P/R/F1 (E-1) | **Extends** | `output/<run-id>/metrics/metrics.json`, `output/<run-id>/outcomes/{candidate,sentence}-outcomes.jsonl` | The primary missing statistic: `score` computes accuracy/precision/recall/F1, confusion counts, and paired outcomes for VER-RAW/CONFIDENCE/SIMPLE/CORRECTIVE. Requires external live-verifier verdicts. |
+| A-CLAIM-019 | CODE verifier verified-vs-unverified gold P/R/F1 (E-1) | **Extends** | `output/<run-id>/metrics/{metrics.json,publication-table.tsv,publication-summary.md}`, `output/<run-id>/outcomes/{candidate,sentence}-outcomes.jsonl` | The primary missing statistic: `score` computes accuracy/precision/recall/F1, confusion counts, and paired outcomes for VER-RAW/CONFIDENCE/SIMPLE/CORRECTIVE, then renders publication views without altering the metrics. Requires external live-verifier verdicts. |
 | A-CLAIM-020 | Local Qwen zero-/few-shot extraction baseline (E-2) | **Removed** | — | No artifact exists and it was not authorized; withdrawn from the deliverable (external if later authorized). |
 | A-CLAIM-021 | External published/span-RE baseline or non-comparability (E-3) | **Retained (provenance)** | — | D-BENCH resolves to recorded metric-noncomparability; the SpERT reproduction is retained provenance. |
 | A-CLAIM-022 | Graph RAG rerun at n≥100 with intervals (E-4) | **Removed** | — | D-RAG: marked unsupported; the redesigned evaluation is not implemented. |

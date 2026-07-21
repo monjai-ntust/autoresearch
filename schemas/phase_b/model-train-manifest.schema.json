@@ -30,7 +30,7 @@
     "split": {"type": "object"},
     "recipe": {"type": "object"},
     "expected_checkpoint_dir": {"type": "string", "minLength": 1},
-    "checkpoint_manifest_contract": {"const": "urn:phase-b:model-checkpoint-manifest:2.0"},
+    "checkpoint_manifest_contract": {"const": "urn:phase-b:model-checkpoint-manifest:3.0"},
     "final_test_selection_forbidden": {"const": true},
     "live_execution_status": {"enum": ["gated_external_accelerator", "completed_external_accelerator"]},
     "inputs": {"type": "object"},

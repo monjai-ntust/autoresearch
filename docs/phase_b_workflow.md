@@ -3,15 +3,15 @@
 This is the source-only guide for generating the Path A primary data and its
 required derived artifacts from a fresh clone under approved protocol
 `B04-PATH-A-1.3` and workflow `PATH-A-WORKFLOW-1.3`. It does not depend on the
-parent repository or `research-logs`. Historical checkpoints and ledgers are
+anything outside the standalone checkout, including `research-logs`. Historical checkpoints and ledgers are
 provenance only: do not copy them into a fresh run or treat them as primary
 data.
 
 ## Current implementation boundary
 
-The B-05/B-06, development-only B-07, and B-05U slice implements one public
-module entry point with canonical lifecycle, assembly, pilot, and scoring
-stages plus focused contract tests:
+The primary public entry point is `phase_b.sh --stage full`.
+It owns the canonical lifecycle, assembly, pilot, scoring, and recovery flow;
+`phase_b.py` is its internal stage dispatcher. Focused contract tests cover:
 
 - `doctor` validates the direct source checkout, Git cleanliness, root-anchored
   output ignore behavior, configuration/matrix identities, and tracked artifact
@@ -77,17 +77,17 @@ resolve to one authoritative typed BIO span. `prepare` inventories all nine in
 only those nine rows ineligible for typed strict gold; it does not project,
 expand, or manually type an endpoint. The canonical checkpoint adapter, live
 candidate inference, eight-seed assembly, threshold selection, pilot
-preparation, and recovery orchestration are implemented; their accelerator
-results, actual model-backed development pilot, publication rendering, and
-parent-side archival have not yet been executed for a completed publication
-run. Historical standalone scripts remain provenance paths and
+preparation, and recovery orchestration are implemented. The first external
+eight-seed run completed a passing model-backed development pilot, final-test
+inference, both verifier modes, and scoring; publication rendering and the
+remaining parent-side archival/release audit are still pending. Historical standalone scripts remain provenance paths and
 are not publication commands for Path A. Direct `train_span.py` execution still
 reads legacy annotation CSVs and creates its old random development split; only
-`phase_b.py model train --execution live` opts it into the prepared
+the internal `phase_b.py model train --execution live` stage opts it into the prepared
 `CODE-SPLIT-1` contract.
-Final-test inference and full Qwen execution remain blocked until the newly
-captured B-07 evidence passes and the user has supplied the full runner's
-explicit conditional approval.
+Each new full run still blocks final-test inference and full Qwen execution
+until its newly captured B-07 evidence passes. Invocation authorization is
+implicit; a failed or absent pilot audit cannot be bypassed.
 
 [`Phase C migration plan`](phase_c_migration.md) records the raw/typed design
 lineage and its remaining execution gates. B-05C approves the compatibility
@@ -176,14 +176,14 @@ explicit about what this revision can and cannot generate, so a fresh clone
 does not silently train on a different split and label it as Path A primary
 data.
 
-### Bash debug/resume runner
+### Primary Bash launcher and recovery behavior
 
 On the external Linux machine, use the tracked runner to pull the current
 branch's configured upstream, synchronize the locked environment, and run every
 implemented canonical prerequisite from its first incomplete run-local artifact:
 
 ```bash
-scripts/phase_b_debug.sh
+phase_b.sh
 ```
 
 It treats a passing checkout manifest, reconciliation audit, verified
@@ -218,10 +218,9 @@ verified acquisition manifest. It downloads only when no valid local cache is
 available. The reused archive is an immutable input, not a checkpoint,
 prediction, or verifier result; every other artifact remains run-local.
 
-## 3. Reconcile the frozen Section 5 ledgers
+## 3. Reconcile the archived Section 5 ledgers
 
-This stage is read-only with respect to the ledgers and does not require the
-CODE-ACCORD download:
+This stage does not require the external archive or the CODE-ACCORD download:
 
 ```bash
 uv run --frozen python -B phase_b.py \
@@ -230,17 +229,16 @@ uv run --frozen python -B phase_b.py \
   --run-id path-a-example
 ```
 
-The register at `configs/phase_b_section5_evidence.json` binds both ledgers by
-UTF-8 content normalized to LF, so clean Linux and Windows checkouts reconcile
-the same historical text. The audit separately records the raw checkout hash,
-byte count, and newline style. It validates and retains the two blank physical
-lines and two concatenated two-record lines in `results.tsv`; normalization is
-never used to rewrite the source files.
+The register at `configs/phase_b_section5_evidence.json` records both former
+source ledgers' verified archive path, checkout SHA-256, Git blob, LF-normalized
+identity, line counts, and known physical defects. The generated TSVs themselves
+have moved to external archival storage and are not runtime inputs. A
+standalone clone validates the frozen register without reading that archive.
 
 The output is `audit/section5-evidence-reconciliation.json`. Its authority is
 always `secondary_only`, its canonical-ready count is zero, and publication
-execution remains unadmitted. The command exits 2 on identity, structure,
-anchor, or overwrite drift. Missing final-recipe, cross-dataset, verifier, and
+execution remains unadmitted. The command exits 2 on register identity,
+structure/reference, or overwrite drift. Missing final-recipe, cross-dataset, verifier, and
 zh-Hant evidence must be supplied through separately hashed provenance or
 regenerated under the canonical framework; it is not inferred from these
 ledgers.
@@ -344,8 +342,10 @@ Completion creates the selected checkpoint, restart state, training summary,
 checkpoint manifest, seed-specific stage manifest, progress log, and dataset
 compatibility audit beneath the same run. The checkpoint manifest binds the
 model to the fetched archive, acquisition/annotation/prepared/split identities,
-train/development files, code/config/model revision, selected metric, restart
-state, and source commit. Candidate generation rechecks those identities and
+train/development files, code/config/model revision, the run-local Hugging Face
+cache manifest/tree, selected metric, restart state, and source commit. The
+first seed may fetch the pinned revision; every later seed and live inference
+uses the verified cache with local-only loading. Candidate generation rechecks those identities and
 rejects a copied, legacy-split, stale, or renamed checkpoint.
 
 ### Historical-data comparability limit
@@ -363,11 +363,10 @@ The complete invariant/difference table and historical per-seed evidence are in
 
 ### Complete conditional publication run
 
-After the seed-42 restart and nonpublication smoke have been reviewed, the
-complete external-machine command is:
+The complete external-machine command is:
 
 ```bash
-bash scripts/phase_b_debug.sh --stage full --approve-b07
+bash phase_b.sh --stage full
 ```
 
 No run ID, branch, seed list, Python patch version, model digest, or Ollama blob
@@ -380,11 +379,11 @@ run identity or deliberately name a new run.
 `full` performs dry planning, independent training and development inference
 for every configured seed, candidate assembly/indexing, development-only
 threshold selection, a label-blind one-candidate-per-seed pilot selection, four
-fresh live pilot captures, and the B-07 audit. `--approve-b07` is conditional
-user authorization to continue into test inference and the two complete live
-verifier passes only when that newly produced pilot reports `pilot_status=pass`
-and `material_protocol_review_required=false`; any other pilot result stops the
-run. It then independently infers the test split for all seeds, assembles the
+fresh live pilot captures, and the B-07 audit. Applicable live/full invocation
+is authorized by default, but the launcher continues into test inference and
+the two complete live verifier passes only when that newly produced pilot
+reports `pilot_status=pass` and `material_protocol_review_required=false`; any
+other pilot result stops the run. It then independently infers the test split for all seeds, assembles the
 test universe, runs simple and corrective Qwen verification, and scores the
 four frozen conditions. The full command writes an append-only console log to
 `output/<run-id>/logs/phase-b-debug.log` and records all derived settings in
@@ -400,16 +399,16 @@ launcher for the same run ID.
 Run or resume the selected seed with:
 
 ```bash
-scripts/phase_b_debug.sh --run-id "$RUN_ID" --stage train-live --seed 42
+bash phase_b.sh --run-id "$RUN_ID" --stage train-live --seed 42
 ```
 
-`--stage publishable --seed 42` runs the dry plan, canonical training, and
-development candidate generation, then stops at B-07 for smoke/restart review.
+`--stage publishable --seed 42` remains a diagnostic route that runs the dry
+plan, canonical training, and development candidate generation, then stops
+before the full-run pilot and final-test stages.
 The default `available` sweep parser-checks live training but reports it as
-blocked rather than unexpectedly starting a 3,500-step job. After B-07
-approval, repeat the seed-specific training and development-candidate commands
-for seeds `42` through `49`; final-test inference and live verification remain
-separately gated.
+blocked rather than unexpectedly starting a 3,500-step job. The primary `full`
+stage handles seeds `42` through `49`; final-test inference and live verification
+remain gated by its mandatory passing pilot audit.
 
 ### Non-publication end-to-end smoke lane
 
@@ -420,7 +419,7 @@ code paths without overwriting the seed-42 checkpoint, development candidates,
 or any canonical verifier/score location:
 
 ```bash
-scripts/phase_b_debug.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
+bash phase_b.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
   --allow-live-smoke --ollama-model qwen3:32b
 ```
 
@@ -460,7 +459,7 @@ The runner also exposes the retained `train_span.py` command for diagnosing the
 historical CSV trainer with the closest frozen recipe settings:
 
 ```bash
-scripts/phase_b_debug.sh --run-id "$RUN_ID" \
+bash phase_b.sh --run-id "$RUN_ID" \
   --stage legacy-train --seed 42 --allow-legacy-diagnostic
 ```
 
@@ -469,7 +468,7 @@ the canonical seed checkpoint is absent, retain the acknowledgement while using
 the normal target:
 
 ```bash
-scripts/phase_b_debug.sh --run-id "$RUN_ID" --allow-legacy-diagnostic
+bash phase_b.sh --run-id "$RUN_ID" --allow-legacy-diagnostic
 ```
 
 It uses only the run-local extracted annotation CSVs and writes its checkpoint
@@ -477,7 +476,7 @@ plus a `completed_noncanonical_diagnostic` marker under
 `output/$RUN_ID/checkpoints/legacy-train-span/`. The explicit acknowledgement
 is required because this direct command constructs its own legacy development
 split and is outside the canonical manifest chain. Its marker records
-`publishable_primary_data: false`; the debug runner will not use that checkpoint
+`publishable_primary_data: false`; the primary launcher will not use that checkpoint
 for canonical candidate generation or let it satisfy `--stage publishable`.
 
 #### GB10 CUDA runtime requirement
@@ -784,6 +783,8 @@ The scorer writes, without overwriting an existing artifact:
 outcomes/candidate-outcomes.jsonl
 outcomes/sentence-outcomes.jsonl
 metrics/metrics.json
+metrics/publication-table.tsv
+metrics/publication-summary.md
 manifests/score-manifest.json
 ```
 
@@ -805,6 +806,8 @@ When all eight seeds are present, scoring also performs the predeclared 10,000
 paired hierarchical seed/document bootstrap, exact signed-rank tests, paired
 t-test sensitivity checks, and separate Holm adjustments. Incomplete seed
 coverage is retained as a development result with statistics explicitly blocked.
+The publication table and Markdown summary are deterministic views of the same
+`metrics.json` counts/statistics; they do not recompute, select, or tune results.
 
 The manifest stores only run-relative paths plus hashes. A second invocation on
 the same run refuses to replace the first result. To compare a rerun, use a new

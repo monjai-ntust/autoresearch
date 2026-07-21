@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:phase-b:section5-evidence-register:1.0",
+  "$id": "urn:phase-b:section5-evidence-register:2.0",
   "title": "Frozen secondary Section 5 evidence register",
   "type": "object",
   "required": [
@@ -14,7 +14,7 @@
   ],
   "properties": {
     "$schema": {"type": "string", "minLength": 1},
-    "register_revision": {"const": "SECTION5-EVIDENCE-1.0"},
+    "register_revision": {"const": "SECTION5-EVIDENCE-2.0"},
     "protocol_id": {"const": "B04-PATH-A-1.3"},
     "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
     "authority": {"const": "secondary_only"},
@@ -26,9 +26,13 @@
         "type": "object",
         "required": [
           "path",
+          "archival_status",
+          "source_checkout_bytes",
+          "source_checkout_sha256",
+          "source_git_blob",
+          "source_newline_style",
           "normalized_lf_bytes",
           "normalized_lf_sha256",
-          "allowed_newline_styles",
           "line_count",
           "ends_with_newline",
           "has_header",
@@ -38,13 +42,13 @@
         ],
         "properties": {
           "path": {"type": "string", "minLength": 1},
+          "archival_status": {"const": "hash_verified_external_archive"},
+          "source_checkout_bytes": {"type": "integer", "minimum": 1},
+          "source_checkout_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "source_git_blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "source_newline_style": {"enum": ["lf", "crlf"]},
           "normalized_lf_bytes": {"type": "integer", "minimum": 1},
           "normalized_lf_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "allowed_newline_styles": {
-            "type": "array",
-            "items": {"enum": ["lf", "crlf"]},
-            "uniqueItems": true
-          },
           "line_count": {"type": "integer", "minimum": 1},
           "ends_with_newline": {"type": "boolean"},
           "has_header": {"type": "boolean"},

@@ -43,6 +43,12 @@ from typing import Any
 
 from config import PipelineConfig
 from constants import ENTITY_TYPES, MATCHER_ID, PROTOCOL_ID, RELATION_TYPES, TRAINING_SEEDS
+from hf_cache import (
+    CACHE_RELATIVE,
+    MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE,
+    verify_cache_manifest,
+    write_cache_manifest,
+)
 from paths import RunLayout
 from phase_b_io import (
     DataContractError,
@@ -59,7 +65,7 @@ EXECUTION_MODES = {"dry-run", "replay", "live"}
 TRAIN_EXECUTION_MODES = {"dry-run", "live"}
 _SPLIT_ID = "CODE-SPLIT-1"
 _CONFIDENCE_PRECISION = 6
-_CHECKPOINT_MANIFEST_CONTRACT = "urn:phase-b:model-checkpoint-manifest:2.0"
+_CHECKPOINT_MANIFEST_CONTRACT = "urn:phase-b:model-checkpoint-manifest:3.0"
 _HISTORICAL_ENTITY_TRAIN_SHA256 = (
     "c13ad02ab72f0f3a3ddca588c02bcd5d7db1622ae81351d967431623963e4fcd"
 )
@@ -120,6 +126,8 @@ class CheckpointIdentity:
     trainer_sha256: str
     data_adapter_sha256: str
     model_helper_sha256: str
+    model_cache_manifest_sha256: str
+    model_cache_tree_sha256: str
     source_commit: str
     restart_state_sha256: str
     dataset_compatibility_sha256: str
@@ -167,6 +175,9 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             "trainer_sha256",
             "data_adapter_sha256",
             "model_helper_sha256",
+            "model_cache_manifest",
+            "model_cache_manifest_sha256",
+            "model_cache_tree_sha256",
             "source_commit",
             "selected_metric",
             "selected_metric_value",
@@ -177,7 +188,7 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
         },
         label,
     )
-    if value["schema_version"] != "phase-b-model-checkpoint-manifest-2.0":
+    if value["schema_version"] != "phase-b-model-checkpoint-manifest-3.0":
         raise DataContractError(f"{label}.schema_version is unsupported")
     if value["protocol_id"] != PROTOCOL_ID:
         raise DataContractError(f"{label}.protocol_id differs from {PROTOCOL_ID}")
@@ -198,6 +209,8 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
     _unit_float(value["selected_metric_value"], f"{label}.selected_metric_value")
     if value["dataset_compatibility_report"] != "audit/model-training-dataset-compatibility.json":
         raise DataContractError(f"{label}.dataset_compatibility_report is unsupported")
+    if value["model_cache_manifest"] != HF_CACHE_MANIFEST_RELATIVE:
+        raise DataContractError(f"{label}.model_cache_manifest is unsupported")
     if value["historical_comparability"] != "partial_match_full_legacy_equivalence_unavailable":
         raise DataContractError(f"{label}.historical_comparability is unsupported")
     source_commit = value["source_commit"]
@@ -242,6 +255,13 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
         ),
         model_helper_sha256=_sha256_hex(
             value["model_helper_sha256"], f"{label}.model_helper_sha256"
+        ),
+        model_cache_manifest_sha256=_sha256_hex(
+            value["model_cache_manifest_sha256"],
+            f"{label}.model_cache_manifest_sha256",
+        ),
+        model_cache_tree_sha256=_sha256_hex(
+            value["model_cache_tree_sha256"], f"{label}.model_cache_tree_sha256"
         ),
         source_commit=source_commit,
         restart_state_sha256=_sha256_hex(
@@ -462,6 +482,7 @@ def _live_inference_records(
     checkpoint_blob_path: Path,
     base_model: str,
     device_preference: str | None,
+    model_cache_dir: Path,
 ) -> list[dict[str, Any]]:
     """Run the retained encoder over prepared sentences and emit ledger records.
 
@@ -498,7 +519,12 @@ def _live_inference_records(
     device = torch.device(device_preference or ("cuda" if torch.cuda.is_available() else "cpu"))
 
     model_revision = training["base_model_revision"]
-    tokenizer = AutoTokenizer.from_pretrained(base_model, revision=model_revision)
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model,
+        revision=model_revision,
+        cache_dir=str(model_cache_dir),
+        local_files_only=True,
+    )
     model = BertKGExtractor(
         base_model,
         num_bio_tags=NUM_BIO_TAGS,
@@ -507,6 +533,8 @@ def _live_inference_records(
         use_span_ner=True,
         max_span_width=max_span_width,
         model_revision=model_revision,
+        model_cache_dir=str(model_cache_dir),
+        model_local_files_only=True,
     )
     # Match train_span.py: enabling re_context_span (the frozen
     # context_between_spans recipe flag) requires rebuilding re_head with a 3H
@@ -674,6 +702,12 @@ def _validate_checkpoint_run_identity(
         f"checkpoints/seed-{checkpoint.training_seed}/restart-state.pt",
         must_exist=True,
     )
+    cache_manifest = verify_cache_manifest(
+        layout,
+        model=config.value["training"]["base_model"],
+        revision=config.value["training"]["base_model_revision"],
+    )
+    cache_manifest_path = layout.resolve(HF_CACHE_MANIFEST_RELATIVE, must_exist=True)
     expected = {
         "archive_sha256": preparation.get("archive_sha256"),
         "acquisition_manifest_sha256": sha256_file(acquisition_path),
@@ -688,6 +722,8 @@ def _validate_checkpoint_run_identity(
         "model_helper_sha256": sha256_file(
             layout.source_root / "models/bert_kg_encoder.py"
         ),
+        "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
+        "model_cache_tree_sha256": cache_manifest["tree_sha256"],
         "source_commit": checkout.get("source", {}).get("commit"),
         "restart_state_sha256": sha256_file(restart_path),
         "dataset_compatibility_sha256": sha256_file(compatibility_path),
@@ -813,6 +849,21 @@ def generate_candidates(
             raise DataContractError(
                 "live checkpoint blob hash does not match the checkpoint manifest identity"
             )
+        cache_manifest = verify_cache_manifest(
+            layout,
+            model=config.value["training"]["base_model"],
+            revision=config.value["training"]["base_model_revision"],
+        )
+        cache_manifest_path = layout.resolve(
+            HF_CACHE_MANIFEST_RELATIVE, must_exist=True
+        )
+        if (
+            sha256_file(cache_manifest_path) != checkpoint.model_cache_manifest_sha256
+            or cache_manifest["tree_sha256"] != checkpoint.model_cache_tree_sha256
+        ):
+            raise DataContractError(
+                "run-local Hugging Face cache differs from the checkpoint identity"
+            )
         records = _live_inference_records(
             config,
             checkpoint,
@@ -820,6 +871,7 @@ def generate_candidates(
             checkpoint_blob_path,
             base_model or config.value["training"]["base_model"],
             device,
+            layout.resolve(CACHE_RELATIVE, must_exist=True),
         )
         atomic_write_jsonl(
             live_ledger_path,
@@ -957,6 +1009,7 @@ def _training_command(
     restart_path: Path,
     progress_path: Path,
     summary_path: Path,
+    model_local_files_only: bool,
 ) -> list[str]:
     training = config.value["training"]
     boost = training["comparison_boost"]
@@ -973,6 +1026,8 @@ def _training_command(
         training["base_model"],
         "--model-revision",
         training["base_model_revision"],
+        "--model-cache-dir",
+        str(layout.resolve(CACHE_RELATIVE)),
         "--batch-size",
         str(training["batch_size"]),
         "--max-length",
@@ -1030,6 +1085,8 @@ def _training_command(
         "--run-summary-out",
         str(summary_path),
     ]
+    if model_local_files_only:
+        command.append("--model-local-files-only")
     if restart_path.exists() and not summary_path.exists():
         command.extend(["--resume-from", str(restart_path)])
     return command
@@ -1119,6 +1176,16 @@ def plan_training(
     summary_path = checkpoint_dir / "training-summary.json"
     checkpoint_manifest_path = checkpoint_dir / "checkpoint-manifest.json"
     progress_path = layout.resolve(f"logs/model-train-seed-{training_seed}.log")
+    model_cache_dir = layout.resolve(CACHE_RELATIVE)
+    model_cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_manifest_path = layout.resolve(HF_CACHE_MANIFEST_RELATIVE)
+    cache_is_frozen = cache_manifest_path.exists()
+    if cache_is_frozen:
+        verify_cache_manifest(
+            layout,
+            model=config.value["training"]["base_model"],
+            revision=config.value["training"]["base_model_revision"],
+        )
     if checkpoint_path.exists() and not restart_path.exists() and not summary_path.exists():
         raise DataContractError("orphan checkpoint without restart or summary blocks training")
 
@@ -1130,6 +1197,7 @@ def plan_training(
         restart_path,
         progress_path,
         summary_path,
+        cache_is_frozen,
     )
     if not summary_path.exists():
         try:
@@ -1139,6 +1207,20 @@ def plan_training(
                 f"canonical trainer failed with exit status {exc.returncode}; "
                 "rerun the same command to resume from its last complete state"
             ) from exc
+
+    cache_manifest = (
+        verify_cache_manifest(
+            layout,
+            model=config.value["training"]["base_model"],
+            revision=config.value["training"]["base_model_revision"],
+        )
+        if cache_is_frozen
+        else write_cache_manifest(
+            layout,
+            model=config.value["training"]["base_model"],
+            revision=config.value["training"]["base_model_revision"],
+        )
+    )
 
     for required_path in (checkpoint_path, restart_path, summary_path, progress_path):
         if not required_path.is_file():
@@ -1166,7 +1248,7 @@ def plan_training(
         raise DataContractError("canonical trainer summary lacks a selected checkpoint metric")
 
     checkpoint_manifest = {
-        "schema_version": "phase-b-model-checkpoint-manifest-2.0",
+        "schema_version": "phase-b-model-checkpoint-manifest-3.0",
         "protocol_id": PROTOCOL_ID,
         "split_id": _SPLIT_ID,
         "training_seed": training_seed,
@@ -1189,6 +1271,9 @@ def plan_training(
         "model_helper_sha256": sha256_file(
             layout.source_root / "models/bert_kg_encoder.py"
         ),
+        "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
+        "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
+        "model_cache_tree_sha256": cache_manifest["tree_sha256"],
         "source_commit": checkout.get("source", {}).get("commit"),
         "selected_metric": "development_strict_triple_f1",
         "selected_metric_value": float(selected_value),
@@ -1211,6 +1296,7 @@ def plan_training(
                 "split_manifest_sha256": sha256_file(split_path),
                 "train_jsonl_sha256": sha256_file(train_path),
                 "development_jsonl_sha256": sha256_file(development_path),
+                "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
             },
             "outputs": {
                 "checkpoint": layout.relative_identity(checkpoint_path),
@@ -1221,6 +1307,7 @@ def plan_training(
                 "dataset_compatibility_report": layout.relative_identity(
                     compatibility_path
                 ),
+                "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
             },
             "resume": {
                 "resumed": summary.get("resumed_from") is not None,

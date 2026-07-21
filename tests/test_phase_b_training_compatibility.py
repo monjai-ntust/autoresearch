@@ -141,6 +141,8 @@ class HistoricalDefaultTests(unittest.TestCase):
         self.assertFalse(args.canonical_mode)
         self.assertIsNone(args.prepared_dir)
         self.assertIsNone(args.model_revision)
+        self.assertIsNone(args.model_cache_dir)
+        self.assertFalse(args.model_local_files_only)
         self.assertFalse(args.skip_test_eval)
         self.assertIsNone(args.save_last_to)
         self.assertIsNone(args.resume_from)
@@ -160,6 +162,22 @@ class HistoricalDefaultTests(unittest.TestCase):
         ) as loader:
             BertBackbone("model-a", model_revision="revision-a")
             loader.assert_called_once_with("model-a", revision="revision-a")
+        with patch(
+            "models.bert_kg_encoder.AutoModel.from_pretrained",
+            return_value=fake_model,
+        ) as loader:
+            BertBackbone(
+                "model-a",
+                model_revision="revision-a",
+                model_cache_dir="cache-a",
+                model_local_files_only=True,
+            )
+            loader.assert_called_once_with(
+                "model-a",
+                revision="revision-a",
+                cache_dir="cache-a",
+                local_files_only=True,
+            )
 
 
 if __name__ == "__main__":

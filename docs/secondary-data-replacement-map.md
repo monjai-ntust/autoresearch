@@ -9,7 +9,7 @@ built now, which are externally blocked, and which require a paper-owner or
 scientific decision before any canonical stage is implemented.
 
 It does not authorize edits to the read-only draft; paper corrections are
-tracked as `DISC-*` entries in the parent discrepancy ledger and remain the
+tracked as `DISC-*` entries in the external discrepancy ledger and remain the
 paper owner's responsibility.
 
 ## Disposition legend (from Phase B plan B-05U step 4)

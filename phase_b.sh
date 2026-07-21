@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resume one Phase B command chain from its first incomplete output artifact.
+# Primary publication launcher and recovery interface for the Phase B workflow.
 #
 # The script is intentionally conservative: it never creates placeholder
 # checkpoint, candidate, pilot, or verifier inputs. A selected stage either
@@ -14,7 +14,7 @@ IFS=$'\n\t'
 export PYTHONUTF8=1
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly SOURCE_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly SOURCE_ROOT="$SCRIPT_DIR"
 
 ORIGINAL_ARGS=("$@")
 RUN_ID=""
@@ -24,7 +24,6 @@ SEED=""
 MODE="simple"
 ALLOW_LEGACY_DIAGNOSTIC=false
 ALLOW_LIVE_SMOKE=false
-APPROVE_B07=false
 BLOCKED_COUNT=0
 CONFIG="configs/phase_b_path_a.json"
 RESPONSE_LEDGER="inputs/frozen-simple-responses.jsonl"
@@ -52,7 +51,7 @@ ALLOW_FULL_RUN_RECOVERY_DOCTOR=false
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/phase_b_debug.sh [--run-id RUN_ID] [options]
+  ./phase_b.sh [--run-id RUN_ID] [options]
 
 Always runs `git pull --ff-only` against the checked-out branch's configured
 upstream and then `uv sync --frozen` first.
@@ -81,8 +80,8 @@ Stages:
   threshold          run documented development threshold selection
   verifier-dry       materialize simple/corrective verifier requests
   verifier-replay    replay a simple/corrective response ledger
-  verifier-live      run the gated simple/corrective live verifier
-  pilot-live         run one gated development-pilot capture
+  verifier-live      run the simple/corrective live verifier
+  pilot-live         run one development-pilot capture
   pilot-audit        audit the four separately captured pilot runs
   score              run the documented strict scorer
 
@@ -92,7 +91,6 @@ Options:
   --seed N                    Checkpoint seed (default: 42)
   --allow-legacy-diagnostic   Required acknowledgement for legacy-train
   --allow-live-smoke          Required acknowledgement before real Ollama smoke calls
-  --approve-b07               Conditional approval to continue only after a passing B-07 pilot
   --ollama-model NAME         Local Ollama tag (default: frozen config model)
   --config PATH               Tracked Phase B config (default: configs/phase_b_path_a.json)
   --mode simple|corrective    Verifier mode (default: simple)
@@ -111,17 +109,17 @@ Options:
   -h, --help                  Show this help
 
 Examples:
-  scripts/phase_b_debug.sh --stage bootstrap
-  scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage plan --seed 42
-  scripts/phase_b_debug.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
+  ./phase_b.sh --stage bootstrap
+  ./phase_b.sh --run-id path-a-bootstrap-20260718T120000Z --stage plan --seed 42
+  ./phase_b.sh --run-id path-a-simple-live-8 --stage smoke --seed 42 \
     --allow-live-smoke --model-blob-source ~/.ollama/models/blobs/<locked-blob>
-  scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage train-live --seed 42
-  scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z \
+  ./phase_b.sh --run-id path-a-bootstrap-20260718T120000Z --stage train-live --seed 42
+  ./phase_b.sh --run-id path-a-bootstrap-20260718T120000Z \
     --stage legacy-train --seed 42 --allow-legacy-diagnostic
-  scripts/phase_b_debug.sh --run-id path-a-bootstrap-20260718T120000Z --stage generate-live \
+  ./phase_b.sh --run-id path-a-bootstrap-20260718T120000Z --stage generate-live \
     --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
     --checkpoint-blob checkpoints/seed-42/checkpoint.pt
-  scripts/phase_b_debug.sh --stage full --approve-b07
+  ./phase_b.sh --stage full
 
 The train-live stage is the canonical checkpoint producer. It consumes only
 the run-local prepared train/development split, writes a full restart state,
@@ -140,9 +138,9 @@ threshold/scoring contracts. Its output is marked non-publication and must
 never be used for a paper result or B-07 approval.
 
 The full stage derives seeds, Python, verifier model, and blob digest from the
-tracked config. `--approve-b07` is conditional authorization: final-test and
-full live-verifier work begins only when the newly captured development pilot
-passes and reports that no material protocol review is required. Every command
+tracked config. Applicable live work is authorized by default, but final-test
+and full live-verifier work begins only when the newly captured development
+pilot passes and reports that no material protocol review is required. Every command
 stops on its first new error. Re-running the printed command resumes a valid
 training or verifier response state; an invalid/nonresumable partial stage is
 cleaned only within that stage's declared output paths and rerun from the last
@@ -151,7 +149,7 @@ EOF
 }
 
 die() {
-  printf 'phase_b_debug: error: %s\n' "$*" >&2
+  printf 'phase_b: error: %s\n' "$*" >&2
   if declare -F print_resume_command >/dev/null 2>&1; then
     print_resume_command
   fi
@@ -169,7 +167,6 @@ while (($#)); do
     --seed) SEED="${2:-}"; shift 2 ;;
     --allow-legacy-diagnostic) ALLOW_LEGACY_DIAGNOSTIC=true; shift ;;
     --allow-live-smoke) ALLOW_LIVE_SMOKE=true; shift ;;
-    --approve-b07) APPROVE_B07=true; shift ;;
     --ollama-model) OLLAMA_MODEL="${2:-}"; shift 2 ;;
     --config) CONFIG="${2:-}"; shift 2 ;;
     --mode) MODE="${2:-}"; shift 2 ;;
@@ -201,13 +198,13 @@ cd "$SOURCE_ROOT"
 readonly RUN_ROOT="output/$RUN_ID"
 
 [[ -n "$(git branch --show-current)" ]] \
-  || die "the debug runner requires a checked-out branch with an upstream"
+  || die "the Phase B launcher requires a checked-out branch with an upstream"
 git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1 \
   || die "the checked-out branch has no upstream; configure it before running"
 
 print_resume_command() {
   printf 'Resume with:' >&2
-  printf ' %q' bash scripts/phase_b_debug.sh "${ORIGINAL_ARGS[@]}" >&2
+  printf ' %q' bash phase_b.sh "${ORIGINAL_ARGS[@]}" >&2
   if [[ "$RUN_ID_PROVIDED" == false ]]; then
     printf ' --run-id %q' "$RUN_ID" >&2
   fi
@@ -310,7 +307,7 @@ on_stage_error() {
   trap - ERR
   set +e
   record_recovery_event "failed" "command exited with status $status"
-  printf '\nphase_b_debug: stopped at first new error in stage %q (mode %q).\n' \
+  printf '\nphase_b: stopped at first new error in stage %q (mode %q).\n' \
     "$ACTIVE_STAGE_ID" "$ACTIVE_RECOVERY_MODE" >&2
   print_resume_command
   exit "$status"
@@ -606,6 +603,8 @@ pilot_audit_complete() {
 
 score_complete() {
   [[ -f "$RUN_ROOT/metrics/metrics.json" ]] \
+    && [[ -f "$RUN_ROOT/metrics/publication-table.tsv" ]] \
+    && [[ -f "$RUN_ROOT/metrics/publication-summary.md" ]] \
     && [[ -f "$RUN_ROOT/manifests/score-manifest.json" ]]
 }
 
@@ -977,8 +976,6 @@ verifier_replay_complete() { verifier_complete replay completed; }
 
 ensure_verifier_live() {
   ensure_bootstrap
-  [[ "$APPROVE_B07" == true ]] \
-    || die "verifier-live requires --approve-b07 and a passing development pilot"
   local stage_id="final-verifier-$MODE"
   local cache_relative="inputs/recovery/verifier-$MODE-responses.jsonl"
   local cache_args=()
@@ -1062,8 +1059,6 @@ materialize_model_blob() {
 
 ensure_pilot_live() {
   ensure_doctor
-  [[ "$APPROVE_B07" == true ]] \
-    || die "pilot-live requires --approve-b07"
   [[ -n "$PILOT_CANDIDATES" ]] || die "pilot-live requires --pilot-candidates"
   [[ -n "$PILOT_SELECTION" ]] || die "pilot-live requires --pilot-selection"
   local sentences="${SENTENCES:-data-prepared/development.jsonl}"
@@ -1147,7 +1142,7 @@ maybe_legacy_checkpoint_diagnostic() {
     note "canonical checkpoint inputs are missing; running acknowledged legacy diagnostic checkpoint command"
     ensure_legacy_train
   else
-    blocked "canonical checkpoint inputs are missing; for a diagnostic-only checkpoint rerun with: bash scripts/phase_b_debug.sh --run-id $RUN_ID --stage legacy-train --seed $SEED --allow-legacy-diagnostic"
+    blocked "canonical checkpoint inputs are missing; for a diagnostic-only checkpoint rerun with: bash phase_b.sh --run-id $RUN_ID --stage legacy-train --seed $SEED --allow-legacy-diagnostic"
   fi
 }
 
@@ -1247,7 +1242,7 @@ ensure_available() {
   maybe_threshold
   maybe_verifier_dry
   maybe_verifier_replay
-  blocked "verifier live and pilot-live require the recorded B-07 user go/no-go approval and separately selected/captured inputs"
+  blocked "verifier live and pilot-live require separately selected/captured inputs; final-test access still requires a passing B-07 pilot audit"
   maybe_pilot_audit
   maybe_score
 }
@@ -1271,7 +1266,7 @@ write_full_run_manifest() {
   uv_version="$(uv --version)"
   uv run --frozen --no-sync python -B - \
     "$path" "$RUN_ID" "$CONFIG" "$commit" "$OLLAMA_MODEL" "$MODEL_BLOB" \
-    "$APPROVE_B07" "${TRAINING_SEEDS[*]}" "$PROTOCOL_ID" "$WORKFLOW_ID" \
+    true "${TRAINING_SEEDS[*]}" "$PROTOCOL_ID" "$WORKFLOW_ID" \
     "$MODEL_BLOB_SHA256" "$branch" "$upstream" "$uv_version" <<'PY'
 import datetime
 import hashlib
@@ -1364,7 +1359,7 @@ prepare_pilot_run_inputs() {
   local pilot_id="$1"
   local pilot_root="output/$pilot_id"
   local relative
-  bash scripts/phase_b_debug.sh \
+  bash phase_b.sh \
     --run-id "$pilot_id" --stage bootstrap --config "$CONFIG"
   for relative in \
     predictions/dev/development-candidates.jsonl \
@@ -1474,9 +1469,9 @@ ensure_pilot_captures() {
       pilot_id="$(pilot_run_id "$mode" "$repeat")"
       if ! capture_bundle_complete "$capture_id" "$mode"; then
         prepare_pilot_run_inputs "$pilot_id"
-        bash scripts/phase_b_debug.sh \
+        bash phase_b.sh \
           --run-id "$pilot_id" --stage pilot-live --mode "$mode" \
-          --approve-b07 --config "$CONFIG"
+          --config "$CONFIG"
         copy_pilot_capture "$pilot_id" "$capture_id" "$mode"
       fi
     done
@@ -1485,8 +1480,6 @@ ensure_pilot_captures() {
 }
 
 ensure_full() {
-  [[ "$APPROVE_B07" == true ]] \
-    || die "full requires --approve-b07 as conditional authorization after a passing pilot"
   ALLOW_FULL_RUN_RECOVERY_DOCTOR=true
   ensure_bootstrap
   mkdir -p -- "$RUN_ROOT/logs"
@@ -1660,7 +1653,7 @@ case "$STAGE" in
 esac
 
 if [[ "$STAGE" == "available" && "$BLOCKED_COUNT" -gt 0 ]]; then
-  printf '\nphase_b_debug: %s stage(s) remain blocked for run %q; see the BLOCKED lines above.\n' \
+  printf '\nphase_b: %s stage(s) remain blocked for run %q; see the BLOCKED lines above.\n' \
     "$BLOCKED_COUNT" "$RUN_ID" >&2
   exit 2
 fi

@@ -55,6 +55,10 @@ def parse_args(argv=None):
     p.add_argument("--model-name", default=None)
     p.add_argument("--model-revision", default=None,
                    help="Optional immutable Hugging Face model revision.")
+    p.add_argument("--model-cache-dir", default=None,
+                   help="Optional Hugging Face cache root; required beneath the run in canonical mode.")
+    p.add_argument("--model-local-files-only", action="store_true",
+                   help="Load the pinned model/tokenizer only from --model-cache-dir.")
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--max-length", type=int, default=128)
     p.add_argument("--lr", type=float, default=3e-5)
@@ -1231,6 +1235,7 @@ def main(argv=None):
         required = {
             "--prepared-dir": args.prepared_dir,
             "--model-revision": args.model_revision,
+            "--model-cache-dir": args.model_cache_dir,
             "--save-best-to": args.save_best_to,
             "--save-last-to": args.save_last_to,
             "--progress-log": args.progress_log,
@@ -1240,6 +1245,13 @@ def main(argv=None):
         if missing:
             raise ValueError(
                 "canonical mode requires " + ", ".join(sorted(missing))
+            )
+        prepared_root = Path(args.prepared_dir).resolve()
+        expected_cache = prepared_root.parent / "inputs" / "huggingface"
+        if Path(args.model_cache_dir).resolve() != expected_cache:
+            raise ValueError(
+                "canonical mode requires --model-cache-dir at "
+                "output/<run-id>/inputs/huggingface"
             )
         if not args.skip_test_eval:
             raise ValueError("canonical mode requires --skip-test-eval")
@@ -1273,6 +1285,10 @@ def main(argv=None):
         tokenizer_kwargs["add_prefix_space"] = True
     if args.model_revision:
         tokenizer_kwargs["revision"] = args.model_revision
+    if args.model_cache_dir:
+        tokenizer_kwargs["cache_dir"] = args.model_cache_dir
+    if args.model_local_files_only:
+        tokenizer_kwargs["local_files_only"] = True
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, **tokenizer_kwargs)
     # Pass seed to build_dataloaders for datasets that create dev split at runtime
     # (CODE-ACCORD, CUAD). Datasets with fixed splits (SciERC, SciER, CoNLL04, ADE)
@@ -1352,6 +1368,8 @@ def main(argv=None):
         boundary_reg=args.boundary_reg,
         boundary_refine=args.boundary_refine,
         model_revision=args.model_revision,
+        model_cache_dir=args.model_cache_dir,
+        model_local_files_only=args.model_local_files_only,
     ).to(device)
 
     # A12: Context-between-spans RE enrichment.

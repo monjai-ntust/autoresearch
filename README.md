@@ -2,13 +2,17 @@
 
 This repository contains the research implementation for a low-resource knowledge-graph construction pipeline. It trains a joint named-entity recognition (NER) and relation extraction (RE) encoder, extracts confidence-bearing triples, optionally verifies or corrects them with an Ollama-hosted LLM, and builds a provenance-bearing graph.
 
-The canonical publication-facing Phase B surface is:
+The canonical publication-facing Phase B entry point is:
 
-```text
-python -B phase_b.py
+```bash
+bash phase_b.sh --stage full
 ```
 
-The current B-05/B-06, development-only B-07, and B-05U slice implements
+The launcher derives the frozen seeds and model identities from configuration,
+resumes verified completed stages, and preserves the mandatory passing B-07
+pilot audit before final-test access. Live/full invocation is authorized by
+default; there is no separate approval flag. Its internal `phase_b.py`
+dispatcher implements
 checkout/environment `doctor`, frozen Section 5 ledger `reconcile`, immutable
 CODE-ACCORD `fetch`, raw-provenance/typed-strict `prepare`, canonical
 `model train` (`dry-run|live`) and `model generate-candidates` (`dry-run|replay|live`), frozen verifier
@@ -35,7 +39,8 @@ All secondary historical entry points are grouped under `provenance/` and run
 as modules from the repository root; `train_span.py` remains at root because it
 is also the compatibility-hosted canonical encoder trainer.
 
-`phase_b.py` and its root-module collaborators are a protocol and orchestration layer, not a second encoder
+`phase_b.py` and its root-module collaborators are the launcher's internal
+protocol and orchestration layer, not a second encoder
 implementation. It owns the contracts that the historical root scripts do not
 provide: immutable identities, one experiment matrix, typed matching, split
 isolation, output containment, replay, and machine-readable manifests. The
@@ -45,8 +50,9 @@ runs the retained encoder to produce that ledger. `model train --execution
 live` invokes an opt-in compatibility mode in the original `train_span.py`
 loop: prepared train/development input, revision pinning, full restart state,
 no test access, and schema-bound provenance are added without a second encoder
-or loss loop. Actual accelerator smoke/parity evidence and the eight-seed run
-remain gated, so `train_span.py` and `provenance/inference_kg.py` are retained.
+or loss loop. The first external eight-seed full run completed through its
+passing pilot, final inference, both verifier modes, and scoring; the original
+trainer and inference script remain retained for compatibility/provenance review.
 The new verifier caller is necessarily canonical-specific because the retained
 historical verifier hard-codes the SciERC ontology, parses free-form line
 responses, and lacks the approved prompt/schema/digest/cache/telemetry contract.
@@ -65,19 +71,19 @@ direction is a useful discrepancy check, not an acceptance criterion and never
 a reason to rewrite measurements.
 
 The `reconcile` stage makes that boundary machine-checkable. After `doctor`, it
-verifies the portable LF-normalized identities and known physical structure of
-`results.tsv` and `results_stage2.tsv`, checks stable line/absence anchors for
-seven Section 5 claim families, and writes
-`audit/section5-evidence-reconciliation.json`. It records each checkout's raw
-hash and newline form, preserves the two blank and two concatenated physical
-rows in `results.tsv` as historical defects, and reports zero claim families as
-canonical-ready. It neither repairs the ledgers nor authorizes an official run.
+validates the frozen hashes, physical-structure facts, and claim references for
+the two historical ledgers now held in external archival storage, then writes
+`audit/section5-evidence-reconciliation.json`. The standalone source does not
+read that archive or retain the generated TSVs. The register preserves their
+verified pre-removal facts and reports zero claim families as canonical-ready;
+it neither promotes archived evidence nor authorizes final-test access.
 
 [`docs/phase_c_migration.md`](docs/phase_c_migration.md) records the raw/strict
 design lineage, frozen assumptions, and evidence conditions that require a
-revision. The user approved B-05C compatibility-training implementation; the
-full eight-seed execution, final-test tuning, verifier calls, and paper-quality
-claims still require their later gates.
+revision. The first full eight-seed run passed B-07 and completed final
+inference, both verifier modes, and scoring. Final-test tuning remains
+prohibited; publication claims still require the retained-run and release
+audits.
 
 The maintained [`source change inventory`](docs/source-change-inventory.md)
 classifies every deletion, reuse, modification, and current-only path relative
@@ -96,12 +102,11 @@ edit that changes the comparison or a path's role.
   SciERC, CoNLL04, ADE, and arXiv historical acquisition scripts are also
   included. Complete CODE/ACCORD, SciER, CUAD, and zh-Hant datasets are not
   committed.
-- Missing verifier Precision, Recall, and F1 evaluation remains incomplete. The
-  canonical prompts, dry-run/live/replay instrumentation, development-pilot
-  auditor, offline scorer, and raw/typed-strict materialization are implemented,
-  but no publication result has been produced. Valid results still require
-  regenerated development evidence, a passing actual
-  B-07 pilot, the user's go/no-go decision, and later external-machine execution.
+- The first full external run produced the verifier Precision, Recall, F1,
+  confusion-count, paired-outcome, and uncertainty artifacts after a passing
+  B-07 pilot. The scorer now renders deterministic publication TSV/Markdown
+  products from those same metrics. Release remains pending external
+  clean-clone/offline-cache validation.
 
 ## Installation
 
@@ -131,7 +136,14 @@ run `uv sync --frozen` again before any GPU stage. CPU execution is possible for
 small checks, but reported training runs require a suitable CUDA GPU and
 substantially more time and memory.
 
-Model backbones are loaded through Hugging Face Transformers and may require network access on first use. The verifier and generation scripts additionally require `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the requested local model (historically `qwen3:32b`). `--ollama-url` is configurable, so on-premise execution is a deployment choice rather than a code-enforced invariant.
+Canonical model backbones are loaded through Hugging Face Transformers into
+`output/<run-id>/inputs/huggingface` and may require network access on the first
+seed only. The resulting file inventory/tree hash is frozen; later seeds and
+live inference use that run-local cache with `local_files_only=True`. Historical
+direct commands retain their original cache behavior. The verifier additionally
+requires `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the
+requested local model (historically `qwen3:32b`). `--ollama-url` is configurable,
+so on-premise execution is a deployment choice rather than a code-enforced invariant.
 
 `sentencepiece` and `protobuf` are direct locked dependencies for tokenizer
 conversion paths used by the retained model family. The frozen DeBERTa v1
@@ -435,9 +447,14 @@ uv run python -m provenance.dapt_zh --stage1 20
 
 For the reported full treatment, first run `--prep-data data/dapt_zh_laws`, then `--train --corpus data/dapt_zh_laws/corpus.txt --steps 3000` with the recorded starting checkpoint. Network access, model caches, law-source availability, and a suitable GPU are required.
 
-### Retained result and command records
+### Archived result and retained command records
 
-`results.tsv` and `results_stage2.tsv` are historical experiment ledgers, not newly generated benchmark summaries. They preserve negative as well as positive rows and must not be treated as a clean 38-row manifest. `run_a19_cosine_probe.sh` is the exact nonportable DGX command record for the A19 probe; inspect it before adapting paths, shell, CUDA, or environment assumptions.
+The former `results.tsv` and `results_stage2.tsv` are historical generated
+experiment ledgers, not clean benchmark summaries. Their exact bytes and Git
+identities are held in external archival storage; the
+standalone source retains only their frozen secondary-evidence register.
+`run_a19_cosine_probe.sh` is the exact nonportable DGX command record for the
+A19 probe; inspect it before adapting paths, shell, CUDA, or environment assumptions.
 
 ## Offline regression tests
 
@@ -465,7 +482,7 @@ downloads, caches, checkpoints, predictions, verifier records, metrics, tables,
 manifests, and logs. The historical commands above still name `results/` and
 `checkpoints/` solely to preserve their recorded interfaces; those locations
 must not be used by the publication workflow. Existing confirmed generated
-ledgers are archived to the parent repository only during the approved,
+ledgers are moved to external archival storage only during the approved,
 hash-verified finalization step.
 
 For a reproducible run, record at minimum:

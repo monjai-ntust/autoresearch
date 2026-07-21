@@ -11,7 +11,7 @@ root discovery, and the public command spelling.
 | Former path | Root host | Baseline host/disposition | Mapping result |
 | --- | --- | --- | --- |
 | `phase_b_pipeline/acquisition.py` | `acquisition.py` | No baseline host | Whole-file move; archive contract and fetch symbols retained. |
-| `phase_b_pipeline/cli.py` | `phase_b.py` | No baseline host | Whole-file move; `_parser` and `main` retained; this is the root command. |
+| `phase_b_pipeline/cli.py` | `phase_b.py` | No baseline host | Whole-file move; `_parser` and `main` retained; this is the launcher's internal root dispatcher. |
 | `phase_b_pipeline/config.py` | `config.py` | No baseline host | Whole-file move; frozen configuration validation retained. |
 | `phase_b_pipeline/constants.py` | `constants.py` | No baseline host | Whole-file move; protocol constants retained. |
 | `phase_b_pipeline/doctor.py` | `doctor.py` | No baseline host | Whole-file move; preflight symbols retained. |
@@ -27,9 +27,10 @@ root discovery, and the public command spelling.
 | `phase_b_pipeline/statistics.py` | `phase_b_statistics.py` | No baseline host | Whole-file move renamed to avoid collision with Python standard-library `statistics`; paired statistics symbols retained. |
 | `phase_b_pipeline/verifier.py` | `verifier.py` | `provenance/verify_triples_llm.py` is incompatible SciERC provenance | Whole-file move; frozen CODE verifier symbols retained. |
 | `phase_b_pipeline/__init__.py` | none | No baseline host | Removed after package deletion; it contained only package metadata. |
-| `phase_b_pipeline/__main__.py` | none | No baseline host | Removed after package deletion; `phase_b.py` supplies the direct executable entry point. |
+| `phase_b_pipeline/__main__.py` | none | No baseline host | Removed after package deletion; `phase_b.py` supplies the direct internal dispatcher. |
 
-The active root command is `python -B phase_b.py`. Historical root scripts
+The public command is `bash phase_b.sh --stage full`; it invokes
+`python -B phase_b.py` as its internal stage dispatcher. Historical root scripts
 remain separate provenance paths. In particular, `prepare.py` and
 `provenance/verify_triples_llm.py` was not overwritten because its data/model contracts
 are incompatible with approved Path A semantics.

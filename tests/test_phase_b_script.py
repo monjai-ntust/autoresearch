@@ -15,7 +15,7 @@ from paths import discover_source_root
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
-SCRIPT = (SOURCE_ROOT / "scripts" / "phase_b_debug.sh").read_text(encoding="utf-8")
+SCRIPT = (SOURCE_ROOT / "phase_b.sh").read_text(encoding="utf-8")
 
 MOVED_PROVENANCE_MODULES = (
     "bench_gpu.py",
@@ -44,7 +44,7 @@ MOVED_PROVENANCE_MODULES = (
 )
 
 
-class DebugScriptContractTests(unittest.TestCase):
+class PhaseBScriptContractTests(unittest.TestCase):
     def test_full_run_derives_machine_specific_values(self):
         self.assertIn('RUN_ID=""', SCRIPT)
         self.assertIn("git pull --ff-only", SCRIPT)
@@ -74,7 +74,7 @@ class DebugScriptContractTests(unittest.TestCase):
             SCRIPT,
         )
 
-    def test_full_run_orders_publication_stages_and_keeps_b07_gate(self):
+    def test_full_run_orders_publication_stages_and_keeps_b07_audit_gate(self):
         full = SCRIPT[SCRIPT.index("ensure_full() {") : SCRIPT.index("ensure_smoke() {")]
         ordered_tokens = (
             "ensure_train_live",
@@ -90,7 +90,23 @@ class DebugScriptContractTests(unittest.TestCase):
         )
         positions = [full.index(token) for token in ordered_tokens]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn('[[ "$APPROVE_B07" == true ]]', full)
+        self.assertIn(
+            'pilot_status \'"pass"\'',
+            full,
+        )
+        self.assertIn("material_protocol_review_required false", full)
+        self.assertIn("final-test execution remains blocked", full)
+
+    def test_b07_invocation_is_implicit_without_changing_manifest_value(self):
+        self.assertNotIn("--approve-b07", SCRIPT)
+        self.assertNotIn("APPROVE_B07", SCRIPT)
+        self.assertIn(
+            '"conditional_b07_approval": sys.argv[7] == "true"', SCRIPT
+        )
+        self.assertIn(
+            'true "${TRAINING_SEEDS[*]}" "$PROTOCOL_ID" "$WORKFLOW_ID"',
+            SCRIPT,
+        )
 
     def test_recovery_is_run_scoped_and_records_exact_resume(self):
         self.assertIn('[[ "$run_abs" == "$SOURCE_ROOT"/output/* ]]', SCRIPT)
@@ -101,6 +117,8 @@ class DebugScriptContractTests(unittest.TestCase):
         self.assertIn("print_resume_command", SCRIPT)
         self.assertIn("resume-from-response-cache", SCRIPT)
         self.assertIn("restart-state.pt", SCRIPT)
+        self.assertIn('metrics/publication-table.tsv', SCRIPT)
+        self.assertIn('metrics/publication-summary.md', SCRIPT)
 
     def test_secondary_entry_points_are_namespaced_as_provenance(self):
         for name in MOVED_PROVENANCE_MODULES:

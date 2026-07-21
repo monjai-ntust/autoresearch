@@ -1,6 +1,6 @@
 {
   "$schema": "../schemas/phase_b/section5-evidence-register.schema.json",
-  "register_revision": "SECTION5-EVIDENCE-1.0",
+  "register_revision": "SECTION5-EVIDENCE-2.0",
   "protocol_id": "B04-PATH-A-1.3",
   "workflow_id": "PATH-A-WORKFLOW-1.3",
   "authority": "secondary_only",
@@ -8,9 +8,13 @@
   "ledgers": [
     {
       "path": "results.tsv",
+      "archival_status": "hash_verified_external_archive",
+      "source_checkout_bytes": 27373,
+      "source_checkout_sha256": "abef9a3e2bcc344abff8ed1e03b0ab6831d230052f9a49749bb770e41d3f8852",
+      "source_git_blob": "adf04ae78fce0b0ba7c6e0fc55aa9d8d3bd9d1b1",
+      "source_newline_style": "crlf",
       "normalized_lf_bytes": 27279,
       "normalized_lf_sha256": "f862fa3b63fce17187990337909016176dd9a8527988b5c0da4bd33bb25ccba5",
-      "allowed_newline_styles": ["lf", "crlf"],
       "line_count": 94,
       "ends_with_newline": true,
       "has_header": false,
@@ -24,9 +28,13 @@
     },
     {
       "path": "results_stage2.tsv",
+      "archival_status": "hash_verified_external_archive",
+      "source_checkout_bytes": 3955,
+      "source_checkout_sha256": "049176b32e313c71ed4a1869a0b0843d04849632d1b8f2a92c362efd91e8b3ce",
+      "source_git_blob": "a183e8d894230c6c5edace154aaaef64287cff14",
+      "source_newline_style": "crlf",
       "normalized_lf_bytes": 3946,
       "normalized_lf_sha256": "cc28999d61f6daf323a92645a119ac58a7d0916f5768920403545c71b2a17eb6",
-      "allowed_newline_styles": ["lf", "crlf"],
       "line_count": 9,
       "ends_with_newline": true,
       "has_header": true,

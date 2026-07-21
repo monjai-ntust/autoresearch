@@ -11,6 +11,7 @@ from pathlib import Path
 
 from config import load_pipeline_config
 from constants import PROTOCOL_ID
+from hf_cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE, write_cache_manifest
 from model import generate_candidates, plan_training
 from phase_b_io import (
     DataContractError,
@@ -60,7 +61,7 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
     development = layout.resolve("data-prepared/development.jsonl")
     compatibility = layout.resolve("audit/model-training-dataset-compatibility.json")
     return {
-        "schema_version": "phase-b-model-checkpoint-manifest-2.0",
+        "schema_version": "phase-b-model-checkpoint-manifest-3.0",
         "protocol_id": PROTOCOL_ID,
         "split_id": "CODE-SPLIT-1",
         "training_seed": 42,
@@ -83,6 +84,15 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
         "model_helper_sha256": sha256_file(
             layout.source_root / "models/bert_kg_encoder.py"
         ),
+        "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
+        "model_cache_manifest_sha256": sha256_file(
+            layout.resolve(HF_CACHE_MANIFEST_RELATIVE, must_exist=True)
+        ),
+        "model_cache_tree_sha256": json.loads(
+            layout.resolve(HF_CACHE_MANIFEST_RELATIVE, must_exist=True).read_text(
+                encoding="utf-8"
+            )
+        )["tree_sha256"],
         "source_commit": "3" * 40,
         "selected_metric": "development_strict_triple_f1",
         "selected_metric_value": 0.4,
@@ -107,6 +117,15 @@ def _prepare_run_identities(layout: RunLayout, *, compatibility=True):
     )
     atomic_write_bytes(
         layout.resolve("checkpoints/seed-42/restart-state.pt"), b"restart\n"
+    )
+    atomic_write_bytes(
+        layout.resolve("inputs/huggingface/models--fixture/blobs/model.bin"),
+        b"pinned model/tokenizer fixture\n",
+    )
+    write_cache_manifest(
+        layout,
+        model="microsoft/deberta-large",
+        revision="28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
     )
     acquisition = layout.resolve("manifests/02-input-acquisition-manifest.json")
     atomic_write_json(acquisition, {"archive": {"sha256": "c" * 64}})
@@ -495,6 +514,10 @@ class ModelTrainTests(unittest.TestCase):
             atomic_write_bytes(
                 extracted, historical.read_bytes().replace(b"\r\n", b"\n")
             )
+            layout.resolve(HF_CACHE_MANIFEST_RELATIVE, must_exist=True).unlink()
+            layout.resolve(
+                "inputs/huggingface/models--fixture/blobs/model.bin", must_exist=True
+            ).unlink()
             observed_commands = []
 
             def interrupted(command, *, cwd, check):
@@ -519,6 +542,8 @@ class ModelTrainTests(unittest.TestCase):
                 restart = Path(command[command.index("--save-last-to") + 1])
                 summary = Path(command[command.index("--run-summary-out") + 1])
                 progress = Path(command[command.index("--progress-log") + 1])
+                cache_dir = Path(command[command.index("--model-cache-dir") + 1])
+                atomic_write_bytes(cache_dir / "models--fixture/blobs/model.bin", b"model\n")
                 atomic_write_bytes(checkpoint, b"checkpoint")
                 atomic_write_bytes(restart, b"restart")
                 atomic_write_bytes(progress, b"completed\n")
@@ -557,6 +582,7 @@ class ModelTrainTests(unittest.TestCase):
             self.assertTrue(manifest["resume"]["resumed"])
             self.assertIn("--canonical-mode", observed_commands[-1])
             self.assertIn("--skip-test-eval", observed_commands[-1])
+            self.assertIn("--model-cache-dir", observed_commands[-1])
             checkpoint_manifest = layout.resolve(
                 "checkpoints/seed-42/checkpoint-manifest.json"
             )
