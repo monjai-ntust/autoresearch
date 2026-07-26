@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-generation-trace.schema.json",
+  "title": "Generation trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "dataset_id",
+    "question_id",
+    "condition",
+    "retrieved_evidence_ids",
+    "prompt_sha256",
+    "prompt_record",
+    "model",
+    "revision",
+    "decoding",
+    "response",
+    "latency_ms",
+    "latency_mode",
+    "error"
+  ],
+  "properties": {
+    "schema_version": {"const": "rag-generation-trace-1.0"},
+    "run_id": {"type": "string"},
+    "dataset_id": {"type": "string"},
+    "question_id": {"type": "string"},
+    "condition": {"type": "string"},
+    "retrieved_evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "prompt_record": {
+      "type": "object",
+      "required": ["question", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "question": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "model": {"type": "string"},
+    "revision": {"type": "string"},
+    "decoding": {"type": "object"},
+    "response": {"type": "string"},
+    "latency_ms": {"type": "number", "minimum": 0},
+    "latency_mode": {"enum": ["fixture_normalized", "measured"]},
+    "error": {"type": ["string", "null"]}
+  }
+}

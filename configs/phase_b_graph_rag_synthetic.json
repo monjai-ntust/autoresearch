@@ -1,0 +1,105 @@
+{
+  "schema_version": "rag-run-config-1.0",
+  "run_id": "b09i-synthetic",
+  "adapter": {
+    "import_path": "graph_rag_eval.adapters.synthetic:SyntheticAdapter",
+    "adapter_id": "synthetic-fixture",
+    "adapter_version": "1.0.0",
+    "options": {
+      "dataset_id": "synthetic-rag",
+      "variant": "base"
+    }
+  },
+  "protocol": {
+    "protocol_id": "B09I-SYNTHETIC-CONTRACT-1.0",
+    "regimes": [
+      "diagnostic_fact_probe",
+      "question_only"
+    ],
+    "question_query_fields": [
+      "text",
+      "public_metadata"
+    ],
+    "forbidden_query_fields": [
+      "answers",
+      "answer_aliases",
+      "gold_relation",
+      "gold_triple",
+      "gold_path",
+      "evidence_ids",
+      "source_ids",
+      "condition"
+    ],
+    "required_capabilities": [
+      "documents",
+      "gold_entities",
+      "gold_relations",
+      "gold_triples",
+      "questions",
+      "answer_aliases",
+      "evidence_sets"
+    ],
+    "regime_q": {
+      "required": false,
+      "synthetic_fixture_only": true,
+      "independent_author_available": false,
+      "independent_reviewer_available": false,
+      "publication_claim_allowed": false
+    }
+  },
+  "retrieval": {
+    "conditions": [
+      "no_context",
+      "random_context",
+      "bm25_text",
+      "dense_text_fixture",
+      "hybrid_text",
+      "generated_graph",
+      "graph_plus_bm25",
+      "gold_graph_oracle",
+      "corruptions"
+    ],
+    "budget": {
+      "max_items": 4,
+      "max_tokens": 80,
+      "tokenizer_id": "unicode-word-punctuation-v1"
+    },
+    "bm25": {
+      "package": "bm25s==0.3.9",
+      "k1": 1.2,
+      "b": 0.75,
+      "method": "lucene",
+      "idf_method": "lucene",
+      "token_pattern": "(?u)\\b\\w+\\b"
+    },
+    "graph": {
+      "max_hops": 2,
+      "question_only_linking": true,
+      "gold_repair": false
+    },
+    "corruption": {
+      "seed": 42,
+      "severity": 0.5
+    },
+    "random_seed": 42
+  },
+  "generator": {
+    "generator_id": "deterministic-evidence-fixture-v1",
+    "model_id": "repository-synthetic-generator",
+    "revision": "sha256:repository-synthetic-generator-v1",
+    "prompt_id": "synthetic-supported-answer-v1",
+    "decoding": {
+      "temperature": 0.0,
+      "seed": 42,
+      "max_output_tokens": 16
+    },
+    "judge_required": false,
+    "human_calibration_set": null
+  },
+  "statistics": {
+    "bootstrap_resamples": 10000,
+    "seed": 42,
+    "confidence": 0.95,
+    "cluster_unit": "document"
+  }
+}

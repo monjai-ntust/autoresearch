@@ -203,6 +203,19 @@ is a set relationship between the two trees, not provenance metadata.
 | `phase_b_statistics.py` | Implements paired hierarchical bootstrap intervals, paired t-tests, exact Wilcoxon tests, and Holm correction for the predeclared paired design. |
 | `verifier.py` | Builds canonical requests and prompts and supports dry, live, and replay execution with pinned model identity, warmup, retries, caching, validation, and telemetry. |
 
+### Dataset-neutral Graph RAG evaluation workflow
+
+| Path | Current role and reason |
+| --- | --- |
+| `graph_rag.py` | Thin B-09I CLI exposing `doctor`, `prepare`, and `evaluate` without importing the historical benchmark or a parent-repository resource. |
+| `graph_rag_eval/__init__.py`<br>`graph_rag_eval/capabilities.py`<br>`graph_rag_eval/contracts.py`<br>`graph_rag_eval/identity.py`<br>`graph_rag_eval/registry.py`<br>`graph_rag_eval/trace.py`<br>`graph_rag_eval/budget.py`<br>`graph_rag_eval/runner.py` | Dataset-neutral core: immutable canonical records, typed capability failures, content identities/cache checks, configuration-only adapter discovery, schema/output containment, common budgets, readiness gates, deterministic preparation, layered offline execution, and retained blocked dispositions. Core files contain no dataset import or dataset-name branch. |
+| `graph_rag_eval/adapters/__init__.py`<br>`graph_rag_eval/adapters/base.py`<br>`graph_rag_eval/adapters/synthetic.py`<br>`graph_rag_eval/adapters/code_accord.py` | Adapter boundary. The synthetic adapter supplies deterministic answerable/unanswerable and Regime D/Q fixtures. The CODE-ACCORD adapter owns its raw paths/BIO interpretation and reports the incomplete tracked corpus plus unavailable independent Regime Q author/reviewer as blockers instead of manufacturing questions or zeros. |
+| `graph_rag_eval/graphs/__init__.py`<br>`graph_rag_eval/graphs/snapshots.py`<br>`graph_rag_eval/graphs/corruptions.py`<br>`graph_rag_eval/graphs/matching.py` | Content-addressed graph snapshots, exact/relaxed one-to-one matching, and deterministic edge add/drop, endpoint rewire, relation relabel, provenance removal, entity merge, and entity split controls with parent/recipe identity. |
+| `graph_rag_eval/retrieval/__init__.py`<br>`graph_rag_eval/retrieval/base.py`<br>`graph_rag_eval/retrieval/bm25.py`<br>`graph_rag_eval/retrieval/dense.py`<br>`graph_rag_eval/retrieval/graph.py`<br>`graph_rag_eval/retrieval/hybrid.py` | One `QueryView` retrieval boundary; genuine frozen-parameter `bm25s` ranking; deterministic offline dense-shaped fixture plus pinned local-cache Transformer dense execution; question-only graph seed/expansion with provenance; and deterministic reciprocal-rank fusion. |
+| `graph_rag_eval/evaluation/__init__.py`<br>`graph_rag_eval/evaluation/intrinsic.py`<br>`graph_rag_eval/evaluation/retrieval.py`<br>`graph_rag_eval/evaluation/generation.py`<br>`graph_rag_eval/evaluation/coupled.py`<br>`graph_rag_eval/evaluation/statistics.py` | Separates intrinsic graph, evidence retrieval, answer/support/abstention, coupled, and uncertainty layers. The generation module includes a pinned local-cache Transformer interface; judge metrics remain gated on unavailable human calibration. |
+| `configs/phase_b_graph_rag_synthetic.json` | Freezes the offline contract fixture, public/private projection, conditions, BM25/graph parameters, matched budget, corruptions, prompt/generator identity, seed, and 10,000-resample clustered bootstrap. |
+| `configs/phase_b_graph_rag_code_accord.json` | Freezes CODE-ACCORD readiness inputs while explicitly recording that complete gold inputs, independent Regime Q author/reviewer, model/prompt selection, calibration, minimum effect, and comparison family are unresolved; the runner consequently fails closed before a live call. |
+
 ### Frozen verifier prompts
 
 | Path | Current role and reason |
@@ -246,6 +259,14 @@ is a set relationship between the two trees, not provenance metadata.
 | `schemas/phase_b/verifier-replay.schema.json` | Validates cached request/response replay records so offline reruns use the same model interaction evidence. |
 | `schemas/phase_b/verifier-run-log.schema.json` | Validates structured warmup, retry, latency, cache, parse, and terminal events from verifier execution. |
 | `schemas/phase_b/verifier-simple-response.schema.json` | Constrains simple replies to the approved non-corrective verdict form. |
+| `schemas/phase_b/rag-dataset-descriptor.schema.json` | Validates dataset, adapter, capability, corpus-hash, license, citation, and redistribution identity. |
+| `schemas/phase_b/rag-canonical-record.schema.json` | Validates the shared dataset/schema identity and record-kind identifier for canonical JSONL records. |
+| `schemas/phase_b/rag-graph-snapshot.schema.json` | Validates graph condition, full record payload, component hashes, constructor, and corruption parent/recipe identity. |
+| `schemas/phase_b/rag-question-set.schema.json` | Validates question/evidence-set identity, regime counts, and independent author/reviewer/publication gate. |
+| `schemas/phase_b/rag-run-config.schema.json` | Validates the adapter, public/private protocol, retrieval/budget, generator, and statistics configuration surface. |
+| `schemas/phase_b/rag-retrieval-trace.schema.json` | Validates question-only query projection, ranked evidence/provenance, index identity, budget, seeds/expansion, failure, and latency mode. |
+| `schemas/phase_b/rag-generation-trace.schema.json` | Validates prompt/evidence, immutable model/revision/decoding, response, error, and latency-mode records. |
+| `schemas/phase_b/rag-metrics.schema.json` | Validates per-question/document/seed/aggregate/comparison metric records and explicit `not_applicable` dispositions. |
 
 ### Regression and contract tests
 
@@ -264,6 +285,7 @@ is a set relationship between the two trees, not provenance metadata.
 | `tests/test_phase_b_reconciliation.py` | Tests historical ledger identities, drift detection, physical-defect preservation, and secondary-evidence classification. |
 | `tests/test_phase_b_smoke.py` | Tests the isolated nonpublication smoke-input selection and pseudo-seed cloning contracts without performing accelerator or Ollama execution. |
 | `tests/test_phase_b_verifier.py` | Tests dry/live/replay behavior, model pinning, warmup, retry/cache/error handling, and corrective-response validation. |
+| `tests/test_graph_rag_contracts.py`<br>`tests/test_graph_rag_adapters.py`<br>`tests/test_graph_rag_identity.py`<br>`tests/test_graph_rag_registry_isolation.py`<br>`tests/test_graph_rag_bm25.py`<br>`tests/test_graph_rag_graph_retrieval.py`<br>`tests/test_graph_rag_budget.py`<br>`tests/test_graph_rag_leakage.py`<br>`tests/test_graph_rag_metrics.py`<br>`tests/test_graph_rag_artifacts.py`<br>`tests/test_graph_rag_runner.py`<br>`tests/test_graph_rag_standalone.py` | B-09I focused suite: canonical/schema rejection, adapter capabilities, cache/dataset isolation, temporary third-adapter zero-core-change proof, hand-worked BM25 behavior, graph expansion/provenance/corruptions/matching, matched budgets, leakage sentinels, layered metrics/bootstrap, deterministic artifact replay, no-domain-expert hard stop, and execution from a copied standalone checkout with no parent/paper/research submodule. |
 
 ## Reused or mechanically relocated historical source
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-metrics.schema.json",
+  "title": "Graph RAG metric record",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {"const": "rag-metrics-1.0"},
+    "run_id": {"type": "string"},
+    "dataset_id": {"type": "string"},
+    "question_id": {"type": "string"},
+    "cluster_id": {"type": "string"},
+    "regime": {"type": "string"},
+    "condition": {"type": "string"},
+    "metric": {"type": "string"},
+    "status": {
+      "enum": ["available", "not_applicable", "descriptive_only", "test_eligible"]
+    },
+    "value": {},
+    "numerator": {"type": ["number", "null"]},
+    "denominator": {"type": ["integer", "null"], "minimum": 0},
+    "reason": {"type": "string"},
+    "retrieval": {"type": "object"},
+    "answer": {"type": "object"},
+    "support": {"type": "object"},
+    "coupled": {"type": "object"},
+    "bootstrap": {"type": "object"}
+  }
+}

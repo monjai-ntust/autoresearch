@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-retrieval-trace.schema.json",
+  "title": "Retrieval trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "dataset_id",
+    "question_id",
+    "regime",
+    "condition",
+    "query_sha256",
+    "query",
+    "index_fingerprint",
+    "ranked_evidence",
+    "budget",
+    "latency_ms",
+    "latency_mode",
+    "failure",
+    "seed_ids",
+    "expansion_ids"
+  ],
+  "properties": {
+    "schema_version": {"const": "rag-retrieval-trace-1.0"},
+    "run_id": {"type": "string"},
+    "dataset_id": {"type": "string"},
+    "question_id": {"type": "string"},
+    "regime": {"enum": ["diagnostic_fact_probe", "question_only"]},
+    "condition": {"type": "string"},
+    "query_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "query": {
+      "type": "object",
+      "required": ["dataset_id", "question_id", "text", "regime", "public_metadata"],
+      "additionalProperties": false,
+      "properties": {
+        "dataset_id": {"type": "string"},
+        "question_id": {"type": "string"},
+        "text": {"type": "string"},
+        "regime": {"enum": ["diagnostic_fact_probe", "question_only"]},
+        "public_metadata": {"type": "object"}
+      }
+    },
+    "index_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ranked_evidence": {"type": "array"},
+    "budget": {"type": "object"},
+    "latency_ms": {"type": "number", "minimum": 0},
+    "latency_mode": {"enum": ["fixture_normalized", "measured"]},
+    "failure": {"type": ["string", "null"]},
+    "seed_ids": {"type": "array", "items": {"type": "string"}},
+    "expansion_ids": {"type": "array", "items": {"type": "string"}}
+  }
+}

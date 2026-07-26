@@ -1,0 +1,109 @@
+{
+  "schema_version": "rag-run-config-1.0",
+  "run_id": "b09i-code-accord-readiness",
+  "adapter": {
+    "import_path": "graph_rag_eval.adapters.code_accord:CodeAccordAdapter",
+    "adapter_id": "code-accord-canonical",
+    "adapter_version": "1.0.0",
+    "options": {
+      "data_root": "data/code_accord",
+      "question_set": "output/external-inputs/code-accord-regime-q.jsonl",
+      "dataset_id": "code-accord"
+    }
+  },
+  "protocol": {
+    "protocol_id": "B09I-CODE-ACCORD-1.0",
+    "regimes": [
+      "diagnostic_fact_probe",
+      "question_only"
+    ],
+    "question_query_fields": [
+      "text",
+      "public_metadata"
+    ],
+    "forbidden_query_fields": [
+      "answers",
+      "answer_aliases",
+      "gold_relation",
+      "gold_triple",
+      "gold_path",
+      "evidence_ids",
+      "source_ids",
+      "condition"
+    ],
+    "required_capabilities": [
+      "documents",
+      "gold_entities",
+      "gold_relations",
+      "gold_triples",
+      "questions",
+      "answer_aliases",
+      "evidence_sets"
+    ],
+    "regime_q": {
+      "required": true,
+      "synthetic_fixture_only": false,
+      "independent_author_available": false,
+      "independent_reviewer_available": false,
+      "publication_claim_allowed": false,
+      "blocked_reason": "No domain expert is available to author and independently review questions and acceptable evidence."
+    }
+  },
+  "retrieval": {
+    "conditions": [
+      "no_context",
+      "random_context",
+      "bm25_text",
+      "dense_text",
+      "hybrid_text",
+      "generated_graph",
+      "graph_plus_bm25",
+      "gold_graph_oracle",
+      "corruptions"
+    ],
+    "budget": {
+      "max_items": 8,
+      "max_tokens": 512,
+      "tokenizer_id": "frozen-generator-tokenizer-required"
+    },
+    "bm25": {
+      "package": "bm25s==0.3.9",
+      "k1": 1.2,
+      "b": 0.75,
+      "method": "lucene",
+      "idf_method": "lucene",
+      "token_pattern": "(?u)\\b\\w+\\b"
+    },
+    "graph": {
+      "max_hops": 2,
+      "question_only_linking": true,
+      "gold_repair": false
+    },
+    "corruption": {
+      "seed": 42,
+      "severity": 0.1
+    },
+    "random_seed": 42
+  },
+  "generator": {
+    "generator_id": "external-frozen-generator-required",
+    "model_id": "UNRESOLVED",
+    "revision": "blocked:no-domain-expert-and-no-model-selection",
+    "prompt_id": "UNRESOLVED",
+    "decoding": {
+      "temperature": 0.0,
+      "seed": 42,
+      "max_output_tokens": 64
+    },
+    "judge_required": false,
+    "human_calibration_set": null
+  },
+  "statistics": {
+    "bootstrap_resamples": 10000,
+    "seed": 42,
+    "confidence": 0.95,
+    "cluster_unit": "source_document",
+    "minimum_effect": null,
+    "comparison_family": []
+  }
+}

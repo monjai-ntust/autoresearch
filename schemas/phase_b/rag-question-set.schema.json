@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-question-set.schema.json",
+  "title": "Question-set manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "question_set_sha256",
+    "questions",
+    "regimes",
+    "independence"
+  ],
+  "properties": {
+    "schema_version": {"const": "rag-question-set-1.0"},
+    "question_set_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "questions": {"type": "integer", "minimum": 0},
+    "regimes": {
+      "type": "array",
+      "items": {
+        "enum": ["diagnostic_fact_probe", "question_only"]
+      },
+      "uniqueItems": true
+    },
+    "independence": {
+      "type": "object",
+      "required": [
+        "required",
+        "independent_author_available",
+        "independent_reviewer_available",
+        "publication_claim_allowed"
+      ]
+    }
+  }
+}

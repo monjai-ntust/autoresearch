@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-canonical-record.schema.json",
+  "title": "Graph RAG canonical record",
+  "type": "object",
+  "required": ["dataset_id", "schema_version"],
+  "properties": {
+    "dataset_id": {"type": "string", "minLength": 1},
+    "document_id": {"type": "string", "minLength": 1},
+    "chunk_id": {"type": "string", "minLength": 1},
+    "entity_id": {"type": "string", "minLength": 1},
+    "relation_id": {"type": "string", "minLength": 1},
+    "triple_id": {"type": "string", "minLength": 1},
+    "question_id": {"type": "string", "minLength": 1},
+    "schema_version": {"const": "graph-rag-canonical-1.0"}
+  },
+  "anyOf": [
+    {"required": ["document_id"]},
+    {"required": ["chunk_id"]},
+    {"required": ["entity_id"]},
+    {"required": ["relation_id"]},
+    {"required": ["triple_id"]},
+    {"required": ["question_id"]}
+  ]
+}

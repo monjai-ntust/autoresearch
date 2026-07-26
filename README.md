@@ -91,6 +91,65 @@ to the fixed baseline `9feafa4`, including the rationale for the separate
 canonical pipeline boundary. Update that inventory with every subsequent source
 edit that changes the comparison or a path's role.
 
+## Dataset-neutral generated-graph RAG evaluation
+
+`graph_rag.py` is the separate B-09I evaluation entry point. It does not import
+or modify the historical `provenance/eval_graph_rag.py` harness. The reusable
+`graph_rag_eval/` package defines immutable canonical records, configuration-
+selected dataset adapters, content-addressed graph/index identities, genuine
+`bm25s==0.3.9` retrieval, pinned dense/generator interfaces, question-only graph
+linking and bounded expansion, matched item/token budgets, deterministic graph
+corruptions, layered metrics, clustered paired bootstrap intervals, schema-
+validated traces, and output containment.
+
+The complete no-network synthetic contract is:
+
+```bash
+uv sync --frozen
+uv run python -m unittest discover -s tests -p 'test_graph_rag_*.py' -v
+uv run python graph_rag.py doctor --config configs/phase_b_graph_rag_synthetic.json
+uv run python graph_rag.py prepare --config configs/phase_b_graph_rag_synthetic.json
+uv run python graph_rag.py evaluate --config configs/phase_b_graph_rag_synthetic.json
+```
+
+The synthetic run is a software-contract proof only. It deliberately emits
+`scientific_claims_enabled: false` and cannot become a CODE-ACCORD result.
+Every stage writes beneath `output/<run-id>/graph-rag/`; `--run-id` provides a
+safe namespace for deterministic repeat or standalone-clone checks.
+
+CODE-ACCORD readiness is checked separately:
+
+```bash
+uv run python graph_rag.py doctor --config configs/phase_b_graph_rag_code_accord.json
+uv run python graph_rag.py prepare --config configs/phase_b_graph_rag_code_accord.json
+uv run python graph_rag.py evaluate --config configs/phase_b_graph_rag_code_accord.json --smoke
+```
+
+The tracked checkout contains only the entity training CSV, not the complete
+gold graph inputs. More importantly, the approved B-09I constraint says no
+domain expert is available to independently author and review Regime Q
+questions or acceptable evidence. The CODE-ACCORD configuration therefore
+fails closed: readiness/preparation may retain canonical partial-input evidence,
+but Regime Q retrieval/generation/coupled metrics, judge-dependent metrics, the
+smoke/full experiment, and any QA claim are emitted as blocked or
+`not_applicable`. Templated gold-triple prompts must not be substituted; those
+belong only to the explicitly labeled diagnostic fact-probe regime.
+
+Any future Regime Q input must satisfy the frozen acceptance contract before
+the blocked gate can be reconsidered. An independent author may see the public
+closed corpus but not gold graph records, answers, existing diagnostic prompts,
+retrieval results, or condition labels. A separate reviewer must validate each
+question, normalized answer aliases, answerability, every alternative
+sufficient evidence set, relevance grades, and source spans without seeing
+system outputs. Disagreements require recorded adjudication by an eligible
+person who did not produce the evaluated output. The set must include declared
+unanswerable cases, stable document/group identifiers, disjoint frozen splits,
+author/reviewer/adjudication provenance, exclusion reasons, and content hashes.
+Question text is the only required query input; answers, evidence, relations,
+triples, paths, source identifiers, and condition labels remain private until
+scoring. Without those records and reviewers, CODE-ACCORD Regime Q remains
+blocked rather than being approximated with agent-authored or templated data.
+
 ## Repository status
 
 - Python 3.10 is the selected and minimum supported Python version. The Phase B

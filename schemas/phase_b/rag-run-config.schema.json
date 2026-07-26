@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-run-config.schema.json",
+  "title": "Graph RAG run configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "adapter",
+    "protocol",
+    "retrieval",
+    "generator",
+    "statistics"
+  ],
+  "properties": {
+    "schema_version": {"const": "rag-run-config-1.0"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "adapter": {
+      "type": "object",
+      "required": ["import_path", "adapter_id", "adapter_version", "options"]
+    },
+    "protocol": {
+      "type": "object",
+      "required": [
+        "protocol_id",
+        "regimes",
+        "question_query_fields",
+        "forbidden_query_fields",
+        "required_capabilities",
+        "regime_q"
+      ]
+    },
+    "retrieval": {
+      "type": "object",
+      "required": [
+        "conditions",
+        "budget",
+        "bm25",
+        "graph",
+        "corruption",
+        "random_seed"
+      ]
+    },
+    "generator": {
+      "type": "object",
+      "required": [
+        "generator_id",
+        "model_id",
+        "revision",
+        "prompt_id",
+        "decoding",
+        "judge_required",
+        "human_calibration_set"
+      ]
+    },
+    "statistics": {
+      "type": "object",
+      "required": ["bootstrap_resamples", "seed", "confidence", "cluster_unit"]
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-dataset-descriptor.schema.json",
+  "title": "Graph RAG dataset descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dataset_id",
+    "snapshot_id",
+    "adapter_id",
+    "adapter_version",
+    "license",
+    "citation",
+    "language",
+    "capabilities",
+    "raw_content_sha256",
+    "canonical_content_sha256",
+    "redistribution",
+    "schema_version"
+  ],
+  "properties": {
+    "dataset_id": {"type": "string", "minLength": 1},
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "adapter_id": {"type": "string", "minLength": 1},
+    "adapter_version": {"type": "string", "minLength": 1},
+    "license": {"type": "string"},
+    "citation": {"type": "string"},
+    "language": {"type": "string"},
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string"}
+    },
+    "raw_content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "canonical_content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "redistribution": {"type": "string"},
+    "schema_version": {"const": "graph-rag-canonical-1.0"}
+  }
+}
