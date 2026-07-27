@@ -13,30 +13,38 @@ from graph_rag_eval.graphs.corruptions import (
     split_entity,
 )
 from graph_rag_eval.graphs.matching import match_graphs
-from graph_rag_eval.graphs.snapshots import build_snapshot
+from graph_rag_eval.graphs.snapshots import build_snapshot, structure_summary
+from graph_rag_eval.retrieval.bm25 import BM25Retriever
 from graph_rag_eval.retrieval.graph import GraphRetriever
+from graph_rag_eval.retrieval.hybrid import ReciprocalRankFusionRetriever
 
 
 def graphs():
     adapter = SyntheticAdapter()
     bundle = adapter.load()
+    predicted = adapter.generated_graph(bundle)
     common = dict(
         dataset_id=bundle.descriptor.dataset_id,
-        entities=bundle.entities,
-        relations=bundle.relations,
         descriptor_sha256=content_sha256(bundle.descriptor),
         corpus_sha256=content_sha256(bundle.chunks),
         adapter_sha256=content_sha256({"adapter": adapter.adapter_id}),
         extractor_sha256=content_sha256({"extractor": "fixture"}),
     )
     gold = build_snapshot(
-        condition="gold", triples=bundle.triples,
-        construction_recipe="gold", **common
+        condition="gold",
+        entities=bundle.entities,
+        relations=bundle.relations,
+        triples=bundle.triples,
+        construction_recipe="gold",
+        **common,
     )
     generated = build_snapshot(
         condition="generated",
-        triples=tuple(t for t in bundle.triples if t.triple_id in adapter.generated_triple_ids()),
-        construction_recipe="generated", **common
+        entities=predicted.entities,
+        relations=predicted.relations,
+        triples=predicted.triples,
+        construction_recipe=predicted.construction_recipe,
+        **common,
     )
     return bundle, generated, gold
 
@@ -66,12 +74,64 @@ class GraphRagGraphRetrievalTests(unittest.TestCase):
         self.assertEqual(result.failure, "empty_entity_link")
         self.assertEqual(result.items, ())
 
-    def test_matching_counts_missing_generated_fact(self):
+    def test_matching_counts_both_missing_and_hallucinated_facts(self):
         _, generated, gold = graphs()
         result = match_graphs(generated, gold)
         self.assertEqual(result.triples.true_positive, 3)
         self.assertEqual(result.triples.false_negative, 1)
+        self.assertEqual(result.triples.false_positive, 1)
         self.assertAlmostEqual(result.triples.recall, 0.75)
+        # A predicted graph derived only as a gold subset would pin precision at
+        # 1.0 and make extraction false positives unobservable.
+        self.assertAlmostEqual(result.triples.precision, 0.75)
+        self.assertEqual(result.entities.false_positive, 1)
+        self.assertEqual(result.entities.false_negative, 1)
+        self.assertEqual(result.relations.false_positive, 1)
+        self.assertEqual(result.provenance.false_positive, 1)
+
+    def test_structure_summary_reports_measured_graph_shape(self):
+        _, generated, gold = graphs()
+        gold_structure = structure_summary(gold)
+        generated_structure = structure_summary(generated)
+        self.assertEqual(gold_structure["triples"], 4)
+        self.assertEqual(generated_structure["triples"], 4)
+        self.assertEqual(gold_structure["isolated_entities"], 1)
+        self.assertEqual(gold_structure["connected_components"], 4)
+        self.assertAlmostEqual(gold_structure["average_degree"], 8 / 8)
+        self.assertEqual(generated_structure["triples_with_provenance"], 4)
+
+    def test_hybrid_reports_a_child_failure_even_when_the_other_child_answers(self):
+        bundle, generated, _ = graphs()
+        query = QueryView(
+            bundle.descriptor.dataset_id,
+            "q-empty",
+            "Which astronomy observation is relevant?",
+            "question_only",
+        )
+        graph = GraphRetriever(generated, max_hops=2)
+        text = BM25Retriever(bundle.chunks)
+        hybrid = ReciprocalRankFusionRetriever(graph, text)
+        self.assertEqual(graph.retrieve(query, Budget(4, 80)).failure, "empty_entity_link")
+        fused = hybrid.retrieve(query, Budget(4, 80))
+        self.assertIn("question-only-graph-v1:empty_entity_link", fused.failure)
+
+    def test_graph_ranking_breaks_seed_ties_by_question_overlap(self):
+        bundle, generated, _ = graphs()
+        # Both duct triples hang off the same seed at the same hop, so the seed
+        # score alone cannot order them; only the question terms can.
+        result = GraphRetriever(generated, max_hops=1).retrieve(
+            QueryView(
+                bundle.descriptor.dataset_id,
+                "q-ducts",
+                "Which aluminium covers apply to ventilation ducts?",
+                "question_only",
+            ),
+            Budget(4, 200),
+        )
+        ranked = [item.evidence_id for item in result.items]
+        self.assertEqual(ranked[0], "t-04")
+        self.assertIn("t-90", ranked)
+        self.assertLess(ranked.index("t-04"), ranked.index("t-90"))
 
     def test_all_corruptions_are_deterministic_and_parent_bound(self):
         _, graph, _ = graphs()

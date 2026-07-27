@@ -84,10 +84,34 @@
     "random_seed": 42
   },
   "generator": {
-    "generator_id": "deterministic-evidence-fixture-v1",
+    "import_path": "graph_rag_eval.evaluation.generation:RuleBasedEvidenceGenerator",
+    "generator_id": "rule-based-evidence-fixture-v1",
     "model_id": "repository-synthetic-generator",
     "revision": "sha256:repository-synthetic-generator-v1",
     "prompt_id": "synthetic-supported-answer-v1",
+    "options": {
+      "model_id": "repository-synthetic-generator",
+      "revision": "sha256:repository-synthetic-generator-v1",
+      "prompt_template": "Question: {question}\nEvidence:\n{evidence}",
+      "seed": 42,
+      "rules": [
+        {
+          "question_any": ["minimum", "width"],
+          "relation": "minimum",
+          "text_pattern": "clear width of\\s+([\\d ]+mm)"
+        },
+        {
+          "question_any": ["require"],
+          "relation": "requires",
+          "text_pattern": "require(?:s|d)?\\s+([a-z ]+?)(?:\\.|,|$)"
+        },
+        {
+          "question_any": ["material", "cover"],
+          "relation": "uses",
+          "text_pattern": "use(?:s|d)?\\s+([a-z]+)\\s+covers"
+        }
+      ]
+    },
     "decoding": {
       "temperature": 0.0,
       "seed": 42,

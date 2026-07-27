@@ -49,7 +49,12 @@ def retrieval_metrics(
     all_relevant = set().union(*relevant_sets)
     relevant_ranks = [index for index, item in enumerate(ranked, start=1) if item in all_relevant]
     reciprocal_rank = 1.0 / min(relevant_ranks) if relevant_ranks else 0.0
-    success = float(any(set(ranked) >= relevant for relevant in relevant_sets))
+    # `success_at_k` keeps the KILT definition — at least one relevant item in the
+    # top k. Whole-set containment is reported separately as
+    # `sufficient_evidence_at_k`; reusing the familiar name for the stricter
+    # quantity is the same mislabeling recorded as DISC-007.
+    success = float(bool(relevant_ranks))
+    sufficient = float(any(set(ranked) >= relevant for relevant in relevant_sets))
     precision = len(set(ranked) & all_relevant) / len(ranked) if ranked else 0.0
     grades = {
         item.evidence_id: item.grade
@@ -69,6 +74,7 @@ def retrieval_metrics(
         "evidence_recall_at_k": recall,
         "mrr": reciprocal_rank,
         "success_at_k": success,
+        "sufficient_evidence_at_k": sufficient,
         "precision_at_k": precision,
         "ndcg_at_k": ndcg,
         "denominator": 1,

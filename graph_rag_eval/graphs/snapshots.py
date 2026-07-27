@@ -69,6 +69,62 @@ class GraphSnapshot:
         }
 
 
+def structure_summary(graph: GraphSnapshot) -> dict[str, float | int]:
+    """Reference-free structural description of one graph snapshot.
+
+    Reported alongside gold-referenced precision/recall so a graph condition can
+    still be characterised when no gold graph exists, and so corruption severity
+    can be read against measured structure rather than only against the recipe.
+    """
+
+    adjacency = graph.adjacency()
+    neighbours = {entity.entity_id: set() for entity in graph.entities}
+    for triple in graph.triples:
+        neighbours[triple.head_id].add(triple.tail_id)
+        neighbours[triple.tail_id].add(triple.head_id)
+    order = len(graph.entities)
+    degrees = {key: len(value) for key, value in neighbours.items()}
+    unvisited = set(neighbours)
+    components = []
+    while unvisited:
+        stack = [unvisited.pop()]
+        size = 0
+        while stack:
+            current = stack.pop()
+            size += 1
+            for other in neighbours[current]:
+                if other in unvisited:
+                    unvisited.discard(other)
+                    stack.append(other)
+        components.append(size)
+    clustering = []
+    for entity_id, adjacent in neighbours.items():
+        degree = len(adjacent)
+        if degree < 2:
+            clustering.append(0.0)
+            continue
+        links = sum(
+            1
+            for index, left in enumerate(sorted(adjacent))
+            for right in sorted(adjacent)[index + 1 :]
+            if right in neighbours[left]
+        )
+        clustering.append(2 * links / (degree * (degree - 1)))
+    return {
+        "entities": order,
+        "relations": len(graph.relations),
+        "triples": len(graph.triples),
+        "distinct_endpoint_pairs": len({frozenset((t.head_id, t.tail_id)) for t in graph.triples}),
+        "entities_with_edges": sum(1 for value in adjacency.values() if value),
+        "isolated_entities": sum(1 for value in degrees.values() if value == 0),
+        "average_degree": (sum(degrees.values()) / order) if order else 0.0,
+        "connected_components": len(components),
+        "largest_component_entities": max(components) if components else 0,
+        "average_clustering_coefficient": (sum(clustering) / order) if order else 0.0,
+        "triples_with_provenance": sum(1 for item in graph.triples if item.chunk_ids),
+    }
+
+
 def build_snapshot(
     *,
     dataset_id: str,

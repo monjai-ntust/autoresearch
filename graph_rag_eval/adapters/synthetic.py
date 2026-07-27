@@ -22,7 +22,7 @@ from graph_rag_eval.contracts import (
     canonical_data,
     content_sha256,
 )
-from graph_rag_eval.adapters.base import ValidationReport
+from graph_rag_eval.adapters.base import GeneratedGraph, ValidationReport
 
 
 def _text_hash(text: str) -> str:
@@ -344,7 +344,75 @@ class SyntheticAdapter:
             split_membership=tuple(sorted(splits, key=lambda item: item.item_id)),
         )
 
-    def generated_triple_ids(self) -> tuple[str, ...]:
-        """Lossy generated graph deliberately omits one fact."""
+    def generated_graph(self, bundle: CanonicalBundle) -> GeneratedGraph:
+        """Predicted graph with both extraction misses and hallucinations.
 
-        return ("t-01", "t-02", "t-04")
+        The fixture omits one gold entity and one gold triple and asserts one
+        hallucinated entity, relation, and triple, so intrinsic precision and
+        recall are both strictly below 1.0 and every matching branch is exercised.
+        """
+
+        dropped_entity = "e-service-hatch"
+        dropped_triple = "t-03"
+        hallucinated_entity = Entity(
+            dataset_id=self.dataset_id,
+            entity_id="e-hallucinated-vent-cover",
+            surface_forms=("vent cover",),
+            canonical_label="vent cover",
+            entity_type="Object",
+            source_spans=(("chunk-03", 0, 17),),
+            provenance=Provenance(
+                dataset_id=self.dataset_id,
+                snapshot_id=f"fixture-{self.variant}",
+                chunk_id="chunk-03",
+                span_start=0,
+                span_end=17,
+                stage="synthetic-predicted-entity",
+                producer_version=self.adapter_version,
+                content_sha256=_text_hash("vent cover"),
+            ),
+        )
+        hallucinated_relation = Relation(
+            dataset_id=self.dataset_id,
+            relation_id="r-prohibits",
+            label="prohibits",
+            description="hallucinated prohibition",
+            direction="directed",
+            provenance=Provenance(
+                dataset_id=self.dataset_id,
+                snapshot_id=f"fixture-{self.variant}",
+                stage="synthetic-predicted-schema",
+                producer_version=self.adapter_version,
+                content_sha256=_text_hash("r-prohibits:prohibits"),
+            ),
+        )
+        hallucinated_triple = Triple(
+            dataset_id=self.dataset_id,
+            triple_id="t-90",
+            head_id="e-ducts",
+            relation_id="r-prohibits",
+            tail_id="e-hallucinated-vent-cover",
+            chunk_ids=("chunk-03",),
+            confidence=0.4,
+            provenance=Provenance(
+                dataset_id=self.dataset_id,
+                snapshot_id=f"fixture-{self.variant}",
+                chunk_id="chunk-03",
+                stage="synthetic-predicted-triple",
+                producer_version=self.adapter_version,
+                content_sha256=_text_hash("t-90:e-ducts:r-prohibits:e-hallucinated-vent-cover"),
+            ),
+        )
+        return GeneratedGraph(
+            entities=tuple(
+                item for item in bundle.entities if item.entity_id != dropped_entity
+            )
+            + (hallucinated_entity,),
+            relations=bundle.relations + (hallucinated_relation,),
+            triples=tuple(
+                item for item in bundle.triples if item.triple_id != dropped_triple
+            )
+            + (hallucinated_triple,),
+            extractor_id="synthetic-lossy-and-hallucinating-extractor-v1",
+            construction_recipe="drop-one-entity-and-triple-add-one-hallucination-v1",
+        )

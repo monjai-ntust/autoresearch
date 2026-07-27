@@ -4,7 +4,11 @@ from pathlib import Path
 
 from graph_rag_eval.adapters.synthetic import SyntheticAdapter
 from graph_rag_eval.identity import identity_namespace
-from graph_rag_eval.registry import load_adapter
+from graph_rag_eval.registry import (
+    AdapterRegistryError,
+    load_adapter,
+    load_generator,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +16,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ThirdAdapter(SyntheticAdapter):
     adapter_id = "third-test-adapter"
+
+
+class IncompleteAdapter:
+    """Deliberately omits the predicted-graph member the runner requires."""
+
+    adapter_id = "incomplete-test-adapter"
+    adapter_version = "1.0.0"
+
+    def validate(self):
+        raise NotImplementedError
+
+    def load(self):
+        raise NotImplementedError
 
 
 class GraphRagRegistryIsolationTests(unittest.TestCase):
@@ -23,6 +40,17 @@ class GraphRagRegistryIsolationTests(unittest.TestCase):
         bundle = adapter.load()
         self.assertEqual(bundle.descriptor.adapter_id, "third-test-adapter")
         self.assertEqual(bundle.descriptor.dataset_id, "third")
+
+    def test_registry_rejects_a_component_missing_a_protocol_member(self):
+        with self.assertRaisesRegex(AdapterRegistryError, "generated_graph"):
+            load_adapter("test_graph_rag_registry_isolation:IncompleteAdapter")
+        generator = load_generator(
+            "graph_rag_eval.evaluation.generation:RuleBasedEvidenceGenerator",
+            {"model_id": "fixture", "revision": "sha256:fixture"},
+        )
+        self.assertEqual(generator.generator_id, "rule-based-evidence-fixture-v1")
+        with self.assertRaisesRegex(AdapterRegistryError, "protocol members"):
+            load_generator("test_graph_rag_registry_isolation:IncompleteAdapter")
 
     def test_two_adapters_with_colliding_readable_ids_remain_content_isolated(self):
         first = SyntheticAdapter(dataset_id="same", variant="one").load()

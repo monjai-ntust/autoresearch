@@ -13,6 +13,7 @@ class Capability(str, Enum):
     GOLD_ENTITIES = "gold_entities"
     GOLD_RELATIONS = "gold_relations"
     GOLD_TRIPLES = "gold_triples"
+    PREDICTED_GRAPH = "predicted_graph"
     SOURCE_SPANS = "source_spans"
     QUESTIONS = "questions"
     ANSWER_ALIASES = "answer_aliases"

@@ -8,9 +8,9 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from platform import platform, python_version
 from statistics import mean
+from time import perf_counter
 from typing import Any
 import json
-import re
 import sys
 
 from graph_rag_eval.budget import Budget, assert_matched_budgets
@@ -18,19 +18,17 @@ from graph_rag_eval.contracts import (
     CanonicalBundle,
     QueryView,
     canonical_data,
+    canonical_json,
     content_sha256,
 )
 from graph_rag_eval.evaluation.coupled import coupled_metrics
-from graph_rag_eval.evaluation.generation import (
-    ABSTENTION,
-    answer_metrics,
-    support_metrics,
-)
+from graph_rag_eval.evaluation.generation import answer_metrics, support_metrics
 from graph_rag_eval.evaluation.intrinsic import evaluate_intrinsic
 from graph_rag_eval.evaluation.retrieval import retrieval_metrics
 from graph_rag_eval.evaluation.statistics import (
     PairedObservation,
     clustered_paired_bootstrap,
+    mcnemar_counts,
 )
 from graph_rag_eval.graphs.corruptions import (
     add_edges,
@@ -41,9 +39,13 @@ from graph_rag_eval.graphs.corruptions import (
     rewire_endpoints,
     split_entity,
 )
-from graph_rag_eval.graphs.snapshots import GraphSnapshot, build_snapshot
+from graph_rag_eval.graphs.snapshots import (
+    GraphSnapshot,
+    build_snapshot,
+    structure_summary,
+)
 from graph_rag_eval.identity import fingerprint
-from graph_rag_eval.registry import load_adapter
+from graph_rag_eval.registry import load_adapter, load_generator
 from graph_rag_eval.retrieval.base import (
     EvidenceItem,
     RetrievalResult,
@@ -64,6 +66,10 @@ from graph_rag_eval.trace import (
 
 class ConfigError(ValueError):
     pass
+
+
+class LeakageError(ValueError):
+    """Raised when private material could reach a tested query or prompt."""
 
 
 @dataclass(frozen=True)
@@ -125,6 +131,8 @@ def _load_config(path: Path) -> dict[str, Any]:
     model_revision = data["generator"].get("revision")
     if not model_revision or model_revision in {"main", "latest"}:
         raise ConfigError("generator requires an immutable revision")
+    if not data["generator"].get("import_path"):
+        raise ConfigError("generator requires an explicit import_path")
     return data
 
 
@@ -287,16 +295,13 @@ def _build_graphs(context: RunnerContext, bundle: CanonicalBundle) -> dict[str, 
         extractor_sha256=fingerprint("gold-source", bundle.descriptor.snapshot_id),
         construction_recipe="adapter-declared-gold-v1",
     )
-    generated_ids = set(context.adapter.generated_triple_ids())
-    generated_triples = tuple(item for item in bundle.triples if item.triple_id in generated_ids)
-    if generated_ids - {item.triple_id for item in bundle.triples}:
-        raise ValueError("adapter generated graph references unknown triples")
+    predicted = context.adapter.generated_graph(bundle)
     generated = build_snapshot(
         dataset_id=bundle.descriptor.dataset_id,
         condition="generated_graph",
-        entities=bundle.entities,
-        relations=bundle.relations,
-        triples=generated_triples,
+        entities=predicted.entities,
+        relations=predicted.relations,
+        triples=predicted.triples,
         descriptor_sha256=descriptor_hash,
         corpus_sha256=corpus_hash,
         adapter_sha256=adapter_hash,
@@ -304,9 +309,16 @@ def _build_graphs(context: RunnerContext, bundle: CanonicalBundle) -> dict[str, 
             "adapter-generated-graph",
             context.adapter.adapter_id,
             context.adapter.adapter_version,
-            sorted(generated_ids),
+            predicted.extractor_id,
+            content_sha256(
+                {
+                    "entities": predicted.entities,
+                    "relations": predicted.relations,
+                    "triples": predicted.triples,
+                }
+            ),
         ),
-        construction_recipe="adapter-generated-snapshot-v1",
+        construction_recipe=predicted.construction_recipe,
     )
     graphs = {
         "gold_graph_oracle": gold,
@@ -507,49 +519,40 @@ class _RandomContextRetriever:
         )
 
 
-class _DeterministicEvidenceGenerator:
-    """Synthetic-only generator that never sees private answer/evidence fields."""
+def _generator(context: RunnerContext):
+    config = context.config["generator"]
+    generator = load_generator(config["import_path"], config.get("options"))
+    if generator.generator_id != config["generator_id"]:
+        raise ConfigError("loaded generator ID does not match config")
+    return generator
 
-    generator_id = "deterministic-evidence-fixture-v1"
 
-    def generate(self, query: QueryView, result: RetrievalResult) -> tuple[str, str]:
-        prompt = (
-            f"Question: {query.text}\nEvidence:\n"
-            + "\n".join(item.content for item in result.items)
+def _assert_no_private_leakage(
+    bundle: CanonicalBundle,
+    query: QueryView,
+    question,
+    forbidden_fields: set[str],
+) -> None:
+    """Fail closed when private material can reach the tested query.
+
+    Answers and evidence identifiers legitimately appear inside retrieved
+    evidence; they must never appear in the query projection that retrieval,
+    index fingerprints, and prompt construction consume.
+    """
+
+    if query.text != question.text or query.question_id != question.question_id:
+        raise LeakageError(
+            f"query projection diverges from the public question: {question.question_id}"
         )
-        query_text = query.text.casefold()
-        triple_rows = []
-        for item in result.items:
-            match = re.fullmatch(r"\((.*?), (.*?), (.*?)\)", item.content)
-            if match:
-                triple_rows.append(tuple(part.strip() for part in match.groups()))
-        wanted_relation = None
-        if "minimum" in query_text:
-            wanted_relation = "minimum"
-        elif "require" in query_text:
-            wanted_relation = "requires"
-        elif "material" in query_text or "cover" in query_text:
-            wanted_relation = "uses"
-        if wanted_relation:
-            for _, relation, tail in triple_rows:
-                if relation == wanted_relation:
-                    return tail, prompt
-        joined = " ".join(item.content for item in result.items)
-        patterns = (
-            (r"require(?:s|d)?\s+([a-z ]+?)(?:\.|,|$)", "require"),
-            (r"clear width of\s+([\d ]+mm)", "minimum"),
-            (r"use(?:s|d)?\s+([a-z]+)\s+covers", "material"),
-        )
-        for pattern, purpose in patterns:
-            if (
-                purpose in query_text
-                or (purpose == "minimum" and "width" in query_text)
-                or (purpose == "material" and "cover" in query_text)
-            ):
-                match = re.search(pattern, joined.casefold())
-                if match:
-                    return match.group(1).strip(), prompt
-        return ABSTENTION, prompt
+    exposed = sorted(forbidden_fields & set(query.public_metadata))
+    if exposed:
+        raise LeakageError(f"public metadata exposes forbidden fields: {exposed}")
+    serialized = canonical_json(query)
+    for token in bundle.private_tokens():
+        if token and token in serialized:
+            raise LeakageError(
+                f"private answer or evidence identity reached the query: {question.question_id}"
+            )
 
 
 def _retrievers(
@@ -597,16 +600,20 @@ def _retrievers(
 
 def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[float]] = {}
+    excluded_keys = {"denominator", "k", "abstention_expected", "abstained"}
     for row in rows:
         condition = row["condition"]
         for family in ("retrieval", "answer", "support", "coupled"):
-            for key, value in row[family].items():
-                if isinstance(value, (int, float)) and key not in {
-                    "denominator",
-                    "k",
-                    "abstention_expected",
-                    "abstained",
-                }:
+            record = row[family]
+            # A family that is not `available` contributes no observation. Pooling
+            # its placeholder values would turn an unmet prerequisite into a
+            # measured zero and silently change the denominator.
+            if record.get("status") != "available":
+                continue
+            for key, value in record.items():
+                if isinstance(value, bool) or key in excluded_keys:
+                    continue
+                if isinstance(value, (int, float)):
                     grouped.setdefault((condition, f"{family}.{key}"), []).append(float(value))
     return [
         {
@@ -729,8 +736,9 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
         max_items=int(budget_config["max_items"]),
         max_tokens=int(budget_config["max_tokens"]),
     )
-    generator = _DeterministicEvidenceGenerator()
+    generator = _generator(context)
     answer_by_question = {item.question_id: item for item in bundle.answers}
+    forbidden_fields = set(context.config["protocol"]["forbidden_query_fields"])
     retrieval_traces = []
     generation_traces = []
     failures = []
@@ -740,6 +748,7 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
     )
     for question in bundle.questions:
         query = question.public_view()
+        _assert_no_private_leakage(bundle, query, question, forbidden_fields)
         question_decisions = []
         for condition, retriever in sorted(retrievers.items()):
             result = retriever.retrieve(query, budget)
@@ -774,7 +783,15 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
                         "failure": result.failure,
                     }
                 )
-            prediction, prompt = generator.generate(query, result)
+            generation_started = perf_counter()
+            prediction, record = generator.generate(query, result)
+            generation_latency = (perf_counter() - generation_started) * 1000.0
+            prompt = record["prompt"]
+            if prompt != generator.build_prompt(query, result):
+                raise LeakageError(
+                    "prompt is not a function of the public question and retrieved evidence "
+                    f"alone: {query.question_id}/{condition}"
+                )
             generation_traces.append(
                 {
                     "schema_version": "rag-generation-trace-1.0",
@@ -792,8 +809,10 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
                     "revision": context.config["generator"]["revision"],
                     "decoding": context.config["generator"]["decoding"],
                     "response": prediction,
-                    "latency_ms": 0.0,
-                    "latency_mode": "fixture_normalized",
+                    "input_tokens": record.get("input_tokens"),
+                    "output_tokens": record.get("output_tokens"),
+                    "latency_ms": 0.0 if fixture_mode else generation_latency,
+                    "latency_mode": "fixture_normalized" if fixture_mode else "measured",
                     "error": None,
                 }
             )
@@ -830,22 +849,41 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
                 }
             )
         assert_matched_budgets(question_decisions)
-    intrinsic = evaluate_intrinsic(
-        graphs["generated_graph"],
-        graphs["gold_graph_oracle"],
-        capabilities=bundle.descriptor.capabilities,
-    )
-    intrinsic_rows = [
+    # Every non-oracle graph condition is scored intrinsically so a corruption's
+    # retrieval effect can be read against its measured graph quality instead of
+    # only against its recipe.
+    intrinsic_rows = []
+    for label, snapshot in sorted(graphs.items()):
+        if label == "gold_graph_oracle":
+            continue
+        intrinsic = evaluate_intrinsic(
+            snapshot,
+            graphs["gold_graph_oracle"],
+            capabilities=bundle.descriptor.capabilities,
+        )
+        intrinsic_rows.append(
+            {
+                "schema_version": "rag-metrics-1.0",
+                "run_id": context.run_id,
+                "dataset_id": bundle.descriptor.dataset_id,
+                "condition": label,
+                "metric": "intrinsic_graph",
+                "value": canonical_data(intrinsic),
+                "status": getattr(intrinsic, "status", "available"),
+            }
+        )
+    intrinsic_rows.extend(
         {
             "schema_version": "rag-metrics-1.0",
             "run_id": context.run_id,
             "dataset_id": bundle.descriptor.dataset_id,
-            "condition": "generated_graph",
-            "metric": "intrinsic_graph",
-            "value": canonical_data(intrinsic),
-            "status": getattr(intrinsic, "status", "available"),
+            "condition": label,
+            "metric": "graph_structure",
+            "value": structure_summary(snapshot),
+            "status": "available",
         }
-    ]
+        for label, snapshot in sorted(graphs.items())
+    )
     aggregate = _aggregate(metric_rows)
     per_document = []
     grouped_documents: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -909,6 +947,13 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
                     observations,
                     resamples=int(context.config["statistics"]["bootstrap_resamples"]),
                     seed=int(context.config["statistics"]["seed"]),
+                ),
+                # `supported_answer` is binary and paired, so the discordant
+                # counts are recorded. No p-value is emitted: a test needs a
+                # predeclared comparison family, which no approved run has.
+                "mcnemar": mcnemar_counts(
+                    [item.baseline == 1.0 for item in observations],
+                    [item.treatment == 1.0 for item in observations],
                 ),
             }
         )

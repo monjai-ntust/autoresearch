@@ -24,6 +24,9 @@
     "answer": {"type": "object"},
     "support": {"type": "object"},
     "coupled": {"type": "object"},
-    "bootstrap": {"type": "object"}
+    "bootstrap": {"type": "object"},
+    "mcnemar": {"type": "object"},
+    "baseline": {"type": "string"},
+    "treatment": {"type": "string"}
   }
 }

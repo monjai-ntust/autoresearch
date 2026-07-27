@@ -96,11 +96,33 @@ edit that changes the comparison or a path's role.
 `graph_rag.py` is the separate B-09I evaluation entry point. It does not import
 or modify the historical `provenance/eval_graph_rag.py` harness. The reusable
 `graph_rag_eval/` package defines immutable canonical records, configuration-
-selected dataset adapters, content-addressed graph/index identities, genuine
-`bm25s==0.3.9` retrieval, pinned dense/generator interfaces, question-only graph
-linking and bounded expansion, matched item/token budgets, deterministic graph
-corruptions, layered metrics, clustered paired bootstrap intervals, schema-
-validated traces, and output containment.
+selected dataset adapters and generators, content-addressed graph/index
+identities, genuine `bm25s==0.3.9` retrieval, pinned dense/generator interfaces,
+question-only graph linking and bounded expansion, matched item/token budgets,
+deterministic graph corruptions, layered metrics, clustered paired bootstrap
+intervals, schema-validated traces, and output containment.
+
+An adapter supplies its predicted graph through `generated_graph(bundle)`, which
+returns entities, relations, and triples that are independent of the gold graph.
+A predicted graph may therefore both miss gold material and assert material the
+gold graph does not contain, so intrinsic precision, recall, and F1 are all
+measurable. `adapters.base.gold_subset_graph` remains available for an adapter
+that genuinely has no separate extractor output; it can only lose gold triples,
+so any run using it must report intrinsic precision as fixed at 1.0 by
+construction rather than measured. Intrinsic and structural graph metrics are
+emitted for every non-oracle graph condition, including each corruption, so a
+retrieval or answer change can be read against measured graph quality.
+
+Two retrieval metric names are kept distinct on purpose. `success_at_k` uses the
+KILT definition — at least one relevant item within the top *k*. Whole-set
+containment of an acceptable evidence set is reported as
+`sufficient_evidence_at_k` and is what the coupled layer consumes. Reusing a
+familiar retrieval name for a different computation is the defect recorded as
+`DISC-007`.
+
+Metrics whose prerequisites are unmet emit a typed `not_applicable` record with
+no numeric field, and aggregation skips any family that is not `available`, so
+an unmet prerequisite can never enter a mean as a measured zero.
 
 The complete no-network synthetic contract is:
 

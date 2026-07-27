@@ -86,7 +86,8 @@
     "random_seed": 42
   },
   "generator": {
-    "generator_id": "external-frozen-generator-required",
+    "import_path": "graph_rag_eval.evaluation.generation:FrozenTransformerGenerator",
+    "generator_id": "frozen-transformer-v1",
     "model_id": "UNRESOLVED",
     "revision": "blocked:no-domain-expert-and-no-model-selection",
     "prompt_id": "UNRESOLVED",

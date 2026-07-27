@@ -75,16 +75,22 @@ class GraphRetriever:
                 relation = self.relation_by_id[triple.relation_id].label
                 tail = self.entity_by_id[triple.tail_id].canonical_label
                 score = seed_score / (1 + hop)
+                content = f"({head}, {relation}, {tail})"
+                surface = query_tokens & _tokens(content)
                 rows.append(
                     EvidenceItem(
                         evidence_id=triple.triple_id,
                         evidence_type="triple",
-                        content=f"({head}, {relation}, {tail})",
+                        content=content,
                         score=score,
                         rank=0,
                         provenance_ids=triple.chunk_ids,
                         path_ids=path + (triple.triple_id,),
-                        components={"entity_link": seed_score, "hop": float(hop)},
+                        components={
+                            "entity_link": seed_score,
+                            "hop": float(hop),
+                            "question_overlap": float(len(surface)),
+                        },
                     )
                 )
                 next_entity = (
@@ -94,7 +100,17 @@ class GraphRetriever:
                     queue.append(
                         (next_entity, hop + 1, path + (triple.triple_id, next_entity), seed_score)
                     )
-        rows.sort(key=lambda item: (-item.score, item.evidence_id))
+        # Every triple reached from one seed at one hop shares that seed's score.
+        # Breaking those ties by question-term overlap keeps the ordering
+        # deterministic while making it question-conditioned rather than an
+        # artefact of triple-ID sort order.
+        rows.sort(
+            key=lambda item: (
+                -item.score,
+                -item.components["question_overlap"],
+                item.evidence_id,
+            )
+        )
         ranked = tuple(
             EvidenceItem(
                 evidence_id=item.evidence_id,

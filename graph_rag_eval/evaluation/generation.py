@@ -15,6 +15,8 @@ ABSTENTION = "INSUFFICIENT_EVIDENCE"
 class FrozenTransformerGenerator:
     """Pinned local-cache causal generator for externally approved runs."""
 
+    generator_id = "frozen-transformer-v1"
+
     def __init__(
         self,
         *,
@@ -63,12 +65,17 @@ class FrozenTransformerGenerator:
         ).to(self.device)
         self._model.eval()
 
+    def build_prompt(self, query: QueryView, result: RetrievalResult) -> str:
+        return self.prompt_template.format(
+            question=query.text,
+            evidence="\n".join(item.content for item in result.items),
+        )
+
     def generate(self, query: QueryView, result: RetrievalResult) -> tuple[str, dict]:
         self._load()
         import torch
 
-        evidence = "\n".join(item.content for item in result.items)
-        prompt = self.prompt_template.format(question=query.text, evidence=evidence)
+        prompt = self.build_prompt(query, result)
         encoded = self._tokenizer(
             prompt,
             truncation=True,
@@ -96,6 +103,81 @@ class FrozenTransformerGenerator:
         }
 
 
+class RuleBasedEvidenceGenerator:
+    """Offline generator whose extraction rules are supplied by configuration.
+
+    It never reads answers, evidence labels, or gold graph fields: the prompt and
+    every rule apply only to the public question text and the retrieved evidence.
+    Rules live in the run configuration so no dataset-specific pattern is
+    compiled into core code.
+    """
+
+    generator_id = "rule-based-evidence-fixture-v1"
+
+    def __init__(
+        self,
+        *,
+        model_id: str,
+        revision: str,
+        prompt_template: str = "Question: {question}\nEvidence:\n{evidence}",
+        rules: tuple[dict, ...] = (),
+        seed: int = 42,
+    ):
+        if not revision or revision in {"main", "latest"}:
+            raise ValueError("generator requires an immutable revision")
+        if "{question}" not in prompt_template or "{evidence}" not in prompt_template:
+            raise ValueError("prompt template must contain question and evidence fields")
+        self.model_id = model_id
+        self.revision = revision
+        self.prompt_template = prompt_template
+        self.rules = tuple(dict(item) for item in rules)
+        self.seed = seed
+
+    def build_prompt(self, query: QueryView, result: RetrievalResult) -> str:
+        return self.prompt_template.format(
+            question=query.text,
+            evidence="\n".join(item.content for item in result.items),
+        )
+
+    def _matches(self, rule: dict, question: str) -> bool:
+        keywords = rule.get("question_any", ())
+        return any(keyword in question for keyword in keywords) if keywords else False
+
+    def generate(self, query: QueryView, result: RetrievalResult) -> tuple[str, dict]:
+        prompt = self.build_prompt(query, result)
+        question = query.text.casefold()
+        triples = []
+        for item in result.items:
+            match = re.fullmatch(r"\((.*?), (.*?), (.*?)\)", item.content)
+            if match:
+                triples.append(tuple(part.strip() for part in match.groups()))
+        joined = " ".join(item.content for item in result.items).casefold()
+        response = ABSTENTION
+        for rule in self.rules:
+            if not self._matches(rule, question):
+                continue
+            relation = rule.get("relation")
+            if relation is not None:
+                tails = [tail for _, label, tail in triples if label == relation]
+                if tails:
+                    response = tails[0]
+                    break
+            pattern = rule.get("text_pattern")
+            if pattern:
+                found = re.search(pattern, joined)
+                if found:
+                    response = found.group(1).strip()
+                    break
+        return response, {
+            "prompt": prompt,
+            "input_tokens": len(re.findall(r"\w+|[^\w\s]", prompt)),
+            "output_tokens": len(re.findall(r"\w+|[^\w\s]", response)),
+            "model_id": self.model_id,
+            "revision": self.revision,
+            "seed": self.seed,
+        }
+
+
 def normalize_answer(text: str) -> str:
     return " ".join(re.findall(r"\w+", text.casefold()))
 
@@ -114,20 +196,30 @@ def token_f1(prediction: str, target: str) -> float:
 
 
 def answer_metrics(prediction: str, answer: AnswerAlias) -> dict[str, float | bool | str]:
+    """Score one answer, keeping abstention outcomes out of the accuracy metrics.
+
+    An unanswerable question emits `abstention_correct` and no `exact_match` or
+    `token_f1`, so a condition that abstains everywhere cannot inflate the pooled
+    answer-accuracy mean. `answer_correct` is the single regime-neutral outcome
+    that the coupled layer consumes.
+    """
+
     abstained = prediction.strip() == ABSTENTION
     if answer.abstention_expected:
         return {
             "status": "available",
-            "exact_match": float(abstained),
-            "token_f1": float(abstained),
+            "answer_correct": float(abstained),
+            "abstention_correct": float(abstained),
             "abstention_expected": True,
             "abstained": abstained,
         }
     normalized_prediction = normalize_answer(prediction)
     normalized_targets = [normalize_answer(item) for item in answer.normalized_answers]
+    exact_match = float(normalized_prediction in normalized_targets)
     return {
         "status": "available",
-        "exact_match": float(normalized_prediction in normalized_targets),
+        "answer_correct": exact_match,
+        "exact_match": exact_match,
         "token_f1": max(token_f1(prediction, item) for item in answer.normalized_answers),
         "abstention_expected": False,
         "abstained": abstained,
@@ -138,7 +230,14 @@ def support_metrics(
     retrieved_ids: tuple[str, ...],
     evidence_sets: tuple[EvidenceSet, ...],
     question_id: str,
-) -> dict[str, float | int | str]:
+) -> dict[str, float | int | str | list[str]]:
+    """Score retrieved evidence against the best-matching acceptable evidence set.
+
+    A question with no frozen evidence set yields a typed unavailable record with
+    no numeric fields; emitting 0.0 would silently enter aggregate means as a
+    measured failure.
+    """
+
     alternatives = [
         set(item.evidence_ids)
         for item in evidence_sets
@@ -147,8 +246,8 @@ def support_metrics(
     if not alternatives:
         return {
             "status": "not_applicable",
-            "support_precision": 0.0,
-            "support_recall": 0.0,
+            "missing": ["question_evidence_set"],
+            "reason": "question has no frozen acceptable evidence set",
             "denominator": 0,
         }
     retrieved = set(retrieved_ids)

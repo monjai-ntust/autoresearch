@@ -45,6 +45,7 @@
     "generator": {
       "type": "object",
       "required": [
+        "import_path",
         "generator_id",
         "model_id",
         "revision",

@@ -18,6 +18,7 @@ from graph_rag_eval.contracts import (
     content_sha256,
 )
 from graph_rag_eval.adapters.base import (
+    GeneratedGraph,
     ValidationIssue,
     ValidationReport,
 )
@@ -226,5 +227,19 @@ class CodeAccordAdapter:
             evidence_sets=(),
         )
 
-    def generated_triple_ids(self) -> tuple[str, ...]:
-        return ()
+    def generated_graph(self, bundle: CanonicalBundle) -> GeneratedGraph:
+        """No predicted graph exists until extraction outputs are supplied.
+
+        The tracked standalone checkout carries no relation CSV and no verifier
+        record, so the adapter declares an empty predicted graph rather than
+        inventing one from the gold entities. `validate` already blocks every
+        downstream stage before this is reachable in a scored run.
+        """
+
+        return GeneratedGraph(
+            entities=(),
+            relations=(),
+            triples=(),
+            extractor_id="code-accord-predicted-graph-unavailable",
+            construction_recipe="blocked-no-extraction-output-v1",
+        )

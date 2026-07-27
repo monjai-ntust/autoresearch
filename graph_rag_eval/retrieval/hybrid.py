@@ -54,7 +54,15 @@ class ReciprocalRankFusionRetriever:
             )
             for rank, evidence_id in enumerate(ranking, start=1)
         )
-        failures = sorted({item.failure for item in child_results if item.failure})
+        # A child failure is reported even when the surviving child returns rows;
+        # otherwise an empty graph link is invisible in every hybrid condition.
+        failures = sorted(
+            {
+                f"{result.retriever_id}:{result.failure}"
+                for result in child_results
+                if result.failure
+            }
+        )
         return finalize_result(
             retriever_id=self.retriever_id,
             query=query,
@@ -62,5 +70,11 @@ class ReciprocalRankFusionRetriever:
             budget=budget,
             index_fingerprint=self.index_fingerprint,
             latency_ms=(perf_counter() - started) * 1000.0,
-            failure=";".join(failures) if not fused and failures else None,
+            failure=";".join(failures) if failures else None,
+            seed_ids=tuple(
+                seed for result in child_results for seed in result.seed_ids
+            ),
+            expansion_ids=tuple(
+                item for result in child_results for item in result.expansion_ids
+            ),
         )
