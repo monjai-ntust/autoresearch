@@ -13,22 +13,43 @@ from paths import RunLayout
 
 CACHE_RELATIVE = "inputs/huggingface"
 MANIFEST_RELATIVE = "manifests/huggingface-model-cache.json"
+SCHEMA_VERSION = "phase-b-huggingface-cache-1.1"
 
 
 def _cache_files(cache_dir: Path) -> list[dict[str, Any]]:
     if not cache_dir.is_dir():
         raise DataContractError("run-local Hugging Face cache directory is missing")
+    cache_root = cache_dir.resolve(strict=True)
     records: list[dict[str, Any]] = []
     for path in sorted(cache_dir.rglob("*"), key=lambda item: item.relative_to(cache_dir).as_posix()):
         relative = path.relative_to(cache_dir).as_posix()
         if relative == ".locks" or relative.startswith(".locks/"):
             continue
         if path.is_symlink():
+            target = os.readlink(path)
+            if Path(target).is_absolute():
+                raise DataContractError(
+                    f"run-local Hugging Face cache symlink target is absolute: {relative}"
+                )
+            try:
+                resolved_target = path.resolve(strict=True)
+                resolved_target.relative_to(cache_root)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise DataContractError(
+                    "run-local Hugging Face cache symlink is broken or escapes "
+                    f"the cache root: {relative}"
+                ) from exc
+            if not resolved_target.is_file():
+                raise DataContractError(
+                    f"run-local Hugging Face cache symlink must target a file: {relative}"
+                )
             records.append(
                 {
                     "path": relative,
                     "kind": "symlink",
-                    "target": os.readlink(path),
+                    "target": target,
+                    "bytes": resolved_target.stat().st_size,
+                    "sha256": sha256_file(resolved_target),
                 }
             )
         elif path.is_file():
@@ -55,7 +76,7 @@ def write_cache_manifest(
     cache_dir = layout.resolve(CACHE_RELATIVE, must_exist=True)
     files = _cache_files(cache_dir)
     manifest = {
-        "schema_version": "phase-b-huggingface-cache-1.0",
+        "schema_version": SCHEMA_VERSION,
         "model": model,
         "revision": revision,
         "cache_root": CACHE_RELATIVE,
@@ -80,7 +101,7 @@ def verify_cache_manifest(
     manifest = load_json(path)
     if not isinstance(manifest, dict):
         raise DataContractError("Hugging Face cache manifest must be an object")
-    if manifest.get("schema_version") != "phase-b-huggingface-cache-1.0":
+    if manifest.get("schema_version") != SCHEMA_VERSION:
         raise DataContractError("Hugging Face cache manifest schema is unsupported")
     if manifest.get("model") != model or manifest.get("revision") != revision:
         raise DataContractError("Hugging Face cache model/revision differs from configuration")

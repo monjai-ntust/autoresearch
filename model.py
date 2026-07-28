@@ -76,6 +76,17 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _configured_hub_model(layout: RunLayout, config: PipelineConfig) -> str:
+    model = config.value["training"]["base_model"]
+    raw = Path(model)
+    if raw.is_absolute() or ".." in raw.parts or (layout.source_root / raw).exists():
+        raise DataContractError(
+            "configured base model must be the frozen Hugging Face repository ID, "
+            "not a local or traversal path"
+        )
+    return model
+
+
 def _exact_keys(
     value: dict[str, Any], required: set[str], label: str, optional: set[str] | None = None
 ) -> None:
@@ -769,6 +780,11 @@ def generate_candidates(
         raise DataContractError("live execution requires the run-relative checkpoint blob")
     if execution_mode != "live" and checkpoint_blob_path is not None:
         raise DataContractError("a checkpoint blob is accepted only by live execution")
+    configured_base_model = _configured_hub_model(layout, config)
+    if base_model is not None and base_model != configured_base_model:
+        raise DataContractError(
+            "live base model override must exactly equal the configured model identity"
+        )
 
     sentences = _load_sentences(sentences_path)
     checkpoint = _load_checkpoint_manifest(checkpoint_manifest_path, config)
@@ -869,7 +885,7 @@ def generate_candidates(
             checkpoint,
             sentences,
             checkpoint_blob_path,
-            base_model or config.value["training"]["base_model"],
+            configured_base_model,
             device,
             layout.resolve(CACHE_RELATIVE, must_exist=True),
         )
@@ -1012,6 +1028,7 @@ def _training_command(
     model_local_files_only: bool,
 ) -> list[str]:
     training = config.value["training"]
+    base_model = _configured_hub_model(layout, config)
     boost = training["comparison_boost"]
     command = [
         sys.executable,
@@ -1023,7 +1040,7 @@ def _training_command(
         "--prepared-dir",
         str(layout.resolve("data-prepared", must_exist=True)),
         "--model-name",
-        training["base_model"],
+        base_model,
         "--model-revision",
         training["base_model_revision"],
         "--model-cache-dir",

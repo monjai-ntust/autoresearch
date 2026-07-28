@@ -124,14 +124,24 @@ Metrics whose prerequisites are unmet emit a typed `not_applicable` record with
 no numeric field, and aggregation skips any family that is not `available`, so
 an unmet prerequisite can never enter a mean as a measured zero.
 
-The complete no-network synthetic contract is:
+Prepare the locked environment while network access is available, with every
+dependency artifact confined beneath ignored `output/`:
 
 ```bash
+export UV_CACHE_DIR="$PWD/output/.uv-cache"
+export UV_PROJECT_ENVIRONMENT="$PWD/output/.uv-venv"
+export UV_PYTHON_INSTALL_DIR="$PWD/output/.uv-python"
 uv sync --frozen
-uv run python -m unittest discover -s tests -p 'test_graph_rag_*.py' -v
-uv run python graph_rag.py doctor --config configs/phase_b_graph_rag_synthetic.json
-uv run python graph_rag.py prepare --config configs/phase_b_graph_rag_synthetic.json
-uv run python graph_rag.py evaluate --config configs/phase_b_graph_rag_synthetic.json
+```
+
+After dependency acquisition, disable network access. The complete no-network
+synthetic contract is:
+
+```bash
+uv run --offline --frozen --no-sync python -m unittest discover -s tests -p 'test_graph_rag_*.py' -v
+uv run --offline --frozen --no-sync python graph_rag.py doctor --config configs/phase_b_graph_rag_synthetic.json
+uv run --offline --frozen --no-sync python graph_rag.py prepare --config configs/phase_b_graph_rag_synthetic.json
+uv run --offline --frozen --no-sync python graph_rag.py evaluate --config configs/phase_b_graph_rag_synthetic.json
 ```
 
 The synthetic run is a software-contract proof only. It deliberately emits
@@ -142,9 +152,9 @@ safe namespace for deterministic repeat or standalone-clone checks.
 CODE-ACCORD readiness is checked separately:
 
 ```bash
-uv run python graph_rag.py doctor --config configs/phase_b_graph_rag_code_accord.json
-uv run python graph_rag.py prepare --config configs/phase_b_graph_rag_code_accord.json
-uv run python graph_rag.py evaluate --config configs/phase_b_graph_rag_code_accord.json --smoke
+uv run --offline --frozen --no-sync python graph_rag.py doctor --config configs/phase_b_graph_rag_code_accord.json
+uv run --offline --frozen --no-sync python graph_rag.py prepare --config configs/phase_b_graph_rag_code_accord.json
+uv run --offline --frozen --no-sync python graph_rag.py evaluate --config configs/phase_b_graph_rag_code_accord.json --smoke
 ```
 
 The tracked checkout contains only the entity training CSV, not the complete
@@ -213,14 +223,22 @@ PyTorch is resolved from the CUDA 13.0 wheel index. This is required for the
 external NVIDIA GB10 (compute capability 12.1): the prior CUDA 12.8 wheel
 reports support only through capability 12.0 and fails when NVRTC compiles
 DeBERTa relative-position kernels. After pulling a revision with this lockfile,
-run `uv sync --frozen` again before any GPU stage. CPU execution is possible for
-small checks, but reported training runs require a suitable CUDA GPU and
-substantially more time and memory.
+run the primary launcher, or export the `UV_CACHE_DIR`,
+`UV_PROJECT_ENVIRONMENT`, and `UV_PYTHON_INSTALL_DIR` paths shown in the
+workflow guide before `uv sync --frozen`. Canonical dependency state must remain
+beneath ignored `output/`. CPU execution is possible for small checks, but
+reported training runs require a suitable CUDA GPU and substantially more time
+and memory.
 
 Canonical model backbones are loaded through Hugging Face Transformers into
 `output/<run-id>/inputs/huggingface` and may require network access on the first
-seed only. The resulting file inventory/tree hash is frozen; later seeds and
-live inference use that run-local cache with `local_files_only=True`. Historical
+seed only. The launcher scopes `HF_HOME` and `HF_XET_CACHE` beneath that same
+root. The resulting file inventory/tree hash includes contained relative
+snapshot-symlink target bytes; absolute, escaping, broken, and directory
+symlinks fail closed. Later seeds and live inference verify the cache and use
+`local_files_only=True`; a different `--base-model` identifier/path is rejected.
+The exact direct `uv --offline --no-sync` identity-rejection and
+network-disabled live-inference cache proof is in `docs/phase_b_workflow.md`. Historical
 direct commands retain their original cache behavior. The verifier additionally
 requires `curl`, a reachable Ollama-compatible `/api/chat` endpoint, and the
 requested local model (historically `qwen3:32b`). `--ollama-url` is configurable,
@@ -230,7 +248,8 @@ so on-premise execution is a deployment choice rather than a code-enforced invar
 conversion paths used by the retained model family. The frozen DeBERTa v1
 revision itself includes its BPE `vocab.json` and `merges.txt`; installing
 conversion packages cannot compensate for selecting an older model revision
-that lacks those files. A fresh clone should use `uv sync --frozen`; do not
+that lacks those files. A fresh clone should use the output-contained
+`uv sync --frozen` setup block above; do not
 repair dependency or model identities ad hoc on the execution machine.
 
 ## Historical data acquisition paths
@@ -542,7 +561,7 @@ A19 probe; inspect it before adapting paths, shell, CUDA, or environment assumpt
 Run the publication-critical pure-function tests without downloading a model or dataset:
 
 ```bash
-uv run --frozen python -B -m unittest discover -s tests -v
+uv run --offline --frozen --no-sync python -B -m unittest discover -s tests -v
 ```
 
 The suite covers immutable resumable acquisition, safe selective ZIP extraction,

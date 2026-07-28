@@ -97,14 +97,21 @@ run, final-test access, live verifier calls, or reporting a result.
 ## 1. Prepare the standalone checkout
 
 Clone the source repository directly, check out the release commit, and run from
-its root. Install uv and synchronize the locked environment:
+its root. Install uv, then confine its environment, download cache, and any
+managed Python installation to the ignored runtime root before synchronizing:
 
 ```bash
+export UV_CACHE_DIR="$PWD/output/.uv-cache"
+export UV_PROJECT_ENVIRONMENT="$PWD/output/.uv-venv"
+export UV_PYTHON_INSTALL_DIR="$PWD/output/.uv-python"
 uv sync --frozen
 ```
 
-Do not copy a parent-repository path into the configuration. The sole writable
-runtime root is `output/`, which is root-anchored in `.gitignore`. The current
+The primary launcher exports those paths automatically. The shared uv directories
+are reproducible prerequisites, not scientific run results; after the user
+archives every eligible real run, delete them so `output/` is empty. Do not copy
+a parent-repository path into the configuration. The sole writable runtime root
+is `output/`, which is root-anchored in `.gitignore`. The current
 reference environment records Python 3.10.20 and uv 0.11.26, but those are
 documented in the checkout manifest rather than enforced by `doctor`.
 
@@ -115,10 +122,13 @@ alphanumeric character, and otherwise uses only letters, digits, `.`, `_`, and
 `-`.
 
 ```bash
+RUN_ID="path-a-example"
+export HF_HOME="$PWD/output/$RUN_ID/inputs/huggingface"
+export HF_XET_CACHE="$HF_HOME/xet"
 uv run --frozen python -B phase_b.py \
   doctor \
   --config configs/phase_b_path_a.json \
-  --run-id path-a-example
+  --run-id "$RUN_ID"
 ```
 
 The command exits 0 only when all implemented preflight checks pass. It exits 2
@@ -142,9 +152,14 @@ every bootstrap stage; do not substitute a new live-verifier run ID.
 git clone --branch refactor --single-branch \
   https://github.com/monjai-ntust/autoresearch.git autoresearch-max
 cd autoresearch-max
+export UV_CACHE_DIR="$PWD/output/.uv-cache"
+export UV_PROJECT_ENVIRONMENT="$PWD/output/.uv-venv"
+export UV_PYTHON_INSTALL_DIR="$PWD/output/.uv-python"
 uv sync --frozen
 
 RUN_ID="path-a-bootstrap-$(date -u +%Y%m%dT%H%M%SZ)"
+export HF_HOME="$PWD/output/$RUN_ID/inputs/huggingface"
+export HF_XET_CACHE="$HF_HOME/xet"
 
 uv run --frozen python -B phase_b.py doctor \
   --config configs/phase_b_path_a.json --run-id "$RUN_ID"
@@ -345,8 +360,153 @@ model to the fetched archive, acquisition/annotation/prepared/split identities,
 train/development files, code/config/model revision, the run-local Hugging Face
 cache manifest/tree, selected metric, restart state, and source commit. The
 first seed may fetch the pinned revision; every later seed and live inference
-uses the verified cache with local-only loading. Candidate generation rechecks those identities and
-rejects a copied, legacy-split, stale, or renamed checkpoint.
+uses the verified cache with local-only loading. Relative Hugging Face snapshot
+symlinks are accepted only when they resolve to regular files inside that cache;
+the manifest records both target text and target bytes/hash. Absolute, escaping,
+broken, and directory symlinks fail closed. `HF_HOME` and `HF_XET_CACHE` are
+also scoped beneath the selected run so Xet chunks cannot escape the inventory.
+Candidate generation rechecks those identities and rejects a copied,
+legacy-split, stale, renamed, or differently identified base model/checkpoint.
+Cache schema 1.1 applies only to new clean-clone evidence; preserve rather than
+upgrade or reinterpret the retained older run and its immutable manifest.
+
+### DISC-021 clean-clone and network-disabled cache proof
+
+The release gate requires a new real run from a clean standalone clone on the
+external Bash/GPU machine. The public launcher deliberately performs `git pull`
+and `uv sync`, so it cannot itself be invoked while all network egress is
+disabled. Use it with network access for bootstrap and the first pinned model
+download, then use the direct offline command below only for the cache proof.
+This does not replace or alter the canonical full-run sequence.
+
+```bash
+set -Eeuo pipefail
+RUN_ID="path-a-disc021-$(date -u +%Y%m%dT%H%M%SZ)"
+export UV_CACHE_DIR="$PWD/output/.uv-cache"
+export UV_PROJECT_ENVIRONMENT="$PWD/output/.uv-venv"
+export UV_PYTHON_INSTALL_DIR="$PWD/output/.uv-python"
+export HF_HOME="$PWD/output/$RUN_ID/inputs/huggingface"
+export HF_XET_CACHE="$HF_HOME/xet"
+
+bash phase_b.sh --run-id "$RUN_ID" --stage bootstrap
+bash phase_b.sh --run-id "$RUN_ID" --stage train-live --seed 42
+test -z "$(git status --porcelain --untracked-files=all)"
+RUN_COMMIT="$(uv run --frozen --no-sync python -B - "$RUN_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path("output") / sys.argv[1] / "manifests/00-checkout-manifest.json"
+print(json.loads(path.read_text(encoding="utf-8"))["source"]["commit"])
+PY
+)"
+test "$RUN_COMMIT" = "$(git rev-parse HEAD)"
+
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+cache_fingerprint() {
+  uv run --offline --frozen --no-sync python -B - "$RUN_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from config import load_pipeline_config
+from hf_cache import MANIFEST_RELATIVE, verify_cache_manifest
+from paths import RunLayout, discover_source_root
+from phase_b_io import sha256_file
+
+root = discover_source_root(Path.cwd())
+layout = RunLayout(root, sys.argv[1])
+config = load_pipeline_config(root, "configs/phase_b_path_a.json")
+manifest = verify_cache_manifest(
+    layout,
+    model=config.value["training"]["base_model"],
+    revision=config.value["training"]["base_model_revision"],
+)
+print(json.dumps({
+    "manifest_sha256": sha256_file(
+        layout.resolve(MANIFEST_RELATIVE, must_exist=True)
+    ),
+    "tree_sha256": manifest["tree_sha256"],
+}, sort_keys=True))
+PY
+}
+
+host_cache_fingerprint() {
+  for root in "$HOME/.cache/huggingface" "$HOME/.cache/uv" \
+      "$HOME/.local/share/uv" "$PWD/.venv"; do
+    if [[ -e "$root" ]]; then
+      find "$root" -type f -printf '%p\t%s\t%T@\n'
+    else
+      printf 'MISSING\t%s\n' "$root"
+    fi
+  done | LC_ALL=C sort | sha256sum
+}
+
+cache_fingerprint > "output/$RUN_ID/audit/disc-021-cache-before.json"
+host_cache_fingerprint > "output/$RUN_ID/audit/disc-021-host-before.sha256"
+```
+
+At this point, disable network egress with the site-approved OS/container/firewall
+control and retain its configuration and failed-egress evidence in the run log.
+The two offline environment flags are defense in depth; they are not substitutes
+for actual network isolation. With egress still disabled, run:
+
+```bash
+uv run --offline --frozen --no-sync python -B - "$RUN_ID" <<'PY' \
+  > "output/$RUN_ID/audit/disc-021-identity-rejection.json"
+import json
+import sys
+from pathlib import Path
+
+from config import load_pipeline_config
+from hf_cache import verify_cache_manifest
+from paths import RunLayout, discover_source_root
+from phase_b_io import DataContractError
+
+root = discover_source_root(Path.cwd())
+layout = RunLayout(root, sys.argv[1])
+config = load_pipeline_config(root, "configs/phase_b_path_a.json")
+try:
+    verify_cache_manifest(
+        layout,
+        model=config.value["training"]["base_model"],
+        revision=config.value["training"]["base_model_revision"] + "-intentional-mismatch",
+    )
+except DataContractError as exc:
+    print(json.dumps({"status": "rejected", "detail": str(exc)}, sort_keys=True))
+else:
+    raise SystemExit("cache identity mismatch was not rejected")
+PY
+
+uv run --offline --frozen --no-sync python -B phase_b.py \
+  model generate-candidates \
+  --config configs/phase_b_path_a.json \
+  --run-id "$RUN_ID" \
+  --execution live \
+  --sentences data-prepared/development.jsonl \
+  --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
+  --checkpoint-blob checkpoints/seed-42/checkpoint.pt \
+  --candidates-out predictions/dev/seed-42-candidates.jsonl \
+  2>&1 | tee "output/$RUN_ID/logs/disc-021-offline-generation.log"
+
+cache_fingerprint > "output/$RUN_ID/audit/disc-021-cache-after.json"
+host_cache_fingerprint > "output/$RUN_ID/audit/disc-021-host-after.sha256"
+cmp --silent "output/$RUN_ID/audit/disc-021-cache-before.json" \
+  "output/$RUN_ID/audit/disc-021-cache-after.json"
+cmp --silent "output/$RUN_ID/audit/disc-021-host-before.sha256" \
+  "output/$RUN_ID/audit/disc-021-host-after.sha256"
+```
+
+A valid handoff contains the two identical cache fingerprints, an explicit
+identity-mismatch rejection, an unchanged common host-cache fingerprint, the
+offline generation log/artifacts, and independent evidence that egress was
+disabled. Re-enable the network, unset `HF_HUB_OFFLINE` and
+`TRANSFORMERS_OFFLINE`, and resume the same run with
+`bash phase_b.sh --run-id "$RUN_ID" --stage full`. The user then performs and
+the agent verifies the user-only real-data archive move. No agent-created
+diagnostic output is eligible for that archive.
 
 ### Historical-data comparability limit
 

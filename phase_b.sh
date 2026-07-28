@@ -54,7 +54,8 @@ Usage:
   ./phase_b.sh [--run-id RUN_ID] [options]
 
 Always runs `git pull --ff-only` against the checked-out branch's configured
-upstream and then `uv sync --frozen` first.
+upstream and then `uv sync --frozen` first. The uv environment/cache, managed
+Python downloads, and Hugging Face/Xet cache are confined beneath `output/`.
 Then it skips only stages whose run-local completion artifacts are present and
 runs from the first incomplete selected stage. It exits immediately on a new
 error; rerun the same command after fixing the cause.
@@ -196,6 +197,11 @@ fi
 
 cd "$SOURCE_ROOT"
 readonly RUN_ROOT="output/$RUN_ID"
+export UV_CACHE_DIR="$SOURCE_ROOT/output/.uv-cache"
+export UV_PROJECT_ENVIRONMENT="$SOURCE_ROOT/output/.uv-venv"
+export UV_PYTHON_INSTALL_DIR="$SOURCE_ROOT/output/.uv-python"
+export HF_HOME="$SOURCE_ROOT/$RUN_ROOT/inputs/huggingface"
+export HF_XET_CACHE="$HF_HOME/xet"
 
 [[ -n "$(git branch --show-current)" ]] \
   || die "the Phase B launcher requires a checked-out branch with an upstream"

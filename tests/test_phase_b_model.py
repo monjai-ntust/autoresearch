@@ -398,6 +398,31 @@ class ModelAdapterTests(unittest.TestCase):
                     candidates_out_path=candidates,
                     checkpoint_blob_path=checkpoint,
                 )
+            # A path/model override cannot bypass the configured cache identity.
+            with self.assertRaisesRegex(DataContractError, "configured model identity"):
+                generate_candidates(
+                    layout,
+                    self.config,
+                    execution_mode="live",
+                    sentences_path=sentences,
+                    checkpoint_manifest_path=checkpoint,
+                    candidates_out_path=candidates,
+                    checkpoint_blob_path=checkpoint,
+                    base_model=str(layout.source_root / "outside-model"),
+                )
+            shadow = layout.source_root / self.config.value["training"]["base_model"]
+            shadow.mkdir(parents=True)
+            with self.assertRaisesRegex(DataContractError, "not a local or traversal path"):
+                generate_candidates(
+                    layout,
+                    self.config,
+                    execution_mode="live",
+                    sentences_path=sentences,
+                    checkpoint_manifest_path=checkpoint,
+                    candidates_out_path=candidates,
+                    checkpoint_blob_path=checkpoint,
+                    base_model=self.config.value["training"]["base_model"],
+                )
 
     def test_replay_refuses_to_overwrite_existing_candidates(self):
         with _temporary_output_directory() as temporary:
