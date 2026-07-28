@@ -89,7 +89,7 @@ Each new full run still blocks final-test inference and full Qwen execution
 until its newly captured B-07 evidence passes. Invocation authorization is
 implicit; a failed or absent pilot audit cannot be bypassed.
 
-[`Phase C migration plan`](phase_c_migration.md) records the raw/typed design
+The [`typed-strict migration plan`](migration.md) records the Phase B raw/typed design
 lineage and its remaining execution gates. B-05C approves the compatibility
 trainer implementation; it does not waive the B-07 gate for the full eight-seed
 run, final-test access, live verifier calls, or reporting a result.

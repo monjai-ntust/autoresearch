@@ -1,6 +1,10 @@
-# Phase C migration plan: integrity gate to typed strict-view preparation
+# Migration plan: integrity gate to typed strict-view preparation
 
 ## Status and authority
+
+Legacy revision keys `C-MIGRATION-*` predate the repository's current Phase C
+task numbering. They remain unchanged solely as immutable historical identifiers
+and do not denote the current Phase C RAG work.
 
 This is a migration design and maintenance record. B-05U materialization of the
 raw-provenance/typed-strict dual view is approved; it does not authorize
@@ -65,7 +69,7 @@ historical measurements to preserve a preferred result.
 
 ## Reuse and adjustment map
 
-| Current code or data path | Phase C disposition | Required adjustment or constraint |
+| Current code or data path | Disposition | Required adjustment or constraint |
 |---|---|---|
 | `acquisition.py` | Reuse | Preserve resumable download, safe selective extraction, and exact immutable checks. Any upstream-byte change creates a new dataset identity and requires plan revision. |
 | `config.py`, `constants.py`, `phase_b_io.py`, and `paths.py` | Reuse | Add versioned dual-view identities and manifests without weakening path containment or output-root rules. |
@@ -185,7 +189,7 @@ needed, and approval status. Do not silently update protocol/config identities.
 
 | Date | Revision | Evidence and effect |
 |---|---|---|
-| 2026-07-17 | C-MIGRATION-1.0 | Established the design-only migration from the approved integrity hard stop to the proposed raw/typed-strict dual view; classified canonical and historical reuse boundaries and froze revision triggers. No Phase C materialization or result execution was authorized. |
+| 2026-07-17 | C-MIGRATION-1.0 | Established the design-only migration from the approved integrity hard stop to the proposed raw/typed-strict dual view; classified canonical and historical reuse boundaries and froze revision triggers. No materialization or result execution was authorized. |
 | 2026-07-17 | C-MIGRATION-1.1 | Clarified that historical commands are secondary interfaces and their draft Section 5 data/ledgers are secondary evidence that must be reconciled first; newly added measurements remain bound to the canonical framework. Migration steps and scientific gates are unchanged. |
 | 2026-07-17 | C-MIGRATION-1.2 | Bound the standalone ledgers to a deterministic reconciliation audit and recorded their structural defects and coverage gaps. Migration step 6 now requires separately hashed evidence bundles for final results absent from the ledgers before claim-bearing adapters can be selected. The current canonical preparation hard stop and execution authority are unchanged. |
 | 2026-07-17 | C-MIGRATION-1.3 | Materialized the B-06 `CODE-VERIFIER-1` prompt/schema and dry-run/live/replay boundary. The historical SciERC verifier is now explicitly provenance-only because its ontology, parser, and output contract cannot preserve the approved CODE evaluation semantics; canonical training/inference migration remains adapter-based and gated. |

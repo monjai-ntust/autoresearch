@@ -78,7 +78,7 @@ read that archive or retain the generated TSVs. The register preserves their
 verified pre-removal facts and reports zero claim families as canonical-ready;
 it neither promotes archived evidence nor authorizes final-test access.
 
-[`docs/phase_c_migration.md`](docs/phase_c_migration.md) records the raw/strict
+[`docs/migration.md`](docs/migration.md) records the Phase B raw/strict
 design lineage, frozen assumptions, and evidence conditions that require a
 revision. The first full eight-seed run passed B-07 and completed final
 inference, both verifier modes, and scoring. Final-test tuning remains
@@ -93,7 +93,7 @@ edit that changes the comparison or a path's role.
 
 ## Dataset-neutral generated-graph RAG evaluation
 
-`graph_rag.py` is the separate B-09I evaluation entry point. It does not import
+`graph_rag.py` is the separate C-01I evaluation entry point. It does not import
 or modify the historical `provenance/eval_graph_rag.py` harness. The reusable
 `graph_rag_eval/` package defines immutable canonical records, configuration-
 selected dataset adapters and generators, content-addressed graph/index
@@ -148,7 +148,7 @@ uv run python graph_rag.py evaluate --config configs/phase_b_graph_rag_code_acco
 ```
 
 The tracked checkout contains only the entity training CSV, not the complete
-gold graph inputs. More importantly, the approved B-09I constraint says no
+gold graph inputs. More importantly, the approved C-01I constraint says no
 domain expert is available to independently author and review Regime Q
 questions or acceptable evidence. The CODE-ACCORD configuration therefore
 fails closed: readiness/preparation may retain canonical partial-input evidence,
