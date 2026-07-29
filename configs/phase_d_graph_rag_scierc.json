@@ -1,0 +1,156 @@
+{
+  "schema_version": "rag-run-config-1.0",
+  "run_id": "d-scierc-dataset-specific-readiness",
+  "experiment_group_id": "phase-d-scierc-supervised-portability",
+  "checkpoint": {
+    "schema_version": "rag-checkpoint-manifest-1.0",
+    "strategy": "dataset-specific",
+    "status": "blocked",
+    "checkpoint_id": "UNRESOLVED",
+    "checkpoint_sha256": null,
+    "architecture": "BertKGExtractor with SciERC-specific NER and relation heads",
+    "base_model": {
+      "model_id": "allenai/scibert_scivocab_uncased",
+      "revision": "24f92d32b1bfb0bcaf9ab193ff3ad01e87732fc1"
+    },
+    "tokenizer": {
+      "tokenizer_id": "allenai/scibert_scivocab_uncased",
+      "revision": "24f92d32b1bfb0bcaf9ab193ff3ad01e87732fc1"
+    },
+    "training": {
+      "dataset_id": "scierc-official-processed-pinned",
+      "split_id": "official-350-train-50-development-100-test",
+      "recipe_id": "AWAITING-USER-APPROVAL",
+      "seed": null,
+      "selection_metric": "development-end-to-end-typed-relation-f1"
+    },
+    "label_vocabulary": {
+      "entity_types": [
+        "Task",
+        "Method",
+        "Metric",
+        "Material",
+        "OtherScientificTerm",
+        "Generic"
+      ],
+      "relation_types": [
+        "USED-FOR",
+        "FEATURE-OF",
+        "HYPONYM-OF",
+        "EVALUATE-FOR",
+        "PART-OF",
+        "COMPARE",
+        "CONJUNCTION"
+      ]
+    },
+    "blocked_reasons": [
+      "No retained SciERC result-producing checkpoint exists.",
+      "The training/selection protocol and meaningful compute cost are not approved.",
+      "No trained SciERC checkpoint file or checkpoint SHA-256 exists."
+    ]
+  },
+  "adapter": {
+    "import_path": "graph_rag_eval.adapters.scierc:SciERCAdapter",
+    "adapter_id": "scierc-native-extraction",
+    "adapter_version": "1.0.0",
+    "options": {
+      "run_root": "${RUN_ROOT}",
+      "data_root": "inputs/scierc",
+      "prediction_ledger": "inputs/scierc-predictions.jsonl",
+      "dataset_id": "scierc"
+    }
+  },
+  "protocol": {
+    "protocol_id": "PHASE-D-SCIERC-EXTRACTION-READINESS-1.0",
+    "evaluation_scope": "intrinsic_graph_only",
+    "extraction_publication_claim_allowed": false,
+    "regimes": [],
+    "question_query_fields": [
+      "text",
+      "public_metadata"
+    ],
+    "forbidden_query_fields": [
+      "answers",
+      "answer_aliases",
+      "gold_relation",
+      "gold_triple",
+      "gold_path",
+      "evidence_ids",
+      "source_ids",
+      "condition"
+    ],
+    "required_capabilities": [
+      "documents",
+      "document_clusters",
+      "gold_entities",
+      "gold_relations",
+      "gold_triples",
+      "predicted_graph",
+      "source_spans"
+    ],
+    "regime_q": {
+      "required": false,
+      "synthetic_fixture_only": false,
+      "independent_author_available": false,
+      "independent_reviewer_available": false,
+      "publication_claim_allowed": false,
+      "blocked_reason": "SciERC has no native independent questions, answers, or evidence judgments; downstream QA is out of scope."
+    }
+  },
+  "retrieval": {
+    "conditions": [
+      "generated_graph",
+      "gold_graph_oracle"
+    ],
+    "budget": {
+      "max_items": 1,
+      "max_tokens": 1,
+      "tokenizer_id": "not-applicable-intrinsic-extraction-only"
+    },
+    "bm25": {
+      "package": "bm25s==0.3.9",
+      "k1": 1.2,
+      "b": 0.75,
+      "method": "lucene",
+      "idf_method": "lucene",
+      "token_pattern": "(?u)\\b\\w+\\b"
+    },
+    "graph": {
+      "max_hops": 1,
+      "question_only_linking": true,
+      "gold_repair": false
+    },
+    "corruption": {
+      "seed": 42,
+      "severity": 0.0
+    },
+    "random_seed": 42
+  },
+  "generator": {
+    "import_path": "graph_rag_eval.evaluation.generation:RuleBasedEvidenceGenerator",
+    "generator_id": "not-applicable-intrinsic-extraction-only",
+    "model_id": "not-applicable",
+    "revision": "contract:intrinsic-extraction-only-v1",
+    "prompt_id": "not-applicable",
+    "options": {
+      "model_id": "not-applicable",
+      "revision": "contract:intrinsic-extraction-only-v1",
+      "rules": []
+    },
+    "decoding": {
+      "temperature": 0.0,
+      "seed": 42,
+      "max_output_tokens": 1
+    },
+    "judge_required": false,
+    "human_calibration_set": null
+  },
+  "statistics": {
+    "bootstrap_resamples": 10000,
+    "seed": 42,
+    "confidence": 0.95,
+    "cluster_unit": "abstract",
+    "minimum_effect": null,
+    "comparison_family": []
+  }
+}
