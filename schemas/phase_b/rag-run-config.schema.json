@@ -16,6 +16,8 @@
   "properties": {
     "schema_version": {"const": "rag-run-config-1.0"},
     "run_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+    "experiment_group_id": {"type": "string", "minLength": 1},
+    "checkpoint": {"type": "object"},
     "adapter": {
       "type": "object",
       "required": ["import_path", "adapter_id", "adapter_version", "options"]
@@ -29,7 +31,13 @@
         "forbidden_query_fields",
         "required_capabilities",
         "regime_q"
-      ]
+      ],
+      "properties": {
+        "evaluation_scope": {
+          "enum": ["graph_rag_qa", "intrinsic_graph_only"]
+        },
+        "extraction_publication_claim_allowed": {"type": "boolean"}
+      }
     },
     "retrieval": {
       "type": "object",

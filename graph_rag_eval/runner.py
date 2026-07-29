@@ -22,6 +22,7 @@ from graph_rag_eval.contracts import (
     content_sha256,
 )
 from graph_rag_eval.evaluation.coupled import coupled_metrics
+from graph_rag_eval.evaluation.extraction import evaluate_extraction
 from graph_rag_eval.evaluation.generation import answer_metrics, support_metrics
 from graph_rag_eval.evaluation.intrinsic import evaluate_intrinsic
 from graph_rag_eval.evaluation.retrieval import retrieval_metrics
@@ -44,7 +45,12 @@ from graph_rag_eval.graphs.snapshots import (
     build_snapshot,
     structure_summary,
 )
-from graph_rag_eval.identity import fingerprint
+from graph_rag_eval.identity import (
+    file_sha256,
+    fingerprint,
+    source_surface_manifest,
+    source_surface_sha256,
+)
 from graph_rag_eval.registry import load_adapter, load_generator
 from graph_rag_eval.retrieval.base import (
     EvidenceItem,
@@ -66,6 +72,10 @@ from graph_rag_eval.trace import (
 
 class ConfigError(ValueError):
     pass
+
+
+class RunIdentityError(ValueError):
+    """Raised before writes when an occupied run cannot be safely resumed."""
 
 
 class LeakageError(ValueError):
@@ -110,6 +120,11 @@ def _load_config(path: Path) -> dict[str, Any]:
         if key not in adapter:
             raise ConfigError(f"adapter config is missing {key}")
     protocol = data["protocol"]
+    if protocol.get("evaluation_scope", "graph_rag_qa") not in {
+        "graph_rag_qa",
+        "intrinsic_graph_only",
+    }:
+        raise ConfigError("unsupported evaluation_scope")
     if protocol.get("question_query_fields") != ["text", "public_metadata"]:
         raise ConfigError("question query projection must be exactly text + public_metadata")
     forbidden = set(protocol.get("forbidden_query_fields", []))
@@ -136,6 +151,18 @@ def _load_config(path: Path) -> dict[str, Any]:
     return data
 
 
+def _runtime_options(value: Any, run_root: Path) -> Any:
+    """Resolve the one generic run-root token without mutating stored config."""
+
+    if value == "${RUN_ROOT}":
+        return str(run_root)
+    if isinstance(value, dict):
+        return {key: _runtime_options(item, run_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_runtime_options(item, run_root) for item in value]
+    return value
+
+
 def create_context(
     config_path: str | Path,
     *,
@@ -153,8 +180,31 @@ def create_context(
         (root / "schemas/phase_b/rag-run-config.schema.json").read_text(encoding="utf-8")
     )
     validate_schema(config, run_schema)
+    checkpoint = config.get("checkpoint")
+    if checkpoint is not None:
+        checkpoint_schema = json.loads(
+            (
+                root
+                / "schemas"
+                / "phase_b"
+                / "rag-checkpoint-manifest.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        validate_schema(checkpoint, checkpoint_schema)
+        if checkpoint["status"] == "ready":
+            if checkpoint["checkpoint_sha256"] is None:
+                raise ConfigError("ready checkpoint requires an exact SHA-256")
+            if checkpoint["blocked_reasons"]:
+                raise ConfigError("ready checkpoint cannot retain blocked reasons")
+        elif not checkpoint["blocked_reasons"]:
+            raise ConfigError("blocked checkpoint requires at least one reason")
     selected_run_id = run_id or config["run_id"]
-    adapter = load_adapter(config["adapter"]["import_path"], config["adapter"].get("options"))
+    run_root = confined_path(root, selected_run_id)
+    adapter_options = _runtime_options(
+        config["adapter"].get("options", {}),
+        run_root,
+    )
+    adapter = load_adapter(config["adapter"]["import_path"], adapter_options)
     if adapter.adapter_id != config["adapter"]["adapter_id"]:
         raise ConfigError("loaded adapter ID does not match config")
     if adapter.adapter_version != config["adapter"]["adapter_version"]:
@@ -164,9 +214,119 @@ def create_context(
         config_path=path,
         config=config,
         run_id=selected_run_id,
-        run_root=confined_path(root, selected_run_id),
+        run_root=run_root,
         adapter=adapter,
     )
+
+
+def _rag_schema_manifest(source_root: Path) -> list[dict[str, Any]]:
+    schema_root = source_root / "schemas" / "phase_b"
+    return [
+        {
+            "path": path.relative_to(source_root).as_posix(),
+            "bytes": path.stat().st_size,
+            "sha256": file_sha256(path),
+        }
+        for path in sorted(schema_root.glob("rag-*.schema.json"))
+    ]
+
+
+def _expected_run_identity(context: RunnerContext) -> dict[str, Any]:
+    schemas = _rag_schema_manifest(context.source_root)
+    checkpoint = context.config.get("checkpoint")
+    return {
+        "schema_version": "rag-run-identity-1.0",
+        "run_id": context.run_id,
+        "experiment_group_id": context.config.get("experiment_group_id"),
+        "config_sha256": content_sha256(context.config),
+        "adapter": {
+            "adapter_id": context.config["adapter"]["adapter_id"],
+            "adapter_version": context.config["adapter"]["adapter_version"],
+            "import_path": context.config["adapter"]["import_path"],
+            "options_sha256": content_sha256(
+                context.config["adapter"].get("options", {})
+            ),
+        },
+        "checkpoint_sha256": (
+            content_sha256(checkpoint) if checkpoint is not None else None
+        ),
+        "source_surface_sha256": source_surface_sha256(context.source_root),
+        "source_surface": list(source_surface_manifest(context.source_root)),
+        "schema_set_sha256": content_sha256(schemas),
+        "schemas": schemas,
+    }
+
+
+def _bind_run_identity(context: RunnerContext) -> dict[str, Any]:
+    """Claim a new run ID or verify an exact matching staged resume."""
+
+    expected = _expected_run_identity(context)
+    namespace_root = context.run_root.parent
+    identity_path = context.run_root / "manifests" / "run-identity.json"
+    if not context.run_root.exists():
+        if namespace_root.exists():
+            raise RunIdentityError(
+                f"run ID is already occupied outside the Graph RAG contract: "
+                f"{context.run_id}"
+            )
+        context.run_root.mkdir(parents=True, exist_ok=False)
+        artifact = write_json(
+            context.run_root,
+            "manifests/run-identity.json",
+            expected,
+        )
+        return artifact
+    if not context.run_root.is_dir() or not identity_path.is_file():
+        raise RunIdentityError(
+            f"occupied run has no Graph RAG identity manifest: {context.run_id}"
+        )
+    try:
+        observed = json.loads(identity_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RunIdentityError(
+            f"run identity manifest is unreadable: {context.run_id}"
+        ) from error
+    identity_schema = json.loads(
+        (
+            context.source_root
+            / "schemas"
+            / "phase_b"
+            / "rag-run-identity.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    try:
+        validate_schema(observed, identity_schema)
+    except (OSError, ValueError) as error:
+        raise RunIdentityError(
+            f"run identity manifest is invalid: {context.run_id}"
+        ) from error
+    if canonical_json(observed) != canonical_json(expected):
+        raise RunIdentityError(
+            f"run identity mismatch; choose a new run ID: {context.run_id}"
+        )
+    return {
+        "path": "manifests/run-identity.json",
+        "bytes": identity_path.stat().st_size,
+        "sha256": file_sha256(identity_path),
+    }
+
+
+def _assert_existing_json_matches(
+    path: Path,
+    expected: Any,
+    *,
+    label: str,
+) -> None:
+    if not path.exists():
+        return
+    try:
+        observed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RunIdentityError(f"existing {label} manifest is unreadable") from error
+    if canonical_json(observed) != canonical_json(expected):
+        raise RunIdentityError(
+            f"existing {label} identity does not match the resumed run"
+        )
 
 
 def _environment_manifest(context: RunnerContext) -> dict[str, Any]:
@@ -233,16 +393,26 @@ def _scientific_gates(context: RunnerContext, report) -> list[dict[str, Any]]:
                 "reason": "model-based judging is disabled without frozen human calibration",
             }
         )
+    checkpoint = context.config.get("checkpoint")
+    if checkpoint is not None and checkpoint.get("status") != "ready":
+        gates.append(
+            {
+                "code": "checkpoint-not-ready",
+                "status": "blocked",
+                "reason": "; ".join(checkpoint.get("blocked_reasons", ()))
+                or "checkpoint identity is not ready for scientific execution",
+            }
+        )
     return gates
 
 
 def doctor(context: RunnerContext) -> dict[str, Any]:
+    identity_artifact = _bind_run_identity(context)
     report = context.adapter.validate()
     gates = _scientific_gates(context, report)
     blocked = [item for item in gates if item["status"] == "blocked"]
-    context.run_root.mkdir(parents=True, exist_ok=True)
     config_hash = content_sha256(context.config)
-    artifacts = []
+    artifacts = [identity_artifact]
     artifacts.append(write_json(context.run_root, "manifests/environment.json", _environment_manifest(context)))
     artifacts.append(
         write_json(
@@ -255,6 +425,24 @@ def doctor(context: RunnerContext) -> dict[str, Any]:
             },
         )
     )
+    checkpoint = context.config.get("checkpoint")
+    if checkpoint is not None:
+        checkpoint_schema = json.loads(
+            (
+                context.source_root
+                / "schemas"
+                / "phase_b"
+                / "rag-checkpoint-manifest.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        validate_schema(checkpoint, checkpoint_schema)
+        artifacts.append(
+            write_json(
+                context.run_root,
+                "manifests/checkpoint.json",
+                checkpoint,
+            )
+        )
     result = {
         "schema_version": "rag-run-manifest-1.0",
         "run_id": context.run_id,
@@ -324,7 +512,10 @@ def _build_graphs(context: RunnerContext, bundle: CanonicalBundle) -> dict[str, 
         "gold_graph_oracle": gold,
         "generated_graph": generated,
     }
-    if generated.triples:
+    if (
+        generated.triples
+        and "corruptions" in context.config["retrieval"].get("conditions", ())
+    ):
         corruption = context.config["retrieval"].get("corruption", {})
         seed = int(corruption.get("seed", 42))
         severity = float(corruption.get("severity", 0.5))
@@ -363,6 +554,11 @@ def prepare(context: RunnerContext) -> dict[str, Any]:
     if not report.ready:
         return doctor_result
     bundle = context.adapter.load()
+    _assert_existing_json_matches(
+        context.run_root / "manifests" / "dataset.json",
+        bundle.descriptor,
+        label="dataset",
+    )
     graphs = _build_graphs(context, bundle)
     dataset_schema = json.loads(
         (context.source_root / "schemas/phase_b/rag-dataset-descriptor.schema.json").read_text(
@@ -671,6 +867,151 @@ def _figure_svg(aggregate: list[dict[str, Any]]) -> str:
     return "\n".join(elements) + "\n"
 
 
+def _graph_metric_rows(
+    context: RunnerContext,
+    bundle: CanonicalBundle,
+    graphs: dict[str, GraphSnapshot],
+    *,
+    include_extraction: bool,
+) -> list[dict[str, Any]]:
+    rows = []
+    for label, snapshot in sorted(graphs.items()):
+        if label == "gold_graph_oracle":
+            continue
+        intrinsic = evaluate_intrinsic(
+            snapshot,
+            graphs["gold_graph_oracle"],
+            capabilities=bundle.descriptor.capabilities,
+        )
+        rows.append(
+            {
+                "schema_version": "rag-metrics-1.0",
+                "run_id": context.run_id,
+                "dataset_id": bundle.descriptor.dataset_id,
+                "condition": label,
+                "metric": "intrinsic_graph",
+                "value": canonical_data(intrinsic),
+                "status": getattr(intrinsic, "status", "available"),
+            }
+        )
+    if include_extraction:
+        rows.append(
+            {
+                "schema_version": "rag-metrics-1.0",
+                "run_id": context.run_id,
+                "dataset_id": bundle.descriptor.dataset_id,
+                "condition": "generated_graph",
+                "metric": "exact_extraction",
+                "value": evaluate_extraction(
+                    graphs["generated_graph"],
+                    graphs["gold_graph_oracle"],
+                ),
+                "status": "available",
+            }
+        )
+    rows.extend(
+        {
+            "schema_version": "rag-metrics-1.0",
+            "run_id": context.run_id,
+            "dataset_id": bundle.descriptor.dataset_id,
+            "condition": label,
+            "metric": "graph_structure",
+            "value": structure_summary(snapshot),
+            "status": "available",
+        }
+        for label, snapshot in sorted(graphs.items())
+    )
+    return rows
+
+
+def _extraction_table(extraction: dict[str, Any]) -> str:
+    rows = [
+        "task\tlabel\ttrue_positive\tfalse_positive\tfalse_negative"
+        "\tsupport\tprecision\trecall\tf1"
+    ]
+    for task in ("entity", "end_to_end_relation"):
+        values = extraction[task]
+        labeled_counts = [("micro", values["micro"])]
+        labeled_counts.extend(values["per_label"].items())
+        for label, counts in labeled_counts:
+            rows.append(
+                "\t".join(
+                    [
+                        task,
+                        label,
+                        str(counts["true_positive"]),
+                        str(counts["false_positive"]),
+                        str(counts["false_negative"]),
+                        str(counts["support"]),
+                        "" if counts["precision"] is None else f"{counts['precision']:.12g}",
+                        "" if counts["recall"] is None else f"{counts['recall']:.12g}",
+                        "" if counts["f1"] is None else f"{counts['f1']:.12g}",
+                    ]
+                )
+            )
+    return "\n".join(rows) + "\n"
+
+
+def _evaluate_intrinsic_only(
+    context: RunnerContext,
+    bundle: CanonicalBundle,
+    graphs: dict[str, GraphSnapshot],
+    *,
+    smoke: bool,
+) -> dict[str, Any]:
+    metric_rows = _graph_metric_rows(
+        context,
+        bundle,
+        graphs,
+        include_extraction=True,
+    )
+    metric_schema = json.loads(
+        (context.source_root / "schemas/phase_b/rag-metrics.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for row in metric_rows:
+        validate_schema(row, metric_schema)
+    extraction = next(
+        row["value"] for row in metric_rows if row["metric"] == "exact_extraction"
+    )
+    write_json(context.run_root, "manifests/index.json", {})
+    write_jsonl(context.run_root, "traces/retrieval.jsonl", ())
+    write_jsonl(context.run_root, "traces/generation.jsonl", ())
+    write_jsonl(context.run_root, "traces/failures.jsonl", ())
+    write_jsonl(context.run_root, "metrics/per-question.jsonl", ())
+    write_jsonl(context.run_root, "metrics/per-document.jsonl", ())
+    write_jsonl(context.run_root, "metrics/per-seed.jsonl", ())
+    write_jsonl(context.run_root, "metrics/aggregate.jsonl", metric_rows)
+    write_jsonl(context.run_root, "metrics/comparisons.jsonl", ())
+    write_text(
+        context.run_root,
+        "tables/extraction-results.tsv",
+        _extraction_table(extraction),
+    )
+    result = {
+        "schema_version": "rag-run-manifest-1.0",
+        "run_id": context.run_id,
+        "stage": "evaluate",
+        "status": "intrinsic_evaluation_complete",
+        "smoke": smoke,
+        "dataset_id": bundle.descriptor.dataset_id,
+        "evaluation_scope": "intrinsic_graph_only",
+        "scientific_claims_enabled": (
+            not smoke
+            and bool(
+                context.config["protocol"].get(
+                    "extraction_publication_claim_allowed",
+                    False,
+                )
+            )
+        ),
+    }
+    write_json(context.run_root, "manifests/run.json", result)
+    write_jsonl(context.run_root, "logs/evaluate.jsonl", (result,))
+    return result
+
+
 def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
     prepare_result = prepare(context)
     blocked = [
@@ -730,6 +1071,16 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
 
     bundle = context.adapter.load()
     graphs = _build_graphs(context, bundle)
+    if (
+        context.config["protocol"].get("evaluation_scope", "graph_rag_qa")
+        == "intrinsic_graph_only"
+    ):
+        return _evaluate_intrinsic_only(
+            context,
+            bundle,
+            graphs,
+            smoke=smoke,
+        )
     retrievers = _retrievers(context, bundle, graphs)
     budget_config = context.config["retrieval"]["budget"]
     budget = Budget(
@@ -852,37 +1203,11 @@ def evaluate(context: RunnerContext, *, smoke: bool = False) -> dict[str, Any]:
     # Every non-oracle graph condition is scored intrinsically so a corruption's
     # retrieval effect can be read against its measured graph quality instead of
     # only against its recipe.
-    intrinsic_rows = []
-    for label, snapshot in sorted(graphs.items()):
-        if label == "gold_graph_oracle":
-            continue
-        intrinsic = evaluate_intrinsic(
-            snapshot,
-            graphs["gold_graph_oracle"],
-            capabilities=bundle.descriptor.capabilities,
-        )
-        intrinsic_rows.append(
-            {
-                "schema_version": "rag-metrics-1.0",
-                "run_id": context.run_id,
-                "dataset_id": bundle.descriptor.dataset_id,
-                "condition": label,
-                "metric": "intrinsic_graph",
-                "value": canonical_data(intrinsic),
-                "status": getattr(intrinsic, "status", "available"),
-            }
-        )
-    intrinsic_rows.extend(
-        {
-            "schema_version": "rag-metrics-1.0",
-            "run_id": context.run_id,
-            "dataset_id": bundle.descriptor.dataset_id,
-            "condition": label,
-            "metric": "graph_structure",
-            "value": structure_summary(snapshot),
-            "status": "available",
-        }
-        for label, snapshot in sorted(graphs.items())
+    intrinsic_rows = _graph_metric_rows(
+        context,
+        bundle,
+        graphs,
+        include_extraction=False,
     )
     aggregate = _aggregate(metric_rows)
     per_document = []

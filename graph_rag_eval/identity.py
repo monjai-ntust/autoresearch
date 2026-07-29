@@ -42,6 +42,40 @@ def tree_sha256(root: Path) -> str:
     return fingerprint("tree-v1", tree_manifest(root))
 
 
+def source_surface_manifest(source_root: Path) -> tuple[dict[str, Any], ...]:
+    """Hash the standalone code/schema surface that governs a Graph RAG run.
+
+    The manifest intentionally excludes configurations (bound separately) and
+    every generated/cache path. It does not depend on Git metadata, so it works
+    in the clean standalone-copy validation lane.
+    """
+
+    root = source_root.resolve()
+    candidates = [root / "graph_rag.py"]
+    candidates.extend(
+        path
+        for path in (root / "graph_rag_eval").rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    candidates.extend((root / "schemas" / "phase_b").glob("rag-*.schema.json"))
+    rows = []
+    for path in sorted(candidates, key=lambda item: item.relative_to(root).as_posix()):
+        if not path.is_file():
+            continue
+        rows.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "bytes": path.stat().st_size,
+                "sha256": file_sha256(path),
+            }
+        )
+    return tuple(rows)
+
+
+def source_surface_sha256(source_root: Path) -> str:
+    return fingerprint("graph-rag-source-surface-v1", source_surface_manifest(source_root))
+
+
 def verify_cache(cache_dir: Path, expected_fingerprint: str) -> bool:
     manifest = cache_dir / "manifest.json"
     if not manifest.is_file():

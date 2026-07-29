@@ -75,13 +75,18 @@ def match_graphs(
     gold_relation_keys = {relation_key(item) for item in gold.relations}
 
     def triple_key(triple, entities, relations):
+        relation = relations[triple.relation_id]
         if relaxed:
-            return (
-                entity_key(entities[triple.head_id]),
-                relation_key(relations[triple.relation_id]),
-                entity_key(entities[triple.tail_id]),
-            )
-        return (triple.head_id, triple.relation_id, triple.tail_id)
+            head = entity_key(entities[triple.head_id])
+            tail = entity_key(entities[triple.tail_id])
+            relation_value = relation_key(relation)
+        else:
+            head = triple.head_id
+            tail = triple.tail_id
+            relation_value = triple.relation_id
+        if relation.direction == "undirected" and repr(tail) < repr(head):
+            head, tail = tail, head
+        return (head, relation_value, tail)
 
     predicted_relations = {item.relation_id: item for item in predicted.relations}
     gold_relations = {item.relation_id: item for item in gold.relations}

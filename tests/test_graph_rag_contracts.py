@@ -45,13 +45,16 @@ class GraphRagContractTests(unittest.TestCase):
             & field_names
         )
 
-    def test_all_eight_graph_rag_schemas_parse_and_are_versioned(self):
+    def test_all_graph_rag_schemas_parse_and_are_versioned(self):
         names = (
+            "rag-checkpoint-manifest.schema.json",
             "rag-dataset-descriptor.schema.json",
             "rag-canonical-record.schema.json",
+            "rag-extraction-prediction.schema.json",
             "rag-graph-snapshot.schema.json",
             "rag-question-set.schema.json",
             "rag-run-config.schema.json",
+            "rag-run-identity.schema.json",
             "rag-retrieval-trace.schema.json",
             "rag-generation-trace.schema.json",
             "rag-metrics.schema.json",

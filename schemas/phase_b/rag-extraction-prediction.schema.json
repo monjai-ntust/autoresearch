@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-extraction-prediction.schema.json",
+  "title": "Native mention/relation extraction prediction record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type"],
+  "properties": {
+    "schema_version": {"const": "rag-extraction-prediction-1.0"},
+    "record_type": {"enum": ["entity", "relation"]},
+    "doc_key": {"type": "string", "minLength": 1},
+    "sentence_index": {"type": "integer", "minimum": 0},
+    "start": {"type": "integer", "minimum": 0},
+    "end": {"type": "integer", "minimum": 0},
+    "entity_type": {"type": "string", "minLength": 1},
+    "head": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "entity_type"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0},
+        "entity_type": {"type": "string", "minLength": 1}
+      }
+    },
+    "tail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "entity_type"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0},
+        "entity_type": {"type": "string", "minLength": 1}
+      }
+    },
+    "relation_type": {"type": "string", "minLength": 1},
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0
+    }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "doc_key",
+        "start",
+        "end",
+        "entity_type",
+        "confidence"
+      ]
+    },
+    {
+      "required": [
+        "doc_key",
+        "sentence_index",
+        "head",
+        "tail",
+        "relation_type",
+        "confidence"
+      ]
+    }
+  ]
+}

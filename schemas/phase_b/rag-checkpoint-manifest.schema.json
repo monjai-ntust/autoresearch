@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-checkpoint-manifest.schema.json",
+  "title": "Graph extraction checkpoint identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "strategy",
+    "status",
+    "checkpoint_id",
+    "checkpoint_sha256",
+    "architecture",
+    "base_model",
+    "tokenizer",
+    "training",
+    "label_vocabulary",
+    "blocked_reasons"
+  ],
+  "properties": {
+    "schema_version": {"const": "rag-checkpoint-manifest-1.0"},
+    "strategy": {
+      "enum": [
+        "reuse-code-accord",
+        "dataset-specific",
+        "reuse-plus-specific",
+        "exclude-or-block"
+      ]
+    },
+    "status": {"enum": ["ready", "blocked"]},
+    "checkpoint_id": {"type": "string", "minLength": 1},
+    "checkpoint_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "architecture": {"type": "string", "minLength": 1},
+    "base_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "revision"],
+      "properties": {
+        "model_id": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1}
+      }
+    },
+    "tokenizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokenizer_id", "revision"],
+      "properties": {
+        "tokenizer_id": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1}
+      }
+    },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "split_id",
+        "recipe_id",
+        "seed",
+        "selection_metric"
+      ],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "split_id": {"type": "string", "minLength": 1},
+        "recipe_id": {"type": "string", "minLength": 1},
+        "seed": {"type": ["integer", "null"]},
+        "selection_metric": {"type": "string", "minLength": 1}
+      }
+    },
+    "label_vocabulary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity_types", "relation_types"],
+      "properties": {
+        "entity_types": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "relation_types": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "blocked_reasons": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}
