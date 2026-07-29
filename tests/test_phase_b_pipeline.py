@@ -187,7 +187,6 @@ class ConfigContractTests(unittest.TestCase):
             "schemas/phase_b/input-acquisition-manifest.schema.json",
             "schemas/phase_b/data-preparation-manifest.schema.json",
             "schemas/phase_b/gold-alignment-audit.schema.json",
-            "schemas/phase_b/huggingface-cache.schema.json",
             "schemas/phase_b/prepared-sentence.schema.json",
             "schemas/phase_b/section5-evidence-register.schema.json",
             "schemas/phase_b/section5-evidence-reconciliation.schema.json",

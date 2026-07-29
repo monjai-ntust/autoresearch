@@ -186,10 +186,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     generate.add_argument(
         "--base-model",
-        help=(
-            "Compatibility alias for the frozen recipe base model; any different "
-            "identifier or path is rejected"
-        ),
+        help="Base model id or path for live execution (default: frozen recipe base model)",
     )
     generate.add_argument(
         "--device", help="Torch device for live execution (default: cuda if available else cpu)"
