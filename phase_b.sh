@@ -69,7 +69,8 @@ no verified local run cache exists.
 Stages:
   available          parser-check every command and run every available stage (default)
   smoke              non-publication one-candidate real GPU/Ollama end-to-end smoke
-  full               resumable eight-seed, B-07 pilot, test, live-verifier, score run
+  full               resumable Phase B run through score, then C-04 Graph RAG
+  graph-rag          recovery-only Regime-D diagnostic for an already scored full run
   publishable        run the canonical chain until its first publication gate
   bootstrap          doctor -> reconcile -> fetch -> prepare only
   plan               record the implemented seed-specific model-train dry-run
@@ -120,6 +121,7 @@ Examples:
     --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
     --checkpoint-blob checkpoints/seed-42/checkpoint.pt
   ./phase_b.sh --stage full
+  ./phase_b.sh --run-id path-a-full-20260719T153901Z --stage graph-rag
 
 The train-live stage is the canonical checkpoint producer. It consumes only
 the run-local prepared train/development split, writes a full restart state,
@@ -196,6 +198,10 @@ fi
 
 cd "$SOURCE_ROOT"
 readonly RUN_ROOT="output/$RUN_ID"
+if [[ "$STAGE" == "graph-rag" ]]; then
+  ACTIVE_STAGE_ID="graph-rag-diagnostic"
+  ACTIVE_RECOVERY_MODE="resume-or-fresh-child"
+fi
 
 [[ -n "$(git branch --show-current)" ]] \
   || die "the Phase B launcher requires a checked-out branch with an upstream"
@@ -214,6 +220,12 @@ print_resume_command() {
 record_recovery_event() {
   local status="$1"
   local detail="$2"
+  # C-04 treats the completed Phase B parent as immutable evidence. Its
+  # dedicated runner owns all child trace/completion records, so the launcher
+  # must not append its generic recovery ledger under the Phase B parent.
+  if [[ "$ACTIVE_STAGE_ID" == "graph-rag-diagnostic" ]]; then
+    return 0
+  fi
   mkdir -p -- "$RUN_ROOT/manifests"
   uv run --frozen --no-sync python -B - \
     "$RUN_ROOT/manifests/debug-recovery.jsonl" "$ACTIVE_STAGE_ID" \
@@ -494,6 +506,7 @@ run_command_check() {
   uv run --frozen --no-sync python -B phase_b.py verifier --help >/dev/null
   uv run --frozen --no-sync python -B phase_b.py pilot-verifier --help >/dev/null
   uv run --frozen --no-sync python -B phase_b.py score --help >/dev/null
+  uv run --frozen --no-sync python -B graph_rag.py phase-b-diagnostic --help >/dev/null
   uv run --frozen --no-sync python -B train_span.py --help >/dev/null
   uv run --frozen --no-sync python -B smoke.py --help >/dev/null
   uv run --frozen --no-sync python -B -c \
@@ -606,6 +619,13 @@ score_complete() {
     && [[ -f "$RUN_ROOT/metrics/publication-table.tsv" ]] \
     && [[ -f "$RUN_ROOT/metrics/publication-summary.md" ]] \
     && [[ -f "$RUN_ROOT/manifests/score-manifest.json" ]]
+}
+
+graph_rag_complete() {
+  json_equals "$RUN_ROOT/graph-rag/manifests/complete.json" \
+    status '"diagnostic_complete"' \
+    && json_equals "$RUN_ROOT/graph-rag/manifests/complete.json" \
+      regime '"diagnostic_fact_probe"'
 }
 
 ensure_doctor() {
@@ -1119,6 +1139,19 @@ ensure_score() {
   finish_stage "publication scoring completed"
 }
 
+ensure_graph_rag() {
+  score_complete \
+    || die "graph-rag requires a completed Phase B score stage in this run"
+  local stage_id="graph-rag-diagnostic"
+  begin_stage "$stage_id" "resume-or-fresh-child"
+  note "running Phase B-output Regime-D Graph RAG diagnostic"
+  uv run --frozen --no-sync python -B graph_rag.py phase-b-diagnostic \
+    --config configs/phase_b_graph_rag_diagnostic.json --run-id "$RUN_ID"
+  graph_rag_complete \
+    || die "Graph RAG diagnostic returned without a valid completion manifest"
+  finish_stage "Phase B-output Graph RAG diagnostic completed"
+}
+
 maybe_generate_live() {
   local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
   local checkpoint_blob="${CHECKPOINT_BLOB:-checkpoints/seed-$SEED/checkpoint.pt}"
@@ -1231,6 +1264,14 @@ maybe_score() {
   fi
 }
 
+maybe_graph_rag() {
+  if score_complete; then
+    ensure_graph_rag
+  else
+    blocked "Graph RAG diagnostic needs a completed Phase B score stage"
+  fi
+}
+
 ensure_available() {
   ensure_bootstrap
   ensure_command_check
@@ -1245,6 +1286,7 @@ ensure_available() {
   blocked "verifier live and pilot-live require separately selected/captured inputs; final-test access still requires a passing B-07 pilot audit"
   maybe_pilot_audit
   maybe_score
+  maybe_graph_rag
 }
 
 ensure_publishable() {
@@ -1530,6 +1572,7 @@ ensure_full() {
   done
   MODE="simple"
   ensure_score
+  ensure_graph_rag
 }
 
 ensure_smoke() {
@@ -1648,6 +1691,7 @@ case "$STAGE" in
   pilot-live) ensure_pilot_live ;;
   pilot-audit) ensure_pilot_audit ;;
   score) ensure_score ;;
+  graph-rag) ensure_graph_rag ;;
   publishable) ensure_publishable ;;
   *) die "unknown --stage: $STAGE (run with --help for the supported list)" ;;
 esac

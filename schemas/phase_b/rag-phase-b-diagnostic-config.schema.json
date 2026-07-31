@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-phase-b-diagnostic-config.schema.json",
+  "title": "Phase B output Graph RAG Regime-D diagnostic configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol",
+    "parent",
+    "artifacts",
+    "conditions",
+    "probe",
+    "retrieval",
+    "statistics"
+  ],
+  "properties": {
+    "schema_version": {"const": "rag-phase-b-diagnostic-config-1.0"},
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_id",
+        "evaluation_regime",
+        "evaluation_split_id",
+        "unit",
+        "cluster_unit",
+        "denominator",
+        "failure_policy",
+        "claims_boundary",
+        "regime_q"
+      ],
+      "properties": {
+        "protocol_id": {"const": "C-04-PHASE-B-REGIME-D-1.0"},
+        "evaluation_regime": {"const": "diagnostic_fact_probe"},
+        "evaluation_split_id": {"const": "CODE-SPLIT-1:test"},
+        "unit": {"const": "training_seed_x_gold_strict_triple"},
+        "cluster_unit": {"const": "source_document"},
+        "denominator": {"type": "string", "minLength": 1},
+        "failure_policy": {"type": "string", "minLength": 1},
+        "claims_boundary": {"type": "string", "minLength": 1},
+        "regime_q": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "executed",
+            "independent_author_available",
+            "independent_reviewer_available",
+            "blocked_reason"
+          ],
+          "properties": {
+            "executed": {"const": false},
+            "independent_author_available": {"const": false},
+            "independent_reviewer_available": {"const": false},
+            "blocked_reason": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "parent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase_b_protocol_id",
+        "workflow_id",
+        "matcher_id",
+        "dataset_id",
+        "training_seeds",
+        "required_stage",
+        "nonpublication_smoke_allowed"
+      ],
+      "properties": {
+        "phase_b_protocol_id": {"const": "B04-PATH-A-1.3"},
+        "workflow_id": {"const": "PATH-A-WORKFLOW-1.3"},
+        "matcher_id": {"const": "CODE-STRICT-1"},
+        "dataset_id": {"const": "CODE-ACCORD-v1.0.0"},
+        "training_seeds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer"}
+        },
+        "required_stage": {"const": "scored_full_run"},
+        "nonpublication_smoke_allowed": {"const": false}
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkout_manifest",
+        "full_run_manifest",
+        "preparation_manifest",
+        "score_manifest",
+        "simple_verifier_manifest",
+        "corrective_verifier_manifest",
+        "prepared_test",
+        "private_gold",
+        "split_manifest",
+        "development_gold",
+        "development_candidate_index",
+        "threshold_selection",
+        "candidates",
+        "simple_verdicts",
+        "corrective_verdicts",
+        "candidate_outcomes",
+        "sentence_outcomes",
+        "phase_b_metrics"
+      ],
+      "properties": {
+        "checkout_manifest": {"type": "string", "minLength": 1},
+        "full_run_manifest": {"type": "string", "minLength": 1},
+        "preparation_manifest": {"type": "string", "minLength": 1},
+        "score_manifest": {"type": "string", "minLength": 1},
+        "simple_verifier_manifest": {"type": "string", "minLength": 1},
+        "corrective_verifier_manifest": {"type": "string", "minLength": 1},
+        "prepared_test": {"type": "string", "minLength": 1},
+        "private_gold": {"type": "string", "minLength": 1},
+        "split_manifest": {"type": "string", "minLength": 1},
+        "development_gold": {"type": "string", "minLength": 1},
+        "development_candidate_index": {"type": "string", "minLength": 1},
+        "threshold_selection": {"type": "string", "minLength": 1},
+        "candidates": {"type": "string", "minLength": 1},
+        "simple_verdicts": {"type": "string", "minLength": 1},
+        "corrective_verdicts": {"type": "string", "minLength": 1},
+        "candidate_outcomes": {"type": "string", "minLength": 1},
+        "sentence_outcomes": {"type": "string", "minLength": 1},
+        "phase_b_metrics": {"type": "string", "minLength": 1}
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["VER-CONFIDENCE", "VER-SIMPLE", "VER-CORRECTIVE"],
+      "properties": {
+        "VER-CONFIDENCE": {"const": "confidence_filtered"},
+        "VER-SIMPLE": {"const": "simple_verifier"},
+        "VER-CORRECTIVE": {"const": "corrective_verifier"}
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template_id",
+        "template",
+        "public_query_fields",
+        "forbidden_query_fields",
+        "exclusions"
+      ],
+      "properties": {
+        "template_id": {"const": "head-only-relation-neutral-fact-v1"},
+        "template": {"const": "What fact is stated about \"{head}\"?"},
+        "public_query_fields": {
+          "const": ["text", "public_metadata"]
+        },
+        "forbidden_query_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "exclusions": {
+          "const": [
+            "empty_head_or_tail",
+            "head_tail_surface_collision",
+            "private_value_surface_collision"
+          ]
+        }
+      }
+    },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conditions", "budget", "bm25", "graph", "hybrid"],
+      "properties": {
+        "conditions": {
+          "const": [
+            "text_bm25",
+            "confidence_filtered_graph",
+            "confidence_filtered_hybrid",
+            "simple_verifier_graph",
+            "simple_verifier_hybrid",
+            "corrective_verifier_graph",
+            "corrective_verifier_hybrid",
+            "gold_graph_oracle"
+          ]
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_items", "max_tokens", "tokenizer_id"],
+          "properties": {
+            "max_items": {"type": "integer", "minimum": 1},
+            "max_tokens": {"type": "integer", "minimum": 1},
+            "tokenizer_id": {"const": "unicode-word-punctuation-v1"}
+          }
+        },
+        "bm25": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "package",
+            "k1",
+            "b",
+            "method",
+            "idf_method",
+            "token_pattern"
+          ],
+          "properties": {
+            "package": {"const": "bm25s==0.3.9"},
+            "k1": {"type": "number", "minimum": 0},
+            "b": {"type": "number", "minimum": 0},
+            "method": {"type": "string", "minLength": 1},
+            "idf_method": {"type": "string", "minLength": 1},
+            "token_pattern": {"type": "string", "minLength": 1}
+          }
+        },
+        "graph": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_hops", "question_only_linking", "gold_repair"],
+          "properties": {
+            "max_hops": {"const": 1},
+            "question_only_linking": {"const": true},
+            "gold_repair": {"const": false}
+          }
+        },
+        "hybrid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "rrf_k"],
+          "properties": {
+            "method": {"const": "reciprocal_rank_fusion"},
+            "rrf_k": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bootstrap_resamples",
+        "seed",
+        "confidence",
+        "comparison_family",
+        "p_values"
+      ],
+      "properties": {
+        "bootstrap_resamples": {"type": "integer", "minimum": 1},
+        "seed": {"type": "integer", "minimum": 0},
+        "confidence": {"type": "number", "minimum": 0},
+        "comparison_family": {
+          "const": [
+            {
+              "baseline": "confidence_filtered",
+              "treatment": "simple_verifier"
+            },
+            {
+              "baseline": "confidence_filtered",
+              "treatment": "corrective_verifier"
+            }
+          ]
+        },
+        "p_values": {"const": "not_predeclared"}
+      }
+    }
+  }
+}

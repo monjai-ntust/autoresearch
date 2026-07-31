@@ -87,6 +87,7 @@ class PhaseBScriptContractTests(unittest.TestCase):
             "ensure_assemble_candidates test",
             "ensure_verifier_live",
             "ensure_score",
+            "ensure_graph_rag",
         )
         positions = [full.index(token) for token in ordered_tokens]
         self.assertEqual(positions, sorted(positions))
@@ -96,6 +97,32 @@ class PhaseBScriptContractTests(unittest.TestCase):
         )
         self.assertIn("material_protocol_review_required false", full)
         self.assertIn("final-test execution remains blocked", full)
+        self.assertLess(full.index("ensure_score"), full.index("ensure_graph_rag"))
+
+    def test_graph_rag_recovery_stage_is_post_score_only(self):
+        graph_stage = SCRIPT[
+            SCRIPT.index("ensure_graph_rag() {") : SCRIPT.index(
+                "maybe_generate_live() {"
+            )
+        ]
+        self.assertIn("score_complete", graph_stage)
+        self.assertIn("graph_rag.py phase-b-diagnostic", graph_stage)
+        self.assertNotIn("ensure_bootstrap", graph_stage)
+        self.assertNotIn("ensure_train_live", graph_stage)
+        self.assertNotIn("ensure_verifier_live", graph_stage)
+        self.assertNotIn("ensure_score", graph_stage)
+        self.assertIn("graph-rag) ensure_graph_rag", SCRIPT)
+        self.assertIn(
+            "--config configs/phase_b_graph_rag_diagnostic.json", graph_stage
+        )
+        self.assertIn(
+            'if [[ "$ACTIVE_STAGE_ID" == "graph-rag-diagnostic" ]]; then',
+            SCRIPT,
+        )
+        self.assertLess(
+            SCRIPT.index('ACTIVE_STAGE_ID="graph-rag-diagnostic"'),
+            SCRIPT.index('note "updating source checkout from its configured upstream"'),
+        )
 
     def test_b07_invocation_is_implicit_without_changing_manifest_value(self):
         self.assertNotIn("--approve-b07", SCRIPT)

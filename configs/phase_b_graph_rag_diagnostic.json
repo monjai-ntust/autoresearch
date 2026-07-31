@@ -1,0 +1,123 @@
+{
+  "schema_version": "rag-phase-b-diagnostic-config-1.0",
+  "protocol": {
+    "protocol_id": "C-04-PHASE-B-REGIME-D-1.0",
+    "evaluation_regime": "diagnostic_fact_probe",
+    "evaluation_split_id": "CODE-SPLIT-1:test",
+    "unit": "training_seed_x_gold_strict_triple",
+    "cluster_unit": "source_document",
+    "denominator": "all_eligible_gold_strict_triples_for_every_configured_training_seed",
+    "failure_policy": "retain_failed_retrieval_as_zero_success_without_denominator_drop",
+    "claims_boundary": "diagnostic graph fidelity and retrieval/support/fact preservation only; not QA, compliance reasoning, verifier improvement, or a Phase B headline metric",
+    "regime_q": {
+      "executed": false,
+      "independent_author_available": false,
+      "independent_reviewer_available": false,
+      "blocked_reason": "No domain expert is available to independently author and review questions and acceptable evidence."
+    }
+  },
+  "parent": {
+    "phase_b_protocol_id": "B04-PATH-A-1.3",
+    "workflow_id": "PATH-A-WORKFLOW-1.3",
+    "matcher_id": "CODE-STRICT-1",
+    "dataset_id": "CODE-ACCORD-v1.0.0",
+    "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49],
+    "required_stage": "scored_full_run",
+    "nonpublication_smoke_allowed": false
+  },
+  "artifacts": {
+    "checkout_manifest": "manifests/00-checkout-manifest.json",
+    "full_run_manifest": "manifests/debug-full-run.json",
+    "preparation_manifest": "manifests/03-data-preparation-manifest.json",
+    "score_manifest": "manifests/score-manifest.json",
+    "simple_verifier_manifest": "manifests/verifier-simple-live.json",
+    "corrective_verifier_manifest": "manifests/verifier-corrective-live.json",
+    "prepared_test": "data-prepared/test.jsonl",
+    "private_gold": "data-prepared/test-gold.jsonl",
+    "split_manifest": "data-prepared/split-manifest.json",
+    "development_gold": "data-prepared/development-gold.jsonl",
+    "development_candidate_index": "predictions/dev/candidate-index.json",
+    "threshold_selection": "predictions/dev/threshold-selection.json",
+    "candidates": "predictions/test/candidates.jsonl",
+    "simple_verdicts": "verifier/simple/verdicts.jsonl",
+    "corrective_verdicts": "verifier/corrective/verdicts.jsonl",
+    "candidate_outcomes": "outcomes/candidate-outcomes.jsonl",
+    "sentence_outcomes": "outcomes/sentence-outcomes.jsonl",
+    "phase_b_metrics": "metrics/metrics.json"
+  },
+  "conditions": {
+    "VER-CONFIDENCE": "confidence_filtered",
+    "VER-SIMPLE": "simple_verifier",
+    "VER-CORRECTIVE": "corrective_verifier"
+  },
+  "probe": {
+    "template_id": "head-only-relation-neutral-fact-v1",
+    "template": "What fact is stated about \"{head}\"?",
+    "public_query_fields": ["text", "public_metadata"],
+    "forbidden_query_fields": [
+      "answer",
+      "gold_tail",
+      "gold_relation",
+      "gold_strict_key",
+      "source_document_id",
+      "evidence_id",
+      "training_seed",
+      "condition"
+    ],
+    "exclusions": [
+      "empty_head_or_tail",
+      "head_tail_surface_collision",
+      "private_value_surface_collision"
+    ]
+  },
+  "retrieval": {
+    "conditions": [
+      "text_bm25",
+      "confidence_filtered_graph",
+      "confidence_filtered_hybrid",
+      "simple_verifier_graph",
+      "simple_verifier_hybrid",
+      "corrective_verifier_graph",
+      "corrective_verifier_hybrid",
+      "gold_graph_oracle"
+    ],
+    "budget": {
+      "max_items": 8,
+      "max_tokens": 256,
+      "tokenizer_id": "unicode-word-punctuation-v1"
+    },
+    "bm25": {
+      "package": "bm25s==0.3.9",
+      "k1": 1.2,
+      "b": 0.75,
+      "method": "lucene",
+      "idf_method": "lucene",
+      "token_pattern": "(?u)\\b\\w+\\b"
+    },
+    "graph": {
+      "max_hops": 1,
+      "question_only_linking": true,
+      "gold_repair": false
+    },
+    "hybrid": {
+      "method": "reciprocal_rank_fusion",
+      "rrf_k": 60
+    }
+  },
+  "statistics": {
+    "bootstrap_resamples": 10000,
+    "seed": 20260731,
+    "confidence": 0.95,
+    "comparison_family": [
+      {
+        "baseline": "confidence_filtered",
+        "treatment": "simple_verifier"
+      },
+      {
+        "baseline": "confidence_filtered",
+        "treatment": "corrective_verifier"
+      }
+    ],
+    "p_values": "not_predeclared"
+  }
+}

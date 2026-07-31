@@ -51,7 +51,14 @@ def source_surface_manifest(source_root: Path) -> tuple[dict[str, Any], ...]:
     """
 
     root = source_root.resolve()
-    candidates = [root / "graph_rag.py"]
+    candidates = [
+        root / "graph_rag.py",
+        # C-04 parses the frozen Phase B candidate/gold/verdict contracts
+        # through their canonical immutable record host.
+        root / "records.py",
+        root / "constants.py",
+        root / "phase_b_io.py",
+    ]
     candidates.extend(
         path
         for path in (root / "graph_rag_eval").rglob("*.py")

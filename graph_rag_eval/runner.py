@@ -261,14 +261,12 @@ def _bind_run_identity(context: RunnerContext) -> dict[str, Any]:
     """Claim a new run ID or verify an exact matching staged resume."""
 
     expected = _expected_run_identity(context)
-    namespace_root = context.run_root.parent
     identity_path = context.run_root / "manifests" / "run-identity.json"
     if not context.run_root.exists():
-        if namespace_root.exists():
-            raise RunIdentityError(
-                f"run ID is already occupied outside the Graph RAG contract: "
-                f"{context.run_id}"
-            )
+        # `graph-rag/` is the owned namespace. A sibling Phase B run may already
+        # occupy its parent; claiming a fresh child cannot overwrite that parent.
+        # Phase-B-output diagnostics additionally verify the parent byte contract
+        # before calling their dedicated child binder.
         context.run_root.mkdir(parents=True, exist_ok=False)
         artifact = write_json(
             context.run_root,

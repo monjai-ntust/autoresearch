@@ -18,6 +18,11 @@ class GraphRagStandaloneTests(unittest.TestCase):
             clone = Path(temporary) / "standalone"
             clone.mkdir()
             shutil.copy2(ROOT / "graph_rag.py", clone / "graph_rag.py")
+            for source_dependency in ("constants.py", "phase_b_io.py", "records.py"):
+                shutil.copy2(
+                    ROOT / source_dependency,
+                    clone / source_dependency,
+                )
             shutil.copytree(ROOT / "graph_rag_eval", clone / "graph_rag_eval")
             shutil.copytree(ROOT / "configs", clone / "configs")
             shutil.copytree(ROOT / "schemas", clone / "schemas")

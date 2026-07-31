@@ -23,6 +23,7 @@ class GraphRagBackwardCompatibilityTests(unittest.TestCase):
         "unittest-graph-rag-identity-resume",
         "unittest-graph-rag-identity-occupied",
         "unittest-graph-rag-intrinsic-only",
+        "unittest-graph-rag-existing-parent",
     )
 
     def tearDown(self):
@@ -96,6 +97,21 @@ class GraphRagBackwardCompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(RunIdentityError, "no Graph RAG identity"):
             doctor(context)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
+
+    def test_fresh_graph_rag_child_can_coexist_with_existing_parent_files(self):
+        parent = ROOT / "output" / self.run_ids[3]
+        parent.mkdir(parents=True)
+        sentinel = parent / "phase-b-parent.txt"
+        sentinel.write_text("preserve", encoding="utf-8")
+        context = create_context(
+            "configs/phase_b_graph_rag_synthetic.json",
+            run_id=self.run_ids[3],
+        )
+        self.assertEqual(doctor(context)["status"], "ready")
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
+        self.assertTrue(
+            (parent / "graph-rag/manifests/run-identity.json").is_file()
+        )
 
     def test_intrinsic_only_scope_emits_exact_extraction_without_qa(self):
         output = ROOT / "output"

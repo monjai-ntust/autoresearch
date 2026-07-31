@@ -15,6 +15,9 @@ bash phase_b.sh --stage full
 training and development inference, development assembly and thresholding,
 four live pilot captures, mandatory B-07 audit, independent seeds 42–49 test
 inference, test assembly, simple and corrective live verification, then score.
+That immutable run predates C-04 and therefore has no Graph RAG child. The
+current `full` interface preserves every one of those Phase B stages and, only
+after score succeeds, appends the read-only Phase-B-output diagnostic.
 
 The launcher cleanup does not change that sequence or any delegated
 `phase_b.py` data-producing argument. It renames the entry point to `phase_b.sh`
@@ -27,13 +30,14 @@ candidate, verifier, scoring, seed, model, prompt, and dataset semantics are
 unchanged. The separately approved ledger archival revises only configuration
 and provenance schemas. Source-bound manifests necessarily
 record the new source commit and timestamps; those provenance differences are
-not scientific-data changes.
+not scientific-data changes. The appended C-04 child has its own identity and
+cannot overwrite or reinterpret a Phase B artifact.
 
 ## Stage classification
 
 | Stage | Classification | Retention reason |
 | --- | --- | --- |
-| `full` | Public canonical | Only supported unattended publication workflow; reproduces the retained full-run sequence. |
+| `full` | Public canonical | Only supported unattended publication workflow; reproduces the retained Phase B sequence, then runs C-04 only after verified scoring succeeds. |
 | `available` | Diagnostic/recovery | Checks command parsers and attempts only stages whose prerequisites exist. |
 | `smoke` | Diagnostic | Isolated nonpublication GPU/Ollama path check with explicitly marked pseudo-seeds. |
 | `publishable` | Diagnostic/recovery | Stops after one seed's development candidates for training/restart investigation. |
@@ -49,6 +53,7 @@ not scientific-data changes.
 | `pilot-live` | Diagnostic/recovery | Creates one independently identified development-pilot capture. |
 | `pilot-audit` | Diagnostic/recovery | Rebuilds the mandatory four-capture scientific gate. |
 | `score` | Diagnostic/recovery | Rebuilds metrics from completed frozen inputs. |
+| `graph-rag` | Diagnostic/recovery | Adds or verifies only the C-04 Regime-D child of an already scored run; it cannot invoke any Phase B producer or model/verifier call. |
 | `legacy-train` | Provenance-only compatibility | Retains the acknowledged historical CSV trainer diagnostic; never satisfies a canonical checkpoint gate. |
 
 No stage is deleted: each non-public stage has a distinct inspection, replay,

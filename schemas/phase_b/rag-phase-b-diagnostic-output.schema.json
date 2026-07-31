@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rag-phase-b-diagnostic-output.schema.json",
+  "title": "Terminal Phase B Graph RAG diagnostic manifests",
+  "anyOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "python",
+        "platform",
+        "packages",
+        "network_used",
+        "model_calls"
+      ],
+      "properties": {
+        "schema_version": {"const": "rag-phase-b-diagnostic-environment-1.0"},
+        "python": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["implementation", "version", "executable_basename"],
+          "properties": {
+            "implementation": {"type": "string", "minLength": 1},
+            "version": {"type": "string", "minLength": 1},
+            "executable_basename": {"type": "string", "minLength": 1}
+          }
+        },
+        "platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["system", "release", "machine"],
+          "properties": {
+            "system": {"type": "string", "minLength": 1},
+            "release": {"type": "string"},
+            "machine": {"type": "string"}
+          }
+        },
+        "packages": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bm25s"],
+          "properties": {
+            "bm25s": {"const": "0.3.9"}
+          }
+        },
+        "network_used": {"const": false},
+        "model_calls": {"const": 0}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "stage",
+        "status",
+        "regime",
+        "parent_score_manifest_sha256",
+        "child_identity_sha256",
+        "eligible_probes",
+        "excluded_probes",
+        "training_seeds",
+        "retrieval_conditions",
+        "retrieval_observations",
+        "failures",
+        "scientific_claims_enabled",
+        "claims_boundary",
+        "regime_q_executed",
+        "network_used",
+        "model_calls",
+        "phase_b_parent_writes"
+      ],
+      "properties": {
+        "schema_version": {"const": "rag-phase-b-diagnostic-run-1.0"},
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+        "stage": {"const": "phase_b_graph_rag_diagnostic"},
+        "status": {"const": "diagnostic_complete"},
+        "regime": {"const": "diagnostic_fact_probe"},
+        "parent_score_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "child_identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "eligible_probes": {"type": "integer", "minimum": 1},
+        "excluded_probes": {"type": "integer", "minimum": 0},
+        "training_seeds": {"type": "array", "uniqueItems": true, "items": {"type": "integer"}},
+        "retrieval_conditions": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "retrieval_observations": {"type": "integer", "minimum": 1},
+        "failures": {"type": "integer", "minimum": 0},
+        "scientific_claims_enabled": {"const": true},
+        "claims_boundary": {"type": "string", "minLength": 1},
+        "regime_q_executed": {"const": false},
+        "network_used": {"const": false},
+        "model_calls": {"const": 0},
+        "phase_b_parent_writes": {"const": 0}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "run_id", "artifacts"],
+      "properties": {
+        "schema_version": {"const": "rag-phase-b-diagnostic-artifacts-1.0"},
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "bytes", "sha256"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "bytes": {"type": "integer", "minimum": 0},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "run_id",
+        "status",
+        "regime",
+        "artifact_manifest_sha256",
+        "artifact_count",
+        "eligible_probes",
+        "excluded_probes",
+        "retrieval_observations",
+        "claims_boundary"
+      ],
+      "properties": {
+        "schema_version": {"const": "rag-phase-b-diagnostic-complete-1.0"},
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+        "status": {"const": "diagnostic_complete"},
+        "regime": {"const": "diagnostic_fact_probe"},
+        "artifact_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "artifact_count": {"type": "integer", "minimum": 1},
+        "eligible_probes": {"type": "integer", "minimum": 1},
+        "excluded_probes": {"type": "integer", "minimum": 0},
+        "retrieval_observations": {"type": "integer", "minimum": 1},
+        "claims_boundary": {"type": "string", "minLength": 1}
+      }
+    }
+  ]
+}

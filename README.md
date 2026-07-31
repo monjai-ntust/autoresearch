@@ -24,6 +24,11 @@ BIO spans. Those nine rows remain auditable but are ineligible for typed-strict
 gold; no endpoint is silently repaired, projected, expanded, or omitted. See
 [`docs/phase_b_workflow.md`](docs/phase_b_workflow.md) for exact commands, input
 schemas, output layout, reproducibility boundaries, and the still-gated stages.
+After a successful score, `full` runs the canonical C-04
+`diagnostic_fact_probe` Graph RAG evaluation over the confidence-filtered,
+simple-verifier, and corrective-verifier graphs derived from that same run.
+Its scope and recovery contract are documented in
+[`docs/phase_b_graph_rag_diagnostic.md`](docs/phase_b_graph_rag_diagnostic.md).
 The [`model-training compatibility contract`](docs/model-training-compatibility.md)
 records preserved trainer invariants, necessary opt-in differences, and the
 limit on historical statistical comparison.
@@ -91,10 +96,27 @@ to the fixed baseline `9feafa4`, including the rationale for the separate
 canonical pipeline boundary. Update that inventory with every subsequent source
 edit that changes the comparison or a path's role.
 
-## Dataset-neutral generated-graph RAG evaluation
+## Phase B output Graph RAG diagnostic
 
-`graph_rag.py` is the separate C-01I evaluation entry point. It does not import
-or modify the historical `provenance/eval_graph_rag.py` harness. The reusable
+The sole canonical result-producing use of `graph_rag.py` is the C-04
+Phase-B-output diagnostic dispatched by `phase_b.sh --stage full` after scoring.
+An already scored run can recover that child only, without training, inference,
+verifier calls, or rescoring:
+
+```bash
+bash phase_b.sh --run-id path-a-full-20260719T153901Z --stage graph-rag
+```
+
+It verifies the immutable Phase B artifact family before writing exclusively
+beneath `output/<run-id>/graph-rag/`. It evaluates only
+`diagnostic_fact_probe`; results are graph-fidelity and
+retrieval/support/fact-preservation diagnostics, not QA, compliance reasoning,
+verifier improvement, or Phase B headline metrics. See the
+[`complete C-04 contract`](docs/phase_b_graph_rag_diagnostic.md).
+
+The generic C-01I runner remains a noncanonical contract/readiness interface.
+It does not import or modify the historical `provenance/eval_graph_rag.py`
+harness. The reusable
 `graph_rag_eval/` package defines immutable canonical records, configuration-
 selected dataset adapters and generators, content-addressed graph/index
 identities, genuine `bm25s==0.3.9` retrieval, pinned dense/generator interfaces,
@@ -186,8 +208,10 @@ blocked rather than being approximated with agent-authored or templated data.
 - The first full external run produced the verifier Precision, Recall, F1,
   confusion-count, paired-outcome, and uncertainty artifacts after a passing
   B-07 pilot. The scorer now renders deterministic publication TSV/Markdown
-  products from those same metrics. Release remains pending external
-  clean-clone/offline-cache validation.
+  products from those same metrics. Its C-04 parent artifacts pass read-only
+  diagnostic readiness checks, but the historical Graph RAG recovery command
+  has not yet been run. Release remains pending external
+  clean-clone/offline-cache validation and the separately tracked archive gates.
 
 ## Installation
 
@@ -367,7 +391,8 @@ uv run python -m provenance.bench_gpu
 
 This fixed BERT forward/backward smoke is useful for detecting CPU fallback and gross environment problems. Its timings are not the paper's encoder, verifier, or full-pipeline measurements.
 
-For the retained Graph RAG diagnostic, first build a KG and retain inference JSONL with `gold_triples`, then run:
+For historical methodology provenance only, the earlier answer-as-query graph
+harness can still be inspected with:
 
 ```bash
 uv run python -m provenance.eval_graph_rag \
@@ -377,7 +402,10 @@ uv run python -m provenance.eval_graph_rag \
   --output results/scierc_graph_rag_diagnostic.json
 ```
 
-This reproduces the diagnostic protocol behind the draft table, not a leakage-free compliance benchmark. The question sample and exact inference/KG inputs must be recorded with any reported result.
+This is not a supported current evaluation command. It reproduces the draft-era
+diagnostic lineage with unique-token overlap rather than BM25 and violates the
+C-04 query-leakage contract because the historical probe contains the answer.
+Use the canonical Phase B command above for any new diagnostic.
 
 ### Cross-dataset BIO comparator
 

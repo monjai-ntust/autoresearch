@@ -10,7 +10,8 @@ data.
 ## Current implementation boundary
 
 The primary public entry point is `phase_b.sh --stage full`.
-It owns the canonical lifecycle, assembly, pilot, scoring, and recovery flow;
+It owns the canonical lifecycle, assembly, pilot, scoring, post-score C-04
+diagnostic, and recovery flow;
 `phase_b.py` is its internal stage dispatcher. Focused contract tests cover:
 
 - `doctor` validates the direct source checkout, Git cleanliness, root-anchored
@@ -385,7 +386,11 @@ the two complete live verifier passes only when that newly produced pilot
 reports `pilot_status=pass` and `material_protocol_review_required=false`; any
 other pilot result stops the run. It then independently infers the test split for all seeds, assembles the
 test universe, runs simple and corrective Qwen verification, and scores the
-four frozen conditions. The full command writes an append-only console log to
+four frozen conditions. Only after the existing score completion check passes,
+it derives the confidence-filtered, simple-verifier, and corrective-verifier
+graphs from those exact scored artifacts and runs the C-04 Regime-D Graph RAG
+diagnostic. That diagnostic makes no model or verifier call and does not modify
+or reinterpret Phase B data or metrics. The full command writes an append-only console log to
 `output/<run-id>/logs/phase-b-debug.log` and records all derived settings in
 `manifests/debug-full-run.json`.
 
@@ -393,6 +398,37 @@ The command stays attached to the invoking shell. Run it in an existing
 `tmux`/`screen` session if the SSH connection may close. On any new error it
 stops and prints an exact resume command. Do not start a second concurrent
 launcher for the same run ID.
+
+### Graph RAG recovery after scoring
+
+If a complete scored run needs only its missing diagnostic, use:
+
+```bash
+bash phase_b.sh --run-id path-a-full-20260719T153901Z --stage graph-rag
+```
+
+This recovery stage checks only the score prerequisite and dispatches no
+bootstrap, training, inference, verifier, threshold, or scoring action. It
+hash-verifies the prepared corpus, private gold/support, candidate and verdict
+ledgers, threshold/condition/score manifests, outcomes, and Phase B metrics
+before writing the create-only child `output/<run-id>/graph-rag/`. The parent
+run remains read-only.
+
+For an installed standalone checkout whose dependencies are already
+synchronized, the no-network equivalent is:
+
+```bash
+uv run --frozen --no-sync python -B graph_rag.py phase-b-diagnostic \
+  --config configs/phase_b_graph_rag_diagnostic.json \
+  --run-id path-a-full-20260719T153901Z
+```
+
+The retained historical run passes the read-only prerequisite audit, but this
+source checkout does not contain its runtime parent under `output/`; no
+historical diagnostic result is claimed. See
+[`phase_b_graph_rag_diagnostic.md`](phase_b_graph_rag_diagnostic.md) for the
+predeclared protocol, exact artifact contract, metrics, namespace/resume rules,
+and external handoff.
 
 ### Debug runner and B-07 boundary
 
