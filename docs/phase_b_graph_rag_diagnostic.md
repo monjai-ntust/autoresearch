@@ -33,8 +33,9 @@ The `graph-rag` stage requires only the completed score contract. It does not
 call bootstrap, acquisition, preparation, training, inference, threshold
 selection, a verifier, or Phase B scoring. The historical run must already be
 present as `output/path-a-full-20260719T153901Z/` on the external machine. The
-repository's parent `output-archive/` remains user-only and read-only to the
-software and must not be used as a runtime output target.
+repository's parent `project-state/results/output-archive/` remains separate
+research-management evidence, is not available to a standalone source clone,
+and must not be used as a runtime output target.
 
 For an installed, already-synchronized standalone checkout, the equivalent
 no-network recovery route is:
