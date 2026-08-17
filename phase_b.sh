@@ -621,6 +621,15 @@ score_complete() {
     && [[ -f "$RUN_ROOT/manifests/score-manifest.json" ]]
 }
 
+graph_rag_parent_score_complete() {
+  # The retained 2026-07-19 full run predates the deterministic publication
+  # views added on 2026-07-21. Graph RAG consumes the immutable score contract,
+  # not those later renderings; the Python adapter performs the authoritative
+  # hash/schema/cross-artifact validation of the complete 18-file parent set.
+  [[ -f "$RUN_ROOT/metrics/metrics.json" ]] \
+    && [[ -f "$RUN_ROOT/manifests/score-manifest.json" ]]
+}
+
 graph_rag_complete() {
   json_equals "$RUN_ROOT/graph-rag/manifests/complete.json" \
     status '"diagnostic_complete"' \
@@ -1140,7 +1149,7 @@ ensure_score() {
 }
 
 ensure_graph_rag() {
-  score_complete \
+  graph_rag_parent_score_complete \
     || die "graph-rag requires a completed Phase B score stage in this run"
   local stage_id="graph-rag-diagnostic"
   begin_stage "$stage_id" "resume-or-fresh-child"

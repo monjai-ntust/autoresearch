@@ -1074,15 +1074,17 @@ def _retrieval_matrix(
             raise PhaseBDiagnosticError("runtime retriever matrix differs from config")
         for probe in canonical.probes:
             query = probe.question.public_view()
-            # Opaque question IDs are content hashes and can contain incidental
-            # digit/substring collisions. Leakage is assessed on the actual
-            # retrieval features: public text and public metadata.
-            serialized_query = canonical_json(
-                {
-                    "text": query.text,
-                    "public_metadata": query.public_metadata,
-                }
-            )
+            expected_metadata = {"template_id": config["probe"]["template_id"]}
+            if dict(query.public_metadata) != expected_metadata:
+                raise PhaseBDiagnosticError(
+                    "tested query public metadata differs from the fixed template "
+                    f"contract: {probe.question.question_id}"
+                )
+            # Opaque question IDs and JSON field names can contain incidental
+            # substrings of short private values. The fixed metadata equality
+            # above proves that metadata is config-derived; assess target
+            # leakage only on the actual free-text retrieval feature.
+            normalized_query = " ".join(query.text.casefold().split())
             private_values = (
                 probe.tail,
                 probe.relation,
@@ -1094,7 +1096,7 @@ def _retrieval_matrix(
             if any(
                 value
                 and " ".join(str(value).casefold().split())
-                in " ".join(serialized_query.casefold().split())
+                in normalized_query
                 for value in private_values
             ):
                 raise PhaseBDiagnosticError(

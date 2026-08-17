@@ -105,7 +105,9 @@ class PhaseBScriptContractTests(unittest.TestCase):
                 "maybe_generate_live() {"
             )
         ]
-        self.assertIn("score_complete", graph_stage)
+        self.assertIn("graph_rag_parent_score_complete", graph_stage)
+        self.assertNotIn("publication-table.tsv", graph_stage)
+        self.assertNotIn("publication-summary.md", graph_stage)
         self.assertIn("graph_rag.py phase-b-diagnostic", graph_stage)
         self.assertNotIn("ensure_bootstrap", graph_stage)
         self.assertNotIn("ensure_train_live", graph_stage)

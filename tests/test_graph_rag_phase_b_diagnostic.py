@@ -218,13 +218,11 @@ class PhaseBGraphRagDiagnosticTests(unittest.TestCase):
         targets = {item.question.question_id: item for item in canonical.probes}
         for question_id, target in targets.items():
             query = target.question.public_view()
-            serialized = json.dumps(
-                {
-                    "text": query.text,
-                    "public_metadata": dict(query.public_metadata),
-                },
-                sort_keys=True,
-            ).casefold()
+            normalized_query = " ".join(query.text.casefold().split())
+            self.assertEqual(
+                dict(query.public_metadata),
+                {"template_id": self.context.config["probe"]["template_id"]},
+            )
             for private in (
                 target.tail,
                 target.relation,
@@ -232,11 +230,25 @@ class PhaseBGraphRagDiagnosticTests(unittest.TestCase):
                 target.chunk_id,
                 target.gold_triple_id,
             ):
-                self.assertNotIn(private.casefold(), serialized, question_id)
+                self.assertNotIn(
+                    " ".join(private.casefold().split()),
+                    normalized_query,
+                    question_id,
+                )
         gold, predicted = build_phase_b_graphs(
             parent, canonical, self.context.config
         )
         target = canonical.probes[0]
+        # Regression for the historical target `met`: scanning serialized JSON
+        # produced a false positive from the structural key `public_metadata`.
+        incidental_json_key_collision = replace(target, tail="met")
+        _retrieval_matrix(
+            parent,
+            replace(canonical, probes=(incidental_json_key_collision,)),
+            gold,
+            predicted,
+            self.context.config,
+        )
         leaked = replace(
             target,
             question=replace(
@@ -250,6 +262,27 @@ class PhaseBGraphRagDiagnosticTests(unittest.TestCase):
             _retrieval_matrix(
                 parent,
                 replace(canonical, probes=(leaked,)),
+                gold,
+                predicted,
+                self.context.config,
+            )
+
+        leaked_metadata = replace(
+            target,
+            question=replace(
+                target.question,
+                public_metadata={
+                    "template_id": self.context.config["probe"]["template_id"],
+                    "answer_hint": target.tail,
+                },
+            ),
+        )
+        with self.assertRaisesRegex(
+            PhaseBDiagnosticError, "public metadata differs from the fixed template"
+        ):
+            _retrieval_matrix(
+                parent,
+                replace(canonical, probes=(leaked_metadata,)),
                 gold,
                 predicted,
                 self.context.config,
