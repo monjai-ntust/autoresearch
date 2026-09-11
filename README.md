@@ -1,92 +1,131 @@
-# autoresearch
+# Phase E: Methodology-Preserving Graph RAG Reproduction
 
-![teaser](progress.png)
+This branch publishes the remaining downstream CODE-ACCORD Graph RAG workflow used for the paper's Table 2 diagnostic. It deliberately does not retrain an encoder, regenerate encoder inference, invoke the LLM verifier, produce Tables 1/3/4, or run any zh workflow.
 
-*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
+The workflow consumes compatible completed upstream artifacts, constructs only the permitted confidence graph when needed, and runs the five original RAG answer conditions. Every runtime file is written beneath ignored `output/<run-id>/` for later hash-verified archival by the parent research repository.
 
-The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model. The training code here is a simplified single-GPU implementation of [nanochat](https://github.com/karpathy/nanochat). The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the `program.md` Markdown files that provide context to the AI agents and set up your autonomous research org. The default `program.md` in this repo is intentionally kept as a bare bones baseline, though it's obvious how one would iterate on it over time to find the "research org code" that achieves the fastest research progress, how you'd add more agents to the mix, etc. A bit more context on this project is here in this [tweet](https://x.com/karpathy/status/2029701092347630069) and [this tweet](https://x.com/karpathy/status/2031135152349524125).
+## Frozen method
 
-## How it works
+The prompt authority is historical `eval_graph_rag.py` blob `964893546b28f04e34e8c546bcbbfd4cfbc27354`, not the paper draft's incomplete one-line description. The evaluator preserves:
 
-The repo is deliberately kept small and only really has three files that matter:
+- 13 generic, case-folded relation-question templates;
+- five answer modes in order: `llm_only`, `text_retrieval`, `kg_1hop`, `kg_2hop`, and `hybrid`;
+- one user-role message, no system message, `think=false`, temperature `0.0`, and `num_predict=50`;
+- exact prompt labels, whitespace, punctuation, context assembly, retrieval behavior, scoring, and JSON output semantics; and
+- the original ten-question seed-42 sampling behavior.
 
-- **`prepare.py`** — fixed constants, one-time data prep (downloads training data, trains a BPE tokenizer), and runtime utilities (dataloader, evaluation). Not modified.
-- **`train.py`** — the single file the agent edits. Contains the full GPT model, optimizer (Muon + AdamW), and training loop. Everything is fair game: architecture, hyperparameters, optimizer, batch size, etc. **This file is edited and iterated on by the agent**.
-- **`program.md`** — baseline instructions for one agent. Point your agent here and let it go. **This file is edited and iterated on by the human**.
+The later May 7 evaluator and its seven CODE-specific templates are excluded. The only post-restoration behavior change is a fail-closed guard that refuses to write a misleading result when no supported question is generated.
 
-By design, training runs for a **fixed 5-minute time budget** (wall clock, excluding startup/compilation), regardless of the details of your compute. The metric is **val_bpb** (validation bits per byte) — lower is better, and vocab-size-independent so architectural changes are fairly compared.
+The text condition is historical whitespace-token overlap, despite being labeled BM25 in historical material. Answer-derived queries, unequal evidence access, the lenient overlap score, small sample, and gold-graph oracle remain unchanged methodological limitations.
 
-If you are new to neural networks, this ["Dummy's Guide"](https://x.com/hooeem/status/2030720614752039185) looks pretty good for a lot more context.
+Machine-readable method and source identities are in `phase_e_rag_contract.json`.
 
-## Quick start
+## Immutable boundary
 
-**Requirements:** A single NVIDIA GPU (tested on H100), Python 3.10+, [uv](https://docs.astral.sh/uv/).
+`train_span.py`, `inference_kg.py`, `verify_triples_llm.py`, and all existing `data/`, `models/`, and `eval/` files are completed upstream evidence. Phase E validates their Git blobs but does not import, execute, edit, or delete them.
+
+The retained `build_kg.py` can reproduce the confidence-only graph. The exact transient code that produced the corrected verified graph was not committed during the Table-2 window; its first committed form is bundled with excluded later behavior. Consequently, the verified condition must receive a compatible completed graph with 48 nodes and 31 edges or be explicitly recorded as blocked. The runner never reconstructs it from verifier output.
+
+## Requirements
+
+- A clean clone of branch `publication-legacy-methodology` with its Git history.
+- Python 3.10 or newer. The runner and active graph code use only the standard library.
+- `curl`, used by the frozen evaluator for Ollama chat requests.
+- A running Ollama endpoint containing the exact `qwen3:32b` model instance selected for reproduction.
+- The completed 173-record CODE inference JSONL with SHA-256 `4d587f77832968a8e28b2e399d528432764567125d43ac5ca7d7fe1761ec4922`.
+- Optionally, the retained confidence graph with SHA-256 `e1deec394e9f15e5d98670a83034bb4357f023212076e69c7bb6dbee5e0725fb`. If omitted, the runner builds it with the frozen confidence-only graph producer at threshold `0.7`.
+- Either a user-approved completed 48-node/31-edge verified graph plus its exact SHA-256, or an explicit decision to keep that condition blocked.
+
+Inputs may reside outside the clone. A live run verifies them and copies their exact bytes beneath its own output tree before use.
+
+## Validate the source contract
+
+These commands do not call a model:
 
 ```bash
-
-# 1. Install uv project manager (if you don't already have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Install dependencies
-uv sync
-
-# 3. Download data and train tokenizer (one-time, ~2 min)
-uv run prepare.py
-
-# 4. Manually run a single training experiment (~5 min)
-uv run train.py
+python -B run_phase_e_rag.py validate-contract
+python -B -m unittest discover -s tests -v
 ```
 
-If the above commands all work ok, your setup is working and you can go into autonomous research mode.
+The tests check every frozen upstream blob, the active graph-builder blob, the exact evaluator-plus-guard blob, all 13 relation templates, all five runtime prompts, request payload fields, rejection of the later seven templates, the real seed-42 question projection, and the empty-run failure behavior.
 
-## Running the agent
+## Pin the Ollama model identity
 
-Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
+Before a live run, record the canonical hash of the local Ollama `/api/show` response:
 
-```
-Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
-```
-
-The `program.md` file is essentially a super lightweight "skill".
-
-## Project structure
-
-```
-prepare.py      — constants, data prep + runtime utilities (do not modify)
-train.py        — model, optimizer, training loop (agent modifies this)
-program.md      — agent instructions
-pyproject.toml  — dependencies
+```bash
+python -B run_phase_e_rag.py inspect-model --ollama-url http://localhost:11434
 ```
 
-## Design choices
+The live command requires the printed `canonical_show_sha256`. A tag alone is not accepted as sufficient model identity.
 
-- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
-- **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
-- **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
+## Dry-run the artifact plan
 
-## Platform support
+The following forms contain placeholders and are documentation examples, not the final experiment command.
 
-This code currently requires that you have a single NVIDIA GPU. In principle it is quite possible to support CPU, MPS and other platforms but this would also bloat the code. I'm not 100% sure that I want to take this on personally right now. People can reference (or have their agents reference) the full/parent nanochat repository that has wider platform support and shows the various solutions (e.g. a Flash Attention 3 kernels fallback implementation, generic device support, autodetection, etc.), feel free to create forks or discussions for other platforms and I'm happy to link to them here in the README in some new notable forks section or etc.
+With a completed verified graph:
 
-Seeing as there seems to be a lot of interest in tinkering with autoresearch on much smaller compute platforms than an H100, a few extra words. If you're going to try running autoresearch on smaller computers (Macbooks etc.), I'd recommend one of the forks below. On top of this, here are some recommendations for how to tune the defaults for much smaller models for aspiring forks:
+```bash
+python -B run_phase_e_rag.py run \
+  --run-id <run-id> \
+  --inference <completed-inference.jsonl> \
+  --verified-graph <completed-verified-graph.json> \
+  --verified-graph-sha256 <sha256> \
+  --dry-run
+```
 
-1. To get half-decent results I'd use a dataset with a lot less entropy, e.g. this [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean). These are GPT-4 generated short stories. Because the data is a lot narrower in scope, you will see reasonable results with a lot smaller models (if you try to sample from them after training).
-2. You might experiment with decreasing `vocab_size`, e.g. from 8192 down to 4096, 2048, 1024, or even - simply byte-level tokenizer with 256 possibly bytes after utf-8 encoding.
-3. In `prepare.py`, you'll want to lower `MAX_SEQ_LEN` a lot, depending on the computer even down to 256 etc. As you lower `MAX_SEQ_LEN`, you may want to experiment with increasing `DEVICE_BATCH_SIZE` in `train.py` slightly to compensate. The number of tokens per fwd/bwd pass is the product of these two.
-4. Also in `prepare.py`, you'll want to decrease `EVAL_TOKENS` so that your validation loss is evaluated on a lot less data.
-5. In `train.py`, the primary single knob that controls model complexity is the `DEPTH` (default 8, here). A lot of variables are just functions of this, so e.g. lower it down to e.g. 4.
-6. You'll want to most likely use `WINDOW_PATTERN` of just "L", because "SSSL" uses alternating banded attention pattern that may be very inefficient for you. Try it.
-7. You'll want to lower `TOTAL_BATCH_SIZE` a lot, but keep it powers of 2, e.g. down to `2**14` (~16K) or so even, hard to tell.
+With the verified condition explicitly blocked:
 
-I think these would be the reasonable hyperparameters to play with. Ask your favorite coding agent for help and copy paste them this guide, as well as the full source code.
+```bash
+python -B run_phase_e_rag.py run \
+  --run-id <run-id> \
+  --inference <completed-inference.jsonl> \
+  --block-verified \
+  --dry-run
+```
 
-## Notable forks
+Add `--confidence-graph <retained-confidence-graph.json>` to reuse the retained graph rather than rebuilding it. A dry run validates source identities, artifact hashes, schemas, graph shapes, and the ten-question contract without contacting Ollama or creating `output/`.
 
-- [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (MacOS)
-- [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx) (MacOS)
-- [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (Windows)
-- [andyluo7/autoresearch](https://github.com/andyluo7/autoresearch) (AMD)
+## Run the downstream workflow
 
-## License
+Remove `--dry-run` and add both the pinned model identity and endpoint:
 
-MIT
+```bash
+python -B run_phase_e_rag.py run \
+  --run-id <run-id> \
+  --inference <completed-inference.jsonl> \
+  --verified-graph <completed-verified-graph.json> \
+  --verified-graph-sha256 <sha256> \
+  --ollama-url http://localhost:11434 \
+  --ollama-show-sha256 <canonical-show-sha256>
+```
+
+The parent research workflow will supply one fully resolved command only after the external artifact paths, verified-graph disposition/hash, and model identity are confirmed. Do not substitute artifacts or fill unknown values by guesswork.
+
+## Runtime output
+
+A run creates only `output/<run-id>/`:
+
+```text
+output/<run-id>/
+├── inputs/
+│   ├── inference.jsonl
+│   ├── ollama-show.json
+│   └── verified-graph.json          # only when supplied
+├── graphs/
+│   └── confidence-0.7.json
+├── rag-results/
+│   ├── confidence.json
+│   ├── verified.json                # only when supplied
+│   └── gold.json
+├── logs/
+├── artifact-hashes.json
+├── environment.json
+├── method-manifest.json
+├── run-status.json
+└── table2-results.json
+```
+
+Existing stages are reused only when the run identity and stored hashes still match. Failed/interrupted attempt logs are retained. A model-call error, empty prediction, corrupt output, changed source blob, unexpected artifact hash/schema/count, output collision, or run-identity change fails closed.
+
+New results are compared with legacy values only after the complete run tree is returned to the parent repository. Differences are recorded; the prompt and method are never tuned to improve agreement.

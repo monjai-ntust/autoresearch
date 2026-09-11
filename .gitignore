@@ -21,3 +21,6 @@ dev/
 
 # Results file
 results.tsv
+
+# Phase E runtime evidence (temporary until verified parent-archive handoff)
+/output/

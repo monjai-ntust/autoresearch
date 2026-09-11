@@ -60,18 +60,25 @@ def generate_questions(records, max_q):
     """Generate QA pairs from gold triples."""
     questions = []
     rel_templates = {
-        "USED-FOR": ("What is {head} used for?", "{tail}"),
-        "FEATURE-OF": ("What is a feature of {tail}?", "{head}"),
-        "HYPONYM-OF": ("What is {head} a type of?", "{tail}"),
-        "EVALUATE-FOR": ("What is {head} evaluated for?", "{tail}"),
-        "PART-OF": ("What is {head} part of?", "{tail}"),
-        "COMPARE": ("What is {head} compared with?", "{tail}"),
+        "used-for": ("What is {head} used for?", "{tail}"),
+        "feature-of": ("What is a feature of {tail}?", "{head}"),
+        "hyponym-of": ("What is {head} a type of?", "{tail}"),
+        "evaluate-for": ("What is {head} evaluated for?", "{tail}"),
+        "evaluated-with": ("What is {head} evaluated with?", "{tail}"),
+        "part-of": ("What is {head} part of?", "{tail}"),
+        "compare": ("What is {head} compared with?", "{tail}"),
+        "compare-with": ("What is {head} compared with?", "{tail}"),
+        "trained-with": ("What is {head} trained with?", "{tail}"),
+        "subclass-of": ("What is {head} a subclass of?", "{tail}"),
+        "subtask-of": ("What is {head} a subtask of?", "{tail}"),
+        "synonym-of": ("What is a synonym of {head}?", "{tail}"),
+        "benchmark-for": ("What is {head} a benchmark for?", "{tail}"),
     }
 
     for rec in records:
         for t in rec.get("gold_triples", []):
-            rel = t["relation"]
-            if rel not in rel_templates or rel == "CONJUNCTION":
+            rel = t["relation"].lower()
+            if rel not in rel_templates or rel == "conjunction":
                 continue
             template, answer_template = rel_templates[rel]
             q = template.format(head=t["head_text"], tail=t["tail_text"])
@@ -215,6 +222,10 @@ def main():
     # Generate questions
     questions = generate_questions(records, args.max_questions)
     print(f"  Questions: {len(questions)}")
+    if not questions:
+        raise SystemExit(
+            "No supported questions were generated; refusing to write an empty RAG result."
+        )
 
     modes = ["llm_only", "text_retrieval", "kg_1hop", "kg_2hop", "hybrid"]
     results = {m: [] for m in modes}
@@ -284,7 +295,7 @@ def main():
     for mode in modes:
         acc = correct[mode] / n if n > 0 else 0
         print(f"  {mode:20s}: {correct[mode]}/{n} = {acc:.1%}")
-    print(f"  Time: {elapsed:.0f}s ({elapsed/n:.1f}s/question)")
+    print(f"  Time: {elapsed:.0f}s ({elapsed/max(n,1):.1f}s/question)")
 
     # Save
     output = {

@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "phase": "E",
+  "task": "E-T02",
+  "source_baseline": {
+    "commit": "43530988a31b62a66b7594f9d575d14fb75118c9",
+    "tree": "29e0882e8044cd101365abc6b6535137389a8a67"
+  },
+  "evaluator": {
+    "table_era_blob": "964893546b28f04e34e8c546bcbbfd4cfbc27354",
+    "post_bf02_blob": "7c8e4d859096db2f83a9322e3469fc9fbc7c41eb",
+    "excluded_post_table_blob": "c06b753433681f13140d288c7e642c20e1eab851",
+    "max_questions": 10,
+    "sampling_seed": 42,
+    "model": "qwen3:32b",
+    "think": false,
+    "temperature": 0.0,
+    "num_predict": 50,
+    "modes": [
+      "llm_only",
+      "text_retrieval",
+      "kg_1hop",
+      "kg_2hop",
+      "hybrid"
+    ]
+  },
+  "graph_builder": {
+    "blob": "285ca113de9c2ce0b980f3ae179ce2bd626d12cb",
+    "confidence_threshold": 0.7,
+    "confidence_filter_mode": "confidence",
+    "verified_graph_policy": "reuse-compatible-completed-graph-or-block"
+  },
+  "artifacts": {
+    "inference": {
+      "sha256": "4d587f77832968a8e28b2e399d528432764567125d43ac5ca7d7fe1761ec4922",
+      "records": 173
+    },
+    "confidence_graph": {
+      "retained_sha256": "e1deec394e9f15e5d98670a83034bb4357f023212076e69c7bb6dbee5e0725fb",
+      "nodes": 58,
+      "edges": 39,
+      "metadata": {
+        "filter_mode": "confidence",
+        "conf_threshold": 0.7,
+        "n_documents": 173,
+        "n_raw_triples": 39,
+        "n_entity_mentions": 59,
+        "n_canonical_entities": 58,
+        "n_merged_entities": 1,
+        "n_unique_triples": 39
+      }
+    },
+    "verified_graph": {
+      "retained_sha256": null,
+      "nodes": 48,
+      "edges": 31
+    },
+    "gold_graph": {
+      "nodes": 190,
+      "edges": 115
+    }
+  },
+  "legacy_table2_accuracy": {
+    "confidence": {
+      "llm_only": 0.0,
+      "text_retrieval": 0.2,
+      "kg_1hop": 0.0,
+      "kg_2hop": 0.0,
+      "hybrid": 0.3
+    },
+    "verified": {
+      "llm_only": 0.0,
+      "text_retrieval": 0.2,
+      "kg_1hop": 0.0,
+      "kg_2hop": 0.0,
+      "hybrid": 0.2
+    },
+    "gold": {
+      "llm_only": 0.0,
+      "text_retrieval": 0.2,
+      "kg_1hop": 0.6,
+      "kg_2hop": 0.6,
+      "hybrid": 0.5
+    }
+  },
+  "frozen_upstream_blobs": {
+    "train_span.py": "c9efd4f94260cd8021f1cca292e247cdeeb85368",
+    "inference_kg.py": "15e2058a3cce8ff89a8ccf1ecf06a5c177638522",
+    "verify_triples_llm.py": "d5cae04107410ae3011a1986faf2f2796b68a9f3",
+    "data/__init__.py": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "data/ade.py": "222bd3cf931bd5023cd85b052008fc5720bd9203",
+    "data/arxiv_real.py": "3150d8f60da53541b626a137d922f3a1adb2b9cc",
+    "data/conll04.py": "1f12897141bf7a43cda17ef699022a610b7fd43d",
+    "data/download_ade.py": "cc7d633054fbf49c295d1fbd5742f2b6e75861ff",
+    "data/download_arxiv_real.py": "6e399f0d549482bebd494a1eca4709f90f42064e",
+    "data/download_conll04.py": "291ed93e830800f41ac2a598cedac581a61172c8",
+    "data/download_scierc.py": "6ecc81a7a54b4890bb4a7686c251a25f4fb9f6cd",
+    "data/scierc.py": "84c7497192515f84598d7826883ac357f0ba03dc",
+    "data/synth_loader.py": "e4cd97447b75141e62ab0a00fee8159a22db3436",
+    "eval/__init__.py": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+    "eval/triple_f1.py": "bf87dc4416a161c9ea61759b7b18e85d21661652",
+    "models/__init__.py": "f3d9f4b1ed5a90ad4fb6377ade90da7187334877",
+    "models/bert_kg_encoder.py": "bfb2b848a531aee54e326b15e6edfa509ec0ef6b",
+    "models/critic.py": "6079ac50c65f4d8d85726f794b0b7745059a6df4",
+    "models/decoder.py": "b5d442099d87db64b1f886942f9051af2e5c40ee",
+    "models/decoder_d.py": "c4d315bbd4dabd8ea41a81b7ea5b88e99f46cf26",
+    "models/decoder_d_lora.py": "ebf886d0538ea07cb779d1427da692314b92ae79",
+    "models/electra_generator.py": "982088b899ca4304bb2a4f895b3b7119e5725555",
+    "models/encoder.py": "a7854ddaa0144fe5bd85aa9fce5a4ef193c2277a",
+    "models/encoder_reward.py": "6a0ee510c86caf342de5a05f2b2fa39292c5986a",
+    "models/transformer.py": "481dbef9cb03094720b3653a06c85c34fa40041d",
+    "models/triple_recovery.py": "e315bc5433a9e2bbe054de79f9997d1a65c24aba"
+  }
+}
