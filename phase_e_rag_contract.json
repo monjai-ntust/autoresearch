@@ -12,7 +12,7 @@
     "excluded_post_table_blob": "c06b753433681f13140d288c7e642c20e1eab851",
     "max_questions": 10,
     "sampling_seed": 42,
-    "model": "qwen3:32b",
+    "model_identity_policy": "match-hash-verified-completed-verifier-environment-manifest",
     "think": false,
     "temperature": 0.0,
     "num_predict": 50,

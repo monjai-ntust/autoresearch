@@ -23,9 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 OUTPUT_ROOT = (ROOT / "output").resolve()
 CONTRACT_PATH = ROOT / "phase_e_rag_contract.json"
-MODEL = "qwen3:32b"
 RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+MODEL_BLOB_RE = re.compile(r"sha256[-:]([0-9a-f]{64})", re.IGNORECASE)
 
 
 class PhaseEError(RuntimeError):
@@ -262,7 +262,77 @@ def validate_environment(inference_size: int) -> dict:
     }
 
 
-def fetch_model_manifest(ollama_url: str) -> tuple[dict, bytes, str]:
+def load_verifier_model_identity(path: Path, expected_hash: str) -> dict:
+    expected_hash = validate_sha256(
+        expected_hash, "--verifier-environment-sha256"
+    )
+    validate_input_file(path, expected_hash, "verifier environment manifest")
+    manifest = load_json(path)
+    if not isinstance(manifest, dict) or manifest.get("execution_mode") != "live":
+        raise PhaseEError(
+            "Verifier environment manifest must describe a completed live verifier run"
+        )
+    model = manifest.get("model")
+    if not isinstance(model, dict) or model.get("identity_verified") is not True:
+        raise PhaseEError(
+            "Verifier environment manifest lacks a verified model identity"
+        )
+    name = model.get("name")
+    if not isinstance(name, str) or not name.strip() or name != name.strip():
+        raise PhaseEError("Verifier environment manifest has an invalid model tag")
+
+    tag_digest = validate_sha256(
+        str(model.get("tag_digest", "")).removeprefix("sha256:"),
+        "verifier model tag digest",
+    )
+    registry_digest = validate_sha256(
+        str(model.get("registry_manifest_sha256", "")).removeprefix("sha256:"),
+        "verifier registry manifest digest",
+    )
+    if tag_digest != registry_digest:
+        raise PhaseEError(
+            "Verifier environment manifest contains conflicting model tag digests"
+        )
+
+    blob_sha256 = validate_sha256(
+        str(model.get("blob_sha256", "")).removeprefix("sha256:"),
+        "verifier model blob SHA-256",
+    )
+    model_blob_sha256 = validate_sha256(
+        str(model.get("model_blob_sha256", "")).removeprefix("sha256:"),
+        "verifier recorded model blob SHA-256",
+    )
+    if blob_sha256 != model_blob_sha256:
+        raise PhaseEError(
+            "Verifier environment manifest contains conflicting model blob hashes"
+        )
+
+    details = model.get("details")
+    if not isinstance(details, dict):
+        raise PhaseEError("Verifier environment manifest lacks model details")
+    expected_details = {
+        "family": details.get("family"),
+        "parameter_size": details.get("parameter_size"),
+        "quantization_level": details.get("quantization_level"),
+    }
+    if any(
+        not isinstance(value, str) or not value
+        for value in expected_details.values()
+    ):
+        raise PhaseEError("Verifier environment manifest has incomplete model details")
+    expected_details["family"] = expected_details["family"].lower()
+    return {
+        "name": name,
+        "tag_digest": tag_digest,
+        "blob_sha256": blob_sha256,
+        "details": expected_details,
+        "verifier_environment_sha256": expected_hash,
+        "verifier_condition_id": manifest.get("condition_id"),
+        "verifier_protocol_id": manifest.get("protocol_id"),
+    }
+
+
+def validate_ollama_url(ollama_url: str) -> str:
     parsed = urllib.parse.urlparse(ollama_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise PhaseEError("--ollama-url must be an absolute HTTP(S) URL")
@@ -272,12 +342,17 @@ def fetch_model_manifest(ollama_url: str) -> tuple[dict, bytes, str]:
         raise PhaseEError("Phase E permits only a loopback Ollama endpoint")
     if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
         raise PhaseEError("--ollama-url must contain only scheme, loopback host, and port")
-    url = ollama_url.rstrip("/") + "/api/show"
+    return ollama_url.rstrip("/")
+
+
+def fetch_ollama_json(
+    method: str, url: str, payload: dict | None = None
+) -> tuple[dict, bytes, str]:
     request = urllib.request.Request(
         url,
-        data=canonical_json_bytes({"model": MODEL}),
+        data=canonical_json_bytes(payload) if payload is not None else None,
         headers={"Content-Type": "application/json"},
-        method="POST",
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
@@ -285,13 +360,98 @@ def fetch_model_manifest(ollama_url: str) -> tuple[dict, bytes, str]:
     except (OSError, urllib.error.URLError) as exc:
         raise PhaseEError(f"Cannot query Ollama model identity at {url}: {exc}") from exc
     if len(raw) > 16 * 1024 * 1024:
-        raise PhaseEError("Ollama model manifest exceeds the 16 MiB safety limit")
+        raise PhaseEError("Ollama identity response exceeds the 16 MiB safety limit")
     try:
         manifest = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise PhaseEError("Ollama /api/show returned invalid UTF-8 JSON") from exc
+        raise PhaseEError(
+            f"Ollama identity endpoint returned invalid JSON: {url}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise PhaseEError(f"Ollama identity endpoint did not return an object: {url}")
     canonical = canonical_json_bytes(manifest)
     return manifest, canonical, hashlib.sha256(canonical).hexdigest()
+
+
+def fetch_matching_model(ollama_url: str, expected: dict) -> tuple[dict, bytes, bytes]:
+    origin = validate_ollama_url(ollama_url)
+    tags, tags_bytes, tags_hash = fetch_ollama_json("GET", origin + "/api/tags")
+    models = tags.get("models")
+    if not isinstance(models, list):
+        raise PhaseEError("Ollama /api/tags response lacks a models array")
+    matches = [
+        item
+        for item in models
+        if isinstance(item, dict)
+        and expected["name"] in {item.get("name"), item.get("model")}
+    ]
+    if len(matches) != 1:
+        raise PhaseEError(
+            "Ollama tag inventory does not uniquely contain the verifier model tag"
+        )
+    observed_tag_digest = validate_sha256(
+        str(matches[0].get("digest", "")).removeprefix("sha256:"),
+        "Ollama model tag digest",
+    )
+    if observed_tag_digest != expected["tag_digest"]:
+        raise PhaseEError(
+            "Ollama model tag digest differs from the completed verifier run"
+        )
+
+    show, show_bytes, show_hash = fetch_ollama_json(
+        "POST", origin + "/api/show", {"model": expected["name"]}
+    )
+    details = show.get("details")
+    if not isinstance(details, dict):
+        raise PhaseEError("Ollama /api/show response lacks model details")
+    observed_details = {
+        "family": str(details.get("family", "")).lower(),
+        "parameter_size": details.get("parameter_size"),
+        "quantization_level": details.get("quantization_level"),
+    }
+    if observed_details != expected["details"]:
+        raise PhaseEError(
+            "Ollama model details differ from the completed verifier run: "
+            + json.dumps(
+                {"expected": expected["details"], "actual": observed_details},
+                sort_keys=True,
+            )
+        )
+    modelfile = show.get("modelfile")
+    if not isinstance(modelfile, str):
+        raise PhaseEError("Ollama /api/show response lacks a Modelfile")
+    from_lines = [
+        line
+        for line in modelfile.splitlines()
+        if line.lstrip().upper().startswith("FROM ")
+    ]
+    observed_blobs = {
+        match.lower()
+        for line in from_lines
+        for match in MODEL_BLOB_RE.findall(line)
+    }
+    if observed_blobs != {expected["blob_sha256"]}:
+        raise PhaseEError(
+            "Ollama Modelfile blob identity differs from the completed verifier run"
+        )
+    return (
+        {
+            "identity_verified": True,
+            "name": expected["name"],
+            "tag_digest": observed_tag_digest,
+            "blob_sha256": expected["blob_sha256"],
+            "details": observed_details,
+            "verifier_environment_sha256": expected[
+                "verifier_environment_sha256"
+            ],
+            "verifier_condition_id": expected["verifier_condition_id"],
+            "verifier_protocol_id": expected["verifier_protocol_id"],
+            "tags_response_sha256": tags_hash,
+            "show_response_sha256": show_hash,
+        },
+        tags_bytes,
+        show_bytes,
+    )
 
 
 def validate_run_id(run_id: str) -> Path:
@@ -364,13 +524,13 @@ def copy_input(source: Path, destination: Path, expected_hash: str) -> None:
             temporary.unlink()
 
 
-def validate_rag_output(path: Path, contract: dict) -> dict:
+def validate_rag_output(path: Path, contract: dict, model_name: str) -> dict:
     output = load_json(path)
     modes = contract["evaluator"]["modes"]
     expected_questions = contract["evaluator"]["max_questions"]
     if output.get("metadata", {}).get("n_questions") != expected_questions:
         raise PhaseEError(f"RAG output has the wrong question count: {path}")
-    if output.get("metadata", {}).get("model") != MODEL:
+    if output.get("metadata", {}).get("model") != model_name:
         raise PhaseEError(f"RAG output has the wrong model tag: {path}")
     if list(output.get("accuracy", {})) != modes:
         raise PhaseEError(f"RAG output accuracy keys/order changed: {path}")
@@ -486,9 +646,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     inspect_model = subparsers.add_parser(
-        "inspect-model", help="Print the canonical Ollama model-manifest identity"
+        "inspect-model", help="Verify Ollama against a completed verifier manifest"
     )
     inspect_model.add_argument("--ollama-url", default="http://localhost:11434")
+    inspect_model.add_argument(
+        "--verifier-environment-manifest", required=True, type=Path
+    )
+    inspect_model.add_argument("--verifier-environment-sha256", required=True)
 
     run = subparsers.add_parser("run", help="Run only the downstream E-T02 stages")
     run.add_argument("--run-id", required=True)
@@ -503,7 +667,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--verified-graph-sha256")
     run.add_argument("--ollama-url", default="http://localhost:11434")
-    run.add_argument("--ollama-show-sha256")
+    run.add_argument("--verifier-environment-manifest", required=True, type=Path)
+    run.add_argument("--verifier-environment-sha256", required=True)
     run.add_argument(
         "--dry-run",
         action="store_true",
@@ -513,8 +678,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def inspect_model_command(args) -> int:
-    _manifest, _canonical, digest = fetch_model_manifest(args.ollama_url)
-    print(json.dumps({"model": MODEL, "canonical_show_sha256": digest}, indent=2))
+    verifier_environment = args.verifier_environment_manifest.expanduser().resolve()
+    expected = load_verifier_model_identity(
+        verifier_environment, args.verifier_environment_sha256
+    )
+    evidence, _tags_bytes, _show_bytes = fetch_matching_model(
+        args.ollama_url, expected
+    )
+    print(json.dumps(evidence, indent=2, sort_keys=True))
     return 0
 
 
@@ -526,6 +697,10 @@ def run_command(args, contract: dict) -> int:
     validate_input_file(inference, inference_hash, "inference")
     _rows, inference_summary = load_inference(inference, contract)
     environment_summary = validate_environment(inference.stat().st_size)
+    verifier_environment = args.verifier_environment_manifest.expanduser().resolve()
+    model_identity = load_verifier_model_identity(
+        verifier_environment, args.verifier_environment_sha256
+    )
 
     confidence = None
     confidence_summary = None
@@ -572,22 +747,14 @@ def run_command(args, contract: dict) -> int:
         "confidence": confidence_summary or "build-from-frozen-inference",
         "verified": verified_summary or "blocked-by-explicit-flag",
         "gold": "build-inside-table-era-evaluator",
+        "model_identity": model_identity,
     }
     if args.dry_run:
         print(json.dumps(plan, indent=2, sort_keys=True))
         return 0
-    if not args.ollama_show_sha256:
-        raise PhaseEError(
-            "--ollama-show-sha256 is required for a live run; use inspect-model first"
-        )
-    expected_model_hash = validate_sha256(
-        args.ollama_show_sha256, "--ollama-show-sha256"
+    model_evidence, tags_bytes, show_bytes = fetch_matching_model(
+        args.ollama_url, model_identity
     )
-    _model_manifest, model_bytes, model_hash = fetch_model_manifest(args.ollama_url)
-    if model_hash != expected_model_hash:
-        raise PhaseEError(
-            f"Ollama model identity mismatch: expected {expected_model_hash}, got {model_hash}"
-        )
 
     contract_hash = sha256_file(CONTRACT_PATH)
     identity = {
@@ -600,8 +767,12 @@ def run_command(args, contract: dict) -> int:
         "verified_graph_sha256": verified_hash,
         "verified_blocked": bool(args.block_verified),
         "ollama_url": args.ollama_url.rstrip("/"),
-        "ollama_model": MODEL,
-        "ollama_show_sha256": model_hash,
+        "ollama_model": model_identity["name"],
+        "ollama_tag_digest": model_identity["tag_digest"],
+        "ollama_model_blob_sha256": model_identity["blob_sha256"],
+        "verifier_environment_sha256": model_identity[
+            "verifier_environment_sha256"
+        ],
     }
     status_path = run_dir / "run-status.json"
     if run_dir.exists():
@@ -625,10 +796,23 @@ def run_command(args, contract: dict) -> int:
 
     copied_inference = run_dir / "inputs" / "inference.jsonl"
     copy_input(inference, copied_inference, inference_hash)
-    write_bytes_once(run_dir / "inputs" / "ollama-show.json", model_bytes)
+    copy_input(
+        verifier_environment,
+        run_dir / "inputs" / "verifier-environment-manifest.json",
+        model_identity["verifier_environment_sha256"],
+    )
+    model_check_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    model_check_dir = run_dir / "logs" / "model-identity-checks" / model_check_id
+    write_bytes_once(model_check_dir / "ollama-tags.json", tags_bytes)
+    write_bytes_once(model_check_dir / "ollama-show.json", show_bytes)
+    write_json_once(model_check_dir / "result.json", model_evidence)
     write_json_once(
         run_dir / "method-manifest.json",
-        {"contract": contract, "contract_sha256": contract_hash},
+        {
+            "contract": contract,
+            "contract_sha256": contract_hash,
+            "resolved_model_identity": model_identity,
+        },
     )
     write_json_once(
         run_dir / "environment.json",
@@ -639,6 +823,7 @@ def run_command(args, contract: dict) -> int:
             "python_executable": sys.executable,
             "preflight": environment_summary,
             "source": source,
+            "model_identity": model_identity,
         },
     )
 
@@ -697,7 +882,7 @@ def run_command(args, contract: dict) -> int:
         "--ollama-url",
         args.ollama_url.rstrip("/"),
         "--ollama-model",
-        MODEL,
+        model_identity["name"],
         "--max-questions",
         str(contract["evaluator"]["max_questions"]),
     ]
@@ -708,7 +893,7 @@ def run_command(args, contract: dict) -> int:
         evaluator_base
         + ["--kg", str(confidence_output), "--output", str(confidence_rag)],
         confidence_rag,
-        lambda path: validate_rag_output(path, contract),
+        lambda path: validate_rag_output(path, contract, model_identity["name"]),
         run_dir,
         status,
         status_path,
@@ -723,7 +908,7 @@ def run_command(args, contract: dict) -> int:
             evaluator_base
             + ["--kg", str(copied_verified), "--output", str(verified_rag)],
             verified_rag,
-            lambda path: validate_rag_output(path, contract),
+            lambda path: validate_rag_output(path, contract, model_identity["name"]),
             run_dir,
             status,
             status_path,
@@ -748,7 +933,7 @@ def run_command(args, contract: dict) -> int:
             str(gold_rag),
         ],
         gold_rag,
-        lambda path: validate_rag_output(path, contract),
+        lambda path: validate_rag_output(path, contract, model_identity["name"]),
         run_dir,
         status,
         status_path,

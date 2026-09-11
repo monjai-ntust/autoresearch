@@ -31,7 +31,8 @@ The retained `build_kg.py` can reproduce the confidence-only graph. The exact tr
 - A clean clone of branch `publication-legacy-methodology` with its Git history.
 - Python 3.10 or newer. The runner and active graph code use only the standard library.
 - `curl`, used by the frozen evaluator for Ollama chat requests.
-- A running Ollama endpoint containing the exact `qwen3:32b` model instance selected for reproduction.
+- A running Ollama endpoint containing the same model tag, registry-manifest digest, model-blob SHA-256, family, parameter size, and quantization recorded by the completed LLM-verifier run.
+- The completed verifier run's `environment-manifest.json` and its independently retained SHA-256. The runner derives model identity from this hash-verified evidence; no model tag or digest is pinned in the Phase E source or contract.
 - The completed 173-record CODE inference JSONL with SHA-256 `4d587f77832968a8e28b2e399d528432764567125d43ac5ca7d7fe1761ec4922`.
 - Optionally, the retained confidence graph with SHA-256 `e1deec394e9f15e5d98670a83034bb4357f023212076e69c7bb6dbee5e0725fb`. If omitted, the runner builds it with the frozen confidence-only graph producer at threshold `0.7`.
 - Either a user-approved completed 48-node/31-edge verified graph plus its exact SHA-256, or an explicit decision to keep that condition blocked.
@@ -47,17 +48,20 @@ python -B run_phase_e_rag.py validate-contract
 python -B -m unittest discover -s tests -v
 ```
 
-The tests check every frozen upstream blob, the active graph-builder blob, the exact evaluator-plus-guard blob, all 13 relation templates, all five runtime prompts, request payload fields, rejection of the later seven templates, the real seed-42 question projection, and the empty-run failure behavior.
+The tests check every frozen upstream blob, the active graph-builder blob, the exact evaluator-plus-guard blob, all 13 relation templates, all five runtime prompts, request payload fields, rejection of the later seven templates, the real seed-42 question projection, the empty-run failure behavior, and fail-closed verifier-to-RAG model identity matching.
 
-## Pin the Ollama model identity
+## Match the completed verifier's Ollama model identity
 
-Before a live run, record the canonical hash of the local Ollama `/api/show` response:
+Before a live run, verify that the configured Ollama endpoint matches the completed verifier's hash-verified environment manifest:
 
 ```bash
-python -B run_phase_e_rag.py inspect-model --ollama-url http://localhost:11434
+python -B run_phase_e_rag.py inspect-model \
+  --ollama-url http://localhost:11434 \
+  --verifier-environment-manifest <completed-verifier-environment-manifest.json> \
+  --verifier-environment-sha256 <verifier-environment-manifest-sha256>
 ```
 
-The live command requires the printed `canonical_show_sha256`. A tag alone is not accepted as sufficient model identity.
+The runner reads the model tag, registry-manifest digest, model-blob SHA-256, and model details from that manifest. It then compares them with `/api/tags` and `/api/show` at `--ollama-url`. Both API responses and their hashes are logged, but whole-response hashes are not treated as stable model identities.
 
 ## Dry-run the artifact plan
 
@@ -69,6 +73,8 @@ With a completed verified graph:
 python -B run_phase_e_rag.py run \
   --run-id <run-id> \
   --inference <completed-inference.jsonl> \
+  --verifier-environment-manifest <completed-verifier-environment-manifest.json> \
+  --verifier-environment-sha256 <verifier-environment-manifest-sha256> \
   --verified-graph <completed-verified-graph.json> \
   --verified-graph-sha256 <sha256> \
   --dry-run
@@ -80,6 +86,8 @@ With the verified condition explicitly blocked:
 python -B run_phase_e_rag.py run \
   --run-id <run-id> \
   --inference <completed-inference.jsonl> \
+  --verifier-environment-manifest <completed-verifier-environment-manifest.json> \
+  --verifier-environment-sha256 <verifier-environment-manifest-sha256> \
   --block-verified \
   --dry-run
 ```
@@ -88,16 +96,17 @@ Add `--confidence-graph <retained-confidence-graph.json>` to reuse the retained 
 
 ## Run the downstream workflow
 
-Remove `--dry-run` and add both the pinned model identity and endpoint:
+Remove `--dry-run` and supply the endpoint. The same verifier manifest remains the model-identity authority:
 
 ```bash
 python -B run_phase_e_rag.py run \
   --run-id <run-id> \
   --inference <completed-inference.jsonl> \
+  --verifier-environment-manifest <completed-verifier-environment-manifest.json> \
+  --verifier-environment-sha256 <verifier-environment-manifest-sha256> \
   --verified-graph <completed-verified-graph.json> \
   --verified-graph-sha256 <sha256> \
-  --ollama-url http://localhost:11434 \
-  --ollama-show-sha256 <canonical-show-sha256>
+  --ollama-url http://localhost:11434
 ```
 
 The parent research workflow will supply one fully resolved command only after the external artifact paths, verified-graph disposition/hash, and model identity are confirmed. Do not substitute artifacts or fill unknown values by guesswork.
@@ -110,7 +119,7 @@ A run creates only `output/<run-id>/`:
 output/<run-id>/
 ├── inputs/
 │   ├── inference.jsonl
-│   ├── ollama-show.json
+│   ├── verifier-environment-manifest.json
 │   └── verified-graph.json          # only when supplied
 ├── graphs/
 │   └── confidence-0.7.json
@@ -119,6 +128,10 @@ output/<run-id>/
 │   ├── verified.json                # only when supplied
 │   └── gold.json
 ├── logs/
+│   └── model-identity-checks/<timestamp>/
+│       ├── ollama-tags.json
+│       ├── ollama-show.json
+│       └── result.json
 ├── artifact-hashes.json
 ├── environment.json
 ├── method-manifest.json
