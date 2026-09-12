@@ -20,7 +20,6 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from provenance import rule_engine
 
 
 # Pronouns and stopword entities to filter
@@ -52,10 +51,6 @@ def parse_args():
     p.add_argument("--conf-threshold", type=float, default=0.5)
     p.add_argument("--similarity-threshold", type=float, default=0.8,
                    help="String similarity threshold for entity resolution.")
-    p.add_argument("--no-use-corrections", action="store_true",
-                   help="Keep triples accepted/corrected by the LLM, but preserve original encoder text and relation labels.")
-    p.add_argument("--use-rules", action="store_true",
-                   help="Apply A6 Neuro-Symbolic ontology rules to filter invalid triples.")
     return p.parse_args()
 
 
@@ -210,10 +205,10 @@ def filter_triple(triple, filter_mode, conf_threshold):
     elif filter_mode == "confidence":
         return triple["triple_conf"] >= conf_threshold
     elif filter_mode == "llm":
-        return triple.get("llm_verdict") in ("yes", "keep", "correct")
+        return triple.get("llm_verdict") in ("yes", "keep")
     elif filter_mode == "verified":
         return (triple["triple_conf"] >= conf_threshold
-                and triple.get("llm_verdict") in ("yes", "keep", "correct"))
+                and triple.get("llm_verdict") in ("yes", "keep"))
     return True
 
 
@@ -238,34 +233,11 @@ def main():
     all_entity_mentions = set()
 
     for rec in records:
-        # Build lookup for entity types in this doc
-        ent_lookup = {tuple(ent["span"]): ent["type"] for ent in rec.get("predicted_entities", [])}
-        
         for t in rec["predicted_triples"]:
             if not filter_triple(t, args.filter_mode, args.conf_threshold):
                 continue
-            
-            # Resolve types for A6 Rule Filtering
-            h_span = tuple(t["head"])
-            t_span = tuple(t["tail"])
-            h_type = ent_lookup.get(h_span, "Unknown")
-            t_type = ent_lookup.get(t_span, "Unknown")
-            
-            if (not args.no_use_corrections
-                    and t.get("llm_verdict") == "correct"
-                    and "corrected_head" in t):
-                h = t["corrected_head"].lower().strip()
-                tl = t["corrected_tail"].lower().strip()
-                rel = t["corrected_relation"]
-            else:
-                h = t["head_text"].lower().strip()
-                tl = t["tail_text"].lower().strip()
-                rel = t["relation"]
-
-            # Step 1.1: A6 Rule Filtering
-            if args.use_rules:
-                if not rule_engine.is_valid_triple(h_type, rel, t_type):
-                    continue
+            h = t["head_text"].lower().strip()
+            tl = t["tail_text"].lower().strip()
 
             # Pronoun filtering
             if is_pronoun_entity(h) or is_pronoun_entity(tl):
@@ -276,7 +248,7 @@ def main():
             raw_triples.append({
                 "head": h,
                 "tail": tl,
-                "relation": rel,
+                "relation": t["relation"],
                 "triple_conf": t["triple_conf"],
                 "source_doc": rec["doc_id"],
                 "sentence": rec["sentence"],
@@ -309,10 +281,8 @@ def main():
             triple_details[key] = {
                 "best_conf": t["triple_conf"],
                 "sources": [],
-                "source_sentences": [],
             }
         triple_details[key]["sources"].append(t["source_doc"])
-        triple_details[key]["source_sentences"].append(t["sentence"])
         resolved_triples.add(key)
 
     print(f"  After dedup: {len(resolved_triples)} unique triples")
@@ -335,8 +305,6 @@ def main():
             "tail": tl,
             "confidence": details["best_conf"],
             "n_sources": len(set(details["sources"])),
-            "source_docs": sorted(set(details["sources"])),
-            "source_sentences": list(dict.fromkeys(details["source_sentences"]))[:3],
         }
         edges.append(edge)
         nodes[h]["relations"].append(rel)

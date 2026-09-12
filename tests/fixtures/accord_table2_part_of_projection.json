@@ -1,0 +1,139 @@
+{
+  "source_path": "research-logs/results/kg_inference_accord_deberta_large_s42_test.jsonl",
+  "source_sha256_windows_checkout": "82fa304b228885279142c1a87bfded5fd765a5a7123d6ff89241e3cbe148f495",
+  "projection": "First occurrence of each unique table-era part-of question in input order.",
+  "expected_seed42_questions": [
+    "What is Extract air part of?",
+    "What is width part of?",
+    "What is cavity part of?",
+    "What is doors part of?",
+    "What is service pipes part of?",
+    "What is leaf lintels part of?",
+    "What is building part of?",
+    "What is pressure tests part of?",
+    "What is location part of?",
+    "What is area part of?"
+  ],
+  "records": [
+    {
+      "doc_id": 5,
+      "sentence": "If insulating material is inserted into a cavity in a cavity wall , reasonable precautions shall be taken to prevent the subsequent permeation of any toxic fumes from that material into any part of the building occupied by people .",
+      "gold_triples": [{"head_text": "cavity", "tail_text": "cavity wall", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 7,
+      "sentence": "Entrance doors should be capable of being held closed when not in use .",
+      "gold_triples": [{"head_text": "Entrance", "tail_text": "doors", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 12,
+      "sentence": "the location of the electric vehicle charge point or future connection location should be suitable for use by electric vehicles with charging inlets in different places .",
+      "gold_triples": [{"head_text": "location", "tail_text": "electric vehicle charge point", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 14,
+      "sentence": "Length of landings to be at least equal to the width of the ramp .",
+      "gold_triples": [{"head_text": "width", "tail_text": "ramp", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 15,
+      "sentence": "If the building has a floor area greater than 150m2 , heating should be split into different heating zones and each zone should have separate controls for timing and temperature demand .",
+      "gold_triples": [{"head_text": "building", "tail_text": "floor area", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 19,
+      "sentence": "For heating systems in new dwellings , or when a heat generator such as a boiler is replaced in an existing dwelling , each room should be provided with thermostatic room controls .",
+      "gold_triples": [{"head_text": "heating systems", "tail_text": "dwellings", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 23,
+      "sentence": "Floors and foundations : insulation should be installed tight to the structure , without air gaps between insulation panels and at edges .",
+      "gold_triples": [{"head_text": "foundations", "tail_text": "insulation", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 25,
+      "sentence": "Vertical service pipes shall be equipped with mechanical or structural leak detectors at each floor if the service pipes are not visible .",
+      "gold_triples": [{"head_text": "service pipes", "tail_text": "floor", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 27,
+      "sentence": "Taps and WC cubicle doors should be operable by people with limited strength or manual dexterity and doors to cubicles should be capable of being opened if a person has collapsed against them while inside the cubicle .",
+      "gold_triples": [{"head_text": "doors", "tail_text": "cubicles", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 33,
+      "sentence": "If the area of windows , roof windows , rooflights and doors exceeds 25 of the total floor area of the dwelling , compensating measures should be taken to improve the energy efficiency of the dwelling .",
+      "gold_triples": [{"head_text": "area", "tail_text": "doors", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 51,
+      "sentence": "The smaller dimension of each panel which can be either the width or height of the panel should be 230mm or less .",
+      "gold_triples": [{"head_text": "height", "tail_text": "panel", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 68,
+      "sentence": "The use of boards with lapped or tongue and groove edges should be considered .",
+      "gold_triples": [{"head_text": "boards", "tail_text": "edges", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 71,
+      "sentence": "The normal relationship between the dimensions of the rise and going is : twice the rise plus the going ( 2R G ) equals between 550mm and 700mm .",
+      "gold_triples": [{"head_text": "dimensions", "tail_text": "rise", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 74,
+      "sentence": "All walls , ducts and boxings to every WC/cloakroom , bath and shower room are strong enough to support grab rails , seats and other adaptations that could impose a load of 1.5kN/m2 .",
+      "gold_triples": [{"head_text": "ducts", "tail_text": "bath", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 74,
+      "sentence": "All walls , ducts and boxings to every WC/cloakroom , bath and shower room are strong enough to support grab rails , seats and other adaptations that could impose a load of 1.5kN/m2 .",
+      "gold_triples": [{"head_text": "walls", "tail_text": "shower room", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 83,
+      "sentence": "The index terminal flow rate should be set with the terminal fully open and all other terminals should be adjusted to achieve the required flows at each terminal .",
+      "gold_triples": [{"head_text": "index terminal", "tail_text": "flow rate", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 93,
+      "sentence": "The inaccuracies of the crane wheels should be determined together with the crane supplier .",
+      "gold_triples": [{"head_text": "crane", "tail_text": "wheels", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 100,
+      "sentence": "These fittings should not exceed a centre pane U-value of 1.2W/ ( m2K ) .",
+      "gold_triples": [{"head_text": "fittings", "tail_text": "centre pane U-value", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 120,
+      "sentence": "There must be access to each fire compartment of an attic for firefighting operations .",
+      "gold_triples": [{"head_text": "fire compartment", "tail_text": "attic", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 124,
+      "sentence": "For common leaf lintels , the base plate should not be continuous and the lintel core should be insulated .",
+      "gold_triples": [{"head_text": "leaf lintels", "tail_text": "base plate", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 125,
+      "sentence": "Extract air of categories 2 , 3 and 4 shall not be used as recirculation air .",
+      "gold_triples": [{"head_text": "Extract air", "tail_text": "categories", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 131,
+      "sentence": "Whichever approach is adopted , the agreed level of provision should be clearly recorded .",
+      "gold_triples": [{"head_text": "approach", "tail_text": "agreed level of provision", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 147,
+      "sentence": "The results of all pressure tests on dwellings , including any test failures , should be reported to the building control body .",
+      "gold_triples": [{"head_text": "pressure tests", "tail_text": "dwellings", "relation": "part-of"}]
+    },
+    {
+      "doc_id": 168,
+      "sentence": "Fans used for general air distribution that are rated at more than 1100W should be fitted with variable speed drives .",
+      "gold_triples": [{"head_text": "Fans", "tail_text": "air distribution", "relation": "part-of"}]
+    }
+  ]
+}

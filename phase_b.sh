@@ -496,8 +496,6 @@ run_command_check() {
   uv run --frozen --no-sync python -B phase_b.py score --help >/dev/null
   uv run --frozen --no-sync python -B train_span.py --help >/dev/null
   uv run --frozen --no-sync python -B smoke.py --help >/dev/null
-  uv run --frozen --no-sync python -B -c \
-    'import provenance.build_kg, provenance.diagnose_evidence_paths, provenance.rule_engine, provenance.verify_triples_llm'
   write_command_check_marker
 }
 

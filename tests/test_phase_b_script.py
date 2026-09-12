@@ -17,7 +17,7 @@ from paths import discover_source_root
 SOURCE_ROOT = discover_source_root(Path(__file__))
 SCRIPT = (SOURCE_ROOT / "phase_b.sh").read_text(encoding="utf-8")
 
-MOVED_PROVENANCE_MODULES = (
+REMOVED_PROVENANCE_MODULES = (
     "bench_gpu.py",
     "build_kg.py",
     "dapt_zh.py",
@@ -29,7 +29,6 @@ MOVED_PROVENANCE_MODULES = (
     "generate_entity_masks.py",
     "generate_paraphrase_dataset.py",
     "generate_synth_dataset.py",
-    "inference_kg.py",
     "rule_engine.py",
     "train_gan.py",
     "train_gumbel.py",
@@ -39,8 +38,12 @@ MOVED_PROVENANCE_MODULES = (
     "train_stage2c.py",
     "train_stage2d.py",
     "train_stage2e.py",
-    "verify_triples_llm.py",
     "zh_translate_project.py",
+)
+
+RETAINED_PROVENANCE_MODULES = (
+    "inference_kg.py",
+    "verify_triples_llm.py",
 )
 
 
@@ -120,11 +123,17 @@ class PhaseBScriptContractTests(unittest.TestCase):
         self.assertIn('metrics/publication-table.tsv', SCRIPT)
         self.assertIn('metrics/publication-summary.md', SCRIPT)
 
-    def test_secondary_entry_points_are_namespaced_as_provenance(self):
-        for name in MOVED_PROVENANCE_MODULES:
+    def test_source_tree_is_pruned_to_table_reachable_provenance(self):
+        for name in REMOVED_PROVENANCE_MODULES:
             with self.subTest(name=name):
-                self.assertFalse((SOURCE_ROOT / name).exists())
+                if name not in {"build_kg.py", "eval_graph_rag.py"}:
+                    self.assertFalse((SOURCE_ROOT / name).exists())
+                self.assertFalse((SOURCE_ROOT / "provenance" / name).exists())
+        for name in RETAINED_PROVENANCE_MODULES:
+            with self.subTest(name=name):
                 self.assertTrue((SOURCE_ROOT / "provenance" / name).is_file())
+        self.assertTrue((SOURCE_ROOT / "build_kg.py").is_file())
+        self.assertTrue((SOURCE_ROOT / "eval_graph_rag.py").is_file())
         self.assertTrue((SOURCE_ROOT / "train_span.py").is_file())
         self.assertTrue((SOURCE_ROOT / "phase_b.py").is_file())
 
