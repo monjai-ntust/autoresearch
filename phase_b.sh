@@ -26,11 +26,9 @@ ALLOW_LEGACY_DIAGNOSTIC=false
 ALLOW_LIVE_SMOKE=false
 BLOCKED_COUNT=0
 CONFIG="configs/phase_b_path_a.json"
-RESPONSE_LEDGER="inputs/frozen-simple-responses.jsonl"
 CAPTURE_INDEX="inputs/pilot/capture-index.json"
 CHECKPOINT_MANIFEST=""
 CHECKPOINT_BLOB=""
-PREDICTION_LEDGER=""
 SENTENCES=""
 CANDIDATES_OUT=""
 CANDIDATES="predictions/dev/development-candidates.jsonl"
@@ -47,6 +45,7 @@ PROTOCOL_ID=""
 WORKFLOW_ID=""
 MODEL_BLOB_SHA256=""
 ALLOW_FULL_RUN_RECOVERY_DOCTOR=false
+PILOT_REPEAT=1
 
 usage() {
   cat <<'EOF'
@@ -59,12 +58,9 @@ Then it skips only stages whose run-local completion artifacts are present and
 runs from the first incomplete selected stage. It exits immediately on a new
 error; rerun the same command after fixing the cause.
 
-For a new run ID, `fetch` first searches other local `output/<run-id>/` trees
-for the configured immutable CODE-ACCORD archive. A matching size-and-MD5
-archive is hard-linked into the new run when possible (copied only when the
-filesystem does not support hard links), then `fetch` verifies it and writes
-the new run's own acquisition manifest. A network download occurs only when
-no verified local run cache exists.
+For a new run ID, `fetch` acquires the configured immutable CODE-ACCORD archive
+directly into that run. It never searches or imports another `output/<run-id>`
+tree. The run-local copy is verified before its acquisition manifest is written.
 
 Stages:
   available          parser-check every command and run every available stage (default)
@@ -81,8 +77,8 @@ Stages:
   verifier-dry       materialize simple/corrective verifier requests
   verifier-replay    replay a simple/corrective response ledger
   verifier-live      run the simple/corrective live verifier
-  pilot-live         run one development-pilot capture
-  pilot-audit        audit the four separately captured pilot runs
+  pilot-live         run one namespaced development-pilot repeat in this run
+  pilot-audit        audit four namespaced captures from this same run
   score              run the documented strict scorer
 
 Options:
@@ -96,15 +92,14 @@ Options:
   --mode simple|corrective    Verifier mode (default: simple)
   --checkpoint-manifest PATH  Run-relative checkpoint identity manifest
   --checkpoint-blob PATH      Run-relative checkpoint weights for generate-live
-  --prediction-ledger PATH    Run-relative ledger for generate-replay
   --sentences PATH            Run-relative prepared sentence JSONL
   --candidates-out PATH       Run-relative generated-candidate JSONL
   --candidates PATH           Run-relative development candidate JSONL for threshold
-  --response-ledger PATH      Run-relative response ledger for verifier-replay
   --model-blob PATH           Run-relative Ollama blob for verifier-live
   --model-blob-source PATH    Existing local blob to hard-link/copy into --model-blob
   --pilot-candidates PATH     Run-relative pilot candidate JSONL for pilot-live
   --pilot-selection PATH      Run-relative pilot-selection JSON for pilot-live
+  --pilot-repeat 1|2          Repeat namespace for pilot-live (default: 1)
   --capture-index PATH        Run-relative four-capture index for pilot-audit
   -h, --help                  Show this help
 
@@ -172,15 +167,14 @@ while (($#)); do
     --mode) MODE="${2:-}"; shift 2 ;;
     --checkpoint-manifest) CHECKPOINT_MANIFEST="${2:-}"; shift 2 ;;
     --checkpoint-blob) CHECKPOINT_BLOB="${2:-}"; shift 2 ;;
-    --prediction-ledger) PREDICTION_LEDGER="${2:-}"; shift 2 ;;
     --sentences) SENTENCES="${2:-}"; shift 2 ;;
     --candidates-out) CANDIDATES_OUT="${2:-}"; shift 2 ;;
     --candidates) CANDIDATES="${2:-}"; shift 2 ;;
-    --response-ledger) RESPONSE_LEDGER="${2:-}"; shift 2 ;;
     --model-blob) MODEL_BLOB="${2:-}"; shift 2 ;;
     --model-blob-source) MODEL_BLOB_SOURCE="${2:-}"; shift 2 ;;
     --pilot-candidates) PILOT_CANDIDATES="${2:-}"; shift 2 ;;
     --pilot-selection) PILOT_SELECTION="${2:-}"; shift 2 ;;
+    --pilot-repeat) PILOT_REPEAT="${2:-}"; shift 2 ;;
     --capture-index) CAPTURE_INDEX="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
@@ -193,6 +187,7 @@ if [[ -z "$RUN_ID" ]]; then
 fi
 [[ "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || die "invalid --run-id: $RUN_ID"
 [[ "$MODE" == "simple" || "$MODE" == "corrective" ]] || die "--mode must be simple or corrective"
+[[ "$PILOT_REPEAT" == "1" || "$PILOT_REPEAT" == "2" ]] || die "--pilot-repeat must be 1 or 2"
 
 cd "$SOURCE_ROOT"
 readonly RUN_ROOT="output/$RUN_ID"
@@ -216,7 +211,7 @@ record_recovery_event() {
   local detail="$2"
   mkdir -p -- "$RUN_ROOT/manifests"
   uv run --frozen --no-sync python -B - \
-    "$RUN_ROOT/manifests/debug-recovery.jsonl" "$ACTIVE_STAGE_ID" \
+    "$RUN_ROOT/manifests/debug-recovery.jsonl" "$RUN_ID" "$ACTIVE_STAGE_ID" \
     "$ACTIVE_RECOVERY_MODE" "$status" "$detail" <<'PY'
 import datetime
 import json
@@ -226,10 +221,11 @@ from pathlib import Path
 path = Path(sys.argv[1])
 record = {
     "created_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    "stage_id": sys.argv[2],
-    "recovery_mode": sys.argv[3],
-    "status": sys.argv[4],
-    "detail": sys.argv[5],
+    "run_id": sys.argv[2],
+    "stage_id": sys.argv[3],
+    "recovery_mode": sys.argv[4],
+    "status": sys.argv[5],
+    "detail": sys.argv[6],
 }
 with path.open("a", encoding="utf-8", newline="\n") as handle:
     handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
@@ -240,7 +236,7 @@ last_failed_mode() {
   local stage_id="$1"
   local manifest="$RUN_ROOT/manifests/debug-recovery.jsonl"
   [[ -f "$manifest" ]] || return 1
-  uv run --frozen --no-sync python -B - "$manifest" "$stage_id" <<'PY'
+  uv run --frozen --no-sync python -B - "$manifest" "$stage_id" "$RUN_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -253,7 +249,7 @@ try:
 except (OSError, UnicodeError, json.JSONDecodeError):
     raise SystemExit(1)
 for record in reversed(records):
-    if record.get("stage_id") == sys.argv[2]:
+    if record.get("stage_id") == sys.argv[2] and record.get("run_id") == sys.argv[3]:
         if record.get("status") == "failed":
             print(record.get("recovery_mode", ""))
             raise SystemExit(0)
@@ -352,6 +348,98 @@ raise SystemExit(0 if value == expected else 1)
 PY
 }
 
+manifest_hashes_complete() {
+  local manifest="$1"
+  [[ -f "$manifest" ]] || return 1
+  uv run --frozen --no-sync python -B - "$RUN_ROOT" "$RUN_ID" "$manifest" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+run_root = Path(sys.argv[1]).resolve()
+try:
+    producer_path = Path(sys.argv[3]).resolve(strict=True)
+    producer_path.relative_to(run_root)
+    manifest = json.loads(producer_path.read_text(encoding="utf-8"))
+    outputs = manifest["outputs"]
+    valid = isinstance(outputs, dict) and bool(outputs)
+    for relative, expected in outputs.items():
+        path = (run_root / relative).resolve(strict=True)
+        path.relative_to(run_root)
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            valid = False
+            break
+    seal_path = producer_path.with_name("same-run-" + producer_path.name)
+    seal = json.loads(seal_path.read_text(encoding="utf-8"))
+    expected_seal = {
+        "schema_version": "phase-b-same-run-stage-seal-1.0",
+        "run_id": sys.argv[2],
+        "producer_manifest": {
+            "path": producer_path.relative_to(run_root).as_posix(),
+            "sha256": hashlib.sha256(producer_path.read_bytes()).hexdigest(),
+        },
+        "outputs": outputs,
+    }
+    valid = valid and seal == expected_seal
+except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+}
+
+candidate_manifest_complete() {
+  local manifest="$1"
+  local output="$2"
+  [[ -f "$manifest" && -f "$RUN_ROOT/$output" ]] || return 1
+  uv run --frozen --no-sync python -B - \
+    "$RUN_ROOT" "$RUN_ID" "$SEED" "$manifest" "$output" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+run_root = Path(sys.argv[1]).resolve()
+run_id, seed, manifest_path, output_relative = sys.argv[2:]
+try:
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    output = (run_root / output_relative).resolve(strict=True)
+    output.relative_to(run_root)
+    valid = (
+        output.is_file()
+        and manifest.get("status") == "completed"
+        and manifest.get("training_seed") == int(seed)
+        and manifest.get("candidates_output") == output_relative
+    )
+    producer_path = Path(manifest_path).resolve()
+    seal = json.loads(
+    producer_path.with_name("same-run-" + producer_path.name).read_text(
+            encoding="utf-8"
+        )
+    )
+    expected_output_hash = hashlib.sha256(output.read_bytes()).hexdigest()
+    outputs = {output_relative: expected_output_hash}
+    if manifest.get("execution_mode") == "live":
+        ledger = manifest.get("inputs", {}).get("prediction_ledger")
+        if not isinstance(ledger, dict) or not isinstance(ledger.get("path"), str):
+            valid = False
+        else:
+            outputs[ledger["path"]] = ledger.get("sha256")
+    valid = valid and seal == {
+        "schema_version": "phase-b-same-run-stage-seal-1.0",
+        "run_id": run_id,
+        "producer_manifest": {
+            "path": producer_path.relative_to(run_root).as_posix(),
+            "sha256": hashlib.sha256(producer_path.read_bytes()).hexdigest(),
+        },
+        "outputs": outputs,
+    }
+except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+}
+
 archive_ready() {
   local manifest="$RUN_ROOT/manifests/02-input-acquisition-manifest.json"
   [[ -f "$manifest" ]] || return 1
@@ -369,65 +457,6 @@ except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
     good = False
 raise SystemExit(0 if good else 1)
 PY
-}
-
-find_verified_archive_cache() {
-  uv run --frozen --no-sync python -B - "$RUN_ROOT" "$CONFIG" <<'PY'
-import hashlib
-import sys
-from pathlib import Path
-
-from acquisition import archive_contract_from_config
-from config import load_pipeline_config
-
-run_root = Path(sys.argv[1]).resolve(strict=False)
-source_root = Path.cwd().resolve()
-contract = archive_contract_from_config(
-    load_pipeline_config(source_root, sys.argv[2])
-)
-relative = Path("inputs") / "cache" / f"md5-{contract.expected_md5}" / contract.name
-
-for candidate_run in sorted((source_root / "output").glob("*")):
-    candidate = candidate_run / relative
-    if (
-        candidate_run.resolve(strict=False) == run_root
-        or candidate.is_symlink()
-        or not candidate.is_file()
-        or candidate.stat().st_size != contract.expected_bytes
-    ):
-        continue
-    digest = hashlib.md5(usedforsecurity=False)
-    with candidate.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    if digest.hexdigest() == contract.expected_md5:
-        print(f"{candidate}\t{relative.as_posix()}")
-        break
-PY
-}
-
-seed_archive_from_local_cache() {
-  local cache_entry
-  local cached_archive
-  local cache_relative
-  local cached_display
-  local destination
-  cache_entry="$(find_verified_archive_cache)"
-  [[ -n "$cache_entry" ]] || return 0
-  IFS=$'\t' read -r cached_archive cache_relative <<<"$cache_entry"
-
-  destination="$RUN_ROOT/$cache_relative"
-  [[ ! -e "$destination" ]] || return 0
-  cached_display="${cached_archive#"$SOURCE_ROOT/"}"
-  mkdir -p -- "$(dirname -- "$destination")"
-  if ln -- "$cached_archive" "$destination"; then
-    note "reusing verified CODE-ACCORD archive from $cached_display (hard link)"
-  elif cp --reflink=auto -- "$cached_archive" "$destination" 2>/dev/null \
-      || cp -- "$cached_archive" "$destination"; then
-    note "reusing verified CODE-ACCORD archive from $cached_display (copy fallback)"
-  else
-    die "could not materialize verified local archive cache from $cached_archive"
-  fi
 }
 
 skip_or_run() {
@@ -570,13 +599,15 @@ candidate_complete() {
   local execution="$1"
   local output="$2"
   local split
-  if json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED.json" status '"completed"' \
-    && [[ -f "$RUN_ROOT/$output" ]]; then
+  if candidate_manifest_complete \
+    "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED.json" \
+    "$output"; then
     return 0
   fi
   for split in development test; do
-    if json_equals "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED-$split.json" status '"completed"' \
-      && [[ -f "$RUN_ROOT/$output" ]]; then
+    if candidate_manifest_complete \
+      "$RUN_ROOT/manifests/model-generate-candidates-$execution-seed-$SEED-$split.json" \
+      "$output"; then
       return 0
     fi
   done
@@ -592,11 +623,44 @@ verifier_complete() {
   local execution="$1"
   local expected_status="$2"
   local manifest="$RUN_ROOT/manifests/verifier-$MODE-$execution.json"
-  json_equals "$manifest" status "\"$expected_status\"" && [[ -f "$manifest" ]]
+  json_equals "$manifest" status "\"$expected_status\"" \
+    && manifest_hashes_complete "$manifest" \
+    && [[ -f "$manifest" ]]
 }
 
 pilot_audit_complete() {
-  [[ -f "$RUN_ROOT/audit/verifier-pilot/pilot-audit.json" ]]
+  local audit="$RUN_ROOT/audit/verifier-pilot/pilot-audit.json"
+  [[ -f "$audit" ]] || return 1
+  uv run --frozen --no-sync python -B - "$RUN_ROOT" "$RUN_ID" "$audit" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+run_root = Path(sys.argv[1]).resolve()
+run_id = sys.argv[2]
+try:
+    audit = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+    valid = (
+        audit["schema_version"] == "phase-b-verifier-pilot-audit-1.0"
+        and audit["run_id"] == run_id
+        and audit["pilot_status"] == "pass"
+    )
+    for group in ("input_sha256", "output_sha256"):
+        bindings = audit[group]
+        if not isinstance(bindings, dict) or not bindings:
+            valid = False
+            break
+        for relative, expected in bindings.items():
+            path = (run_root / relative).resolve(strict=True)
+            path.relative_to(run_root)
+            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                valid = False
+                break
+except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
 }
 
 score_complete() {
@@ -607,8 +671,8 @@ score_complete() {
 }
 
 ensure_doctor() {
-  if [[ "$ALLOW_FULL_RUN_RECOVERY_DOCTOR" == true ]] && smoke_doctor_complete; then
-    note "reusing the existing passing checkout manifest for full-run recovery"
+  if [[ "$ALLOW_FULL_RUN_RECOVERY_DOCTOR" == true ]] && doctor_complete; then
+    note "reusing the existing passing checkout manifest for same-source full-run recovery"
     return 0
   fi
   skip_or_run doctor doctor_complete \
@@ -623,9 +687,6 @@ ensure_reconcile() {
 }
 
 ensure_fetch() {
-  if ! fetch_complete; then
-    seed_archive_from_local_cache
-  fi
   skip_or_run fetch fetch_complete \
     uv run --frozen --no-sync python -B phase_b.py fetch \
       --config "$CONFIG" --run-id "$RUN_ID"
@@ -648,8 +709,7 @@ ensure_bootstrap() {
 }
 
 smoke_doctor_complete() {
-  [[ -z "$(git status --porcelain --untracked-files=all)" ]] \
-    && json_equals "$RUN_ROOT/manifests/00-checkout-manifest.json" status '"pass"'
+  doctor_complete
 }
 
 ensure_smoke_bootstrap() {
@@ -814,11 +874,13 @@ ensure_generate_live() {
   fi
   if [[ -e "$RUN_ROOT/$output" \
       || -e "$RUN_ROOT/$output_dir/seed-$SEED-prediction-ledger.jsonl" \
-      || -e "$RUN_ROOT/manifests/model-generate-candidates-live-seed-$SEED-$split.json" ]]; then
+      || -e "$RUN_ROOT/manifests/model-generate-candidates-live-seed-$SEED-$split.json" \
+      || -e "$RUN_ROOT/manifests/same-run-model-generate-candidates-live-seed-$SEED-$split.json" ]]; then
     safe_cleanup_stage "$stage_id" \
       "$output" \
       "$output_dir/seed-$SEED-prediction-ledger.jsonl" \
-      "manifests/model-generate-candidates-live-seed-$SEED-$split.json"
+      "manifests/model-generate-candidates-live-seed-$SEED-$split.json" \
+      "manifests/same-run-model-generate-candidates-live-seed-$SEED-$split.json"
   fi
   begin_stage "$stage_id" "fresh"
   note "running model generate-candidates live ($split, seed $SEED)"
@@ -910,11 +972,11 @@ ensure_prepare_pilot() {
 ensure_generate_replay() {
   ensure_bootstrap
   local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
-  local prediction_ledger="${PREDICTION_LEDGER:-predictions/test/prediction-ledger.jsonl}"
+  local prediction_ledger="predictions/test/seed-$SEED-prediction-ledger.jsonl"
   [[ -f "$RUN_ROOT/$checkpoint_manifest" ]] \
     || die "generate-replay requires $checkpoint_manifest (or --checkpoint-manifest)"
   [[ -f "$RUN_ROOT/$prediction_ledger" ]] \
-    || die "generate-replay requires $prediction_ledger (or --prediction-ledger)"
+    || die "generate-replay requires canonical same-run $prediction_ledger"
   local sentences="${SENTENCES:-data-prepared/test.jsonl}"
   local output="${CANDIDATES_OUT:-predictions/test/candidates.jsonl}"
   skip_or_run "model generate-candidates replay" \
@@ -922,7 +984,7 @@ ensure_generate_replay() {
     uv run --frozen --no-sync python -B phase_b.py model generate-candidates \
       --config "$CONFIG" --run-id "$RUN_ID" --execution replay \
       --sentences "$sentences" --checkpoint-manifest "$checkpoint_manifest" \
-      --prediction-ledger "$prediction_ledger" --candidates-out "$output"
+      --candidates-out "$output"
 }
 
 candidate_replay_complete() {
@@ -964,18 +1026,29 @@ verifier_dry_complete() { verifier_complete dry-run planned; }
 
 ensure_verifier_replay() {
   ensure_bootstrap
+  local response_ledger="verifier/$MODE/responses.jsonl"
+  [[ -f "$RUN_ROOT/$response_ledger" \
+      && -f "$RUN_ROOT/manifests/verifier-$MODE-live.json" ]] \
+    || die "verifier replay requires completed same-run live $MODE responses"
   skip_or_run "verifier replay ($MODE)" verifier_replay_complete \
     uv run --frozen --no-sync python -B phase_b.py verifier \
       --config "$CONFIG" --run-id "$RUN_ID" \
-      --mode "$MODE" --execution replay --response-ledger "$RESPONSE_LEDGER"
+      --mode "$MODE" --execution replay
 }
 
-verifier_replay_complete() { verifier_complete replay completed; }
+verifier_replay_complete() {
+  local manifest="$RUN_ROOT/manifests/verifier-replay-$MODE-replay.json"
+  json_equals "$manifest" \
+    status '"completed"' \
+    && manifest_hashes_complete "$manifest" \
+    && [[ -s "$RUN_ROOT/verifier/replay/$MODE/verdicts.jsonl" ]]
+}
 
 ensure_verifier_live() {
   ensure_bootstrap
   local stage_id="final-verifier-$MODE"
   local cache_relative="inputs/recovery/verifier-$MODE-responses.jsonl"
+  local cache_manifest_relative="inputs/recovery/verifier-$MODE-responses.manifest.json"
   local cache_args=()
   local failed_mode=""
   if verifier_live_complete; then
@@ -985,21 +1058,65 @@ ensure_verifier_live() {
   failed_mode="$(last_failed_mode "$stage_id" || true)"
   begin_stage "$stage_id" "recovery-check"
   if [[ "$failed_mode" == "resume-from-response-cache" \
-      && -e "$RUN_ROOT/$cache_relative" ]]; then
-    safe_cleanup_stage "$stage_id" "$cache_relative"
+      && ( -e "$RUN_ROOT/$cache_relative" \
+        || -e "$RUN_ROOT/$cache_manifest_relative" ) ]]; then
+    safe_cleanup_stage "$stage_id" "$cache_relative" "$cache_manifest_relative"
   elif [[ -s "$RUN_ROOT/verifier/$MODE/responses.jsonl" ]]; then
+    if [[ -e "$RUN_ROOT/$cache_relative" \
+        || -e "$RUN_ROOT/$cache_manifest_relative" ]]; then
+      safe_cleanup_stage "$stage_id" "$cache_relative" "$cache_manifest_relative"
+    fi
     mkdir -p -- "$RUN_ROOT/inputs/recovery"
     cp -p -- "$RUN_ROOT/verifier/$MODE/responses.jsonl" "$RUN_ROOT/$cache_relative"
+    uv run --frozen --no-sync python -B - \
+      "$RUN_ROOT" "$RUN_ID" "$MODE" "$cache_relative" \
+      "$cache_manifest_relative" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+run_root = Path(sys.argv[1])
+run_id, mode, cache_relative, manifest_relative = sys.argv[2:]
+cache = run_root / cache_relative
+checkout_relative = "manifests/00-checkout-manifest.json"
+checkout = run_root / checkout_relative
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+document = {
+    "schema_version": "phase-b-same-run-verifier-recovery-1.0",
+    "run_id": run_id,
+    "mode": mode,
+    "response_cache": {"path": cache_relative, "sha256": digest(cache)},
+    "source_response": {
+        "path": f"verifier/{mode}/responses.jsonl",
+        "sha256": digest(cache),
+    },
+    "checkout_manifest": {
+        "path": checkout_relative,
+        "sha256": digest(checkout),
+    },
+}
+manifest = run_root / manifest_relative
+manifest.write_text(
+    json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+PY
     record_recovery_event "checkpointed" \
       "preserved completed live responses as $cache_relative before stage cleanup"
   fi
   if [[ -e "$RUN_ROOT/verifier/$MODE" \
-      || -e "$RUN_ROOT/manifests/verifier-$MODE-live.json" ]]; then
+      || -e "$RUN_ROOT/manifests/verifier-$MODE-live.json" \
+      || -e "$RUN_ROOT/manifests/same-run-verifier-$MODE-live.json" ]]; then
     safe_cleanup_stage "$stage_id" \
-      "verifier/$MODE" "manifests/verifier-$MODE-live.json"
+      "verifier/$MODE" "manifests/verifier-$MODE-live.json" \
+      "manifests/same-run-verifier-$MODE-live.json"
   fi
   if [[ -s "$RUN_ROOT/$cache_relative" ]]; then
-    cache_args=(--cache-ledger "$cache_relative")
+    cache_args=(--resume-from-cache)
     begin_stage "$stage_id" "resume-from-response-cache"
   else
     begin_stage "$stage_id" "fresh"
@@ -1016,7 +1133,31 @@ verifier_live_complete() { verifier_complete live completed; }
 
 smoke_verifier_live_complete() {
   json_equals "$RUN_ROOT/manifests/verifier-smoke-$MODE-live.json" status '"completed"' \
+    && manifest_hashes_complete "$RUN_ROOT/manifests/verifier-smoke-$MODE-live.json" \
     && [[ -f "$RUN_ROOT/verifier/smoke/$MODE/verdicts.jsonl" ]]
+}
+
+reject_cross_run_model_blob() {
+  uv run --frozen --no-sync python -B - \
+    "$MODEL_BLOB_SOURCE" "$SOURCE_ROOT/output" "$RUN_ROOT" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).resolve(strict=True)
+output_root = Path(sys.argv[2]).resolve(strict=False)
+run_root = Path(sys.argv[3]).resolve(strict=False)
+try:
+    source.relative_to(output_root)
+except ValueError:
+    raise SystemExit(0)
+try:
+    source.relative_to(run_root)
+except ValueError:
+    raise SystemExit(
+        "--model-blob-source resolves inside a different output run; "
+        "cross-run model artifacts are forbidden"
+    )
+PY
 }
 
 materialize_model_blob() {
@@ -1041,6 +1182,8 @@ materialize_model_blob() {
     || die "ollama show --modelfile $OLLAMA_MODEL did not report a FROM blob"
   [[ -f "$MODEL_BLOB_SOURCE" && ! -L "$MODEL_BLOB_SOURCE" ]] \
     || die "--model-blob-source must name a regular existing file: $MODEL_BLOB_SOURCE"
+  reject_cross_run_model_blob \
+    || die "--model-blob-source must be external primary input or belong to this run"
   begin_stage "materialize-model-blob" "fresh"
   mkdir -p "$(dirname "$destination")"
   if ln "$MODEL_BLOB_SOURCE" "$destination" 2>/dev/null; then
@@ -1060,24 +1203,28 @@ ensure_pilot_live() {
   [[ -n "$PILOT_CANDIDATES" ]] || die "pilot-live requires --pilot-candidates"
   [[ -n "$PILOT_SELECTION" ]] || die "pilot-live requires --pilot-selection"
   local sentences="${SENTENCES:-data-prepared/development.jsonl}"
-  local stage_id="pilot-verifier-$MODE"
-  if verifier_live_complete; then
-    note "development-pilot live verifier ($MODE) already has its completion artifact; skipping"
+  local capture_id="$MODE-repeat-$PILOT_REPEAT"
+  local artifact_prefix="pilot/$capture_id"
+  local relative_base="verifier/$artifact_prefix/$MODE"
+  local manifest="manifests/verifier-pilot-$capture_id-$MODE-live.json"
+  local stage_id="pilot-$capture_id"
+  if capture_bundle_complete "$capture_id" "$MODE"; then
+    note "same-run development pilot $capture_id already has its completion artifact; skipping"
     return 0
   fi
-  if [[ -e "$RUN_ROOT/verifier/$MODE" \
-      || -e "$RUN_ROOT/manifests/verifier-$MODE-live.json" ]]; then
-    safe_cleanup_stage "$stage_id" \
-      "verifier/$MODE" "manifests/verifier-$MODE-live.json"
+  if [[ -e "$RUN_ROOT/$relative_base" || -e "$RUN_ROOT/$manifest" \
+      || -e "$RUN_ROOT/manifests/same-run-${manifest##*/}" ]]; then
+    safe_cleanup_stage "$stage_id" "$relative_base" "$manifest" \
+      "manifests/same-run-${manifest##*/}"
   fi
   begin_stage "$stage_id" "fresh-no-cache"
-  note "running development-pilot live verifier ($MODE)"
+  note "running same-run development pilot $capture_id"
   uv run --frozen --no-sync python -B phase_b.py verifier \
     --config "$CONFIG" --run-id "$RUN_ID" \
     --mode "$MODE" --execution live --sentences "$sentences" \
     --candidates "$PILOT_CANDIDATES" --pilot-selection "$PILOT_SELECTION" \
-    --model-blob "$MODEL_BLOB"
-  finish_stage "development pilot $MODE capture completed"
+    --artifact-prefix "$artifact_prefix" --model-blob "$MODEL_BLOB"
+  finish_stage "same-run development pilot $capture_id completed"
 }
 
 ensure_pilot_audit() {
@@ -1154,7 +1301,7 @@ maybe_train_live() {
 
 maybe_generate_replay() {
   local checkpoint_manifest="${CHECKPOINT_MANIFEST:-checkpoints/seed-$SEED/checkpoint-manifest.json}"
-  local prediction_ledger="${PREDICTION_LEDGER:-predictions/test/prediction-ledger.jsonl}"
+  local prediction_ledger="predictions/test/seed-$SEED-prediction-ledger.jsonl"
   local sentences="${SENTENCES:-data-prepared/test.jsonl}"
   if candidate_replay_complete; then
     note "model generate-candidates replay already has its completion artifact; skipping"
@@ -1194,14 +1341,16 @@ maybe_verifier_dry() {
 }
 
 maybe_verifier_replay() {
+  local response_ledger="verifier/$MODE/responses.jsonl"
   if verifier_replay_complete; then
     note "verifier replay ($MODE) already has its completion artifact; skipping"
   elif [[ -f "$RUN_ROOT/data-prepared/test.jsonl" \
       && -f "$RUN_ROOT/predictions/test/candidates.jsonl" \
-      && -f "$RUN_ROOT/$RESPONSE_LEDGER" ]]; then
+      && -f "$RUN_ROOT/$response_ledger" \
+      && -f "$RUN_ROOT/manifests/verifier-$MODE-live.json" ]]; then
     ensure_verifier_replay
   else
-    blocked "verifier replay ($MODE) needs test sentences, test candidates, and $RESPONSE_LEDGER"
+    blocked "verifier replay ($MODE) needs test sentences, test candidates, and $response_ledger"
   fi
 }
 
@@ -1211,7 +1360,7 @@ maybe_pilot_audit() {
   elif [[ -f "$RUN_ROOT/$CAPTURE_INDEX" ]]; then
     ensure_pilot_audit
   else
-    blocked "pilot-verifier audit needs $CAPTURE_INDEX from four separately completed pilot-live runs"
+    blocked "pilot-verifier audit needs $CAPTURE_INDEX from four same-run pilot namespaces"
   fi
 }
 
@@ -1346,105 +1495,54 @@ else:
 PY
 }
 
-pilot_run_id() {
-  local mode="$1"
-  local repeat="$2"
-  local short_mode="${mode:0:1}"
-  printf '%s\n' "${RUN_ID:0:48}-pilot-${short_mode}${repeat}"
-}
-
-prepare_pilot_run_inputs() {
-  local pilot_id="$1"
-  local pilot_root="output/$pilot_id"
-  local relative
-  bash phase_b.sh \
-    --run-id "$pilot_id" --stage bootstrap --config "$CONFIG"
-  for relative in \
-    predictions/dev/development-candidates.jsonl \
-    predictions/dev/candidate-index.json \
-    predictions/dev/pilot-candidates.jsonl \
-    predictions/dev/pilot-selection.json \
-    predictions/dev/verifier-warmup-candidate.jsonl \
-    predictions/dev/threshold-selection.json; do
-    link_or_copy "$RUN_ROOT/$relative" "$pilot_root/$relative"
-  done
-  local seed
-  for seed in "${TRAINING_SEEDS[@]}"; do
-    relative="predictions/dev/seed-$seed-candidates.jsonl"
-    link_or_copy "$RUN_ROOT/$relative" "$pilot_root/$relative"
-  done
-  link_or_copy "$RUN_ROOT/$MODEL_BLOB" "$pilot_root/$MODEL_BLOB"
-}
-
 capture_bundle_complete() {
   local capture_id="$1"
   local mode="$2"
-  local root="$RUN_ROOT/inputs/pilot/captures/$capture_id"
-  [[ -f "$root/manifests/00-checkout-manifest.json" ]] \
-    && json_equals "$root/manifests/verifier-$mode-live.json" status '"completed"' \
-    && [[ -s "$root/verifier/$mode/responses.jsonl" ]] \
-    && [[ -s "$root/verifier/$mode/verdicts.jsonl" ]]
-}
-
-copy_pilot_capture() {
-  local pilot_id="$1"
-  local capture_id="$2"
-  local mode="$3"
-  local source="output/$pilot_id"
-  local relative_root="inputs/pilot/captures/$capture_id"
-  local destination="$RUN_ROOT/$relative_root"
-  if capture_bundle_complete "$capture_id" "$mode"; then
-    note "pilot capture $capture_id already copied; skipping"
-    return 0
-  fi
-  if [[ -e "$destination" ]]; then
-    safe_cleanup_stage "copy-$capture_id" "$relative_root"
-  fi
-  mkdir -p -- "$destination/manifests"
-  cp -p -- "$source/manifests/00-checkout-manifest.json" "$destination/manifests/"
-  cp -p -- "$source/manifests/verifier-$mode-live.json" "$destination/manifests/"
-  cp -a -- "$source/verifier" "$destination/verifier"
+  local base="verifier/pilot/$capture_id/$mode"
+  local manifest="manifests/verifier-pilot-$capture_id-$mode-live.json"
+  json_equals "$RUN_ROOT/$manifest" status '"completed"' \
+    && manifest_hashes_complete "$RUN_ROOT/$manifest" \
+    && [[ -s "$RUN_ROOT/$base/responses.jsonl" ]] \
+    && [[ -s "$RUN_ROOT/$base/verdicts.jsonl" ]] \
+    && [[ -s "$RUN_ROOT/$base/environment-manifest.json" ]] \
+    && [[ -s "$RUN_ROOT/$base/run-log.jsonl" ]]
 }
 
 write_capture_index() {
   local path="$RUN_ROOT/$CAPTURE_INDEX"
-  local simple1 simple2 corrective1 corrective2
-  simple1="$(pilot_run_id simple 1)"
-  simple2="$(pilot_run_id simple 2)"
-  corrective1="$(pilot_run_id corrective 1)"
-  corrective2="$(pilot_run_id corrective 2)"
-  if json_equals "$path" schema_version '"phase-b-verifier-pilot-captures-1.0"'; then
+  if json_equals "$path" schema_version '"phase-b-verifier-pilot-captures-2.0"' \
+      && json_equals "$path" run_id "\"$RUN_ID\""; then
     return 0
   fi
   if [[ -e "$path" ]]; then
     safe_cleanup_stage "index-pilot-captures" "$CAPTURE_INDEX"
   fi
   uv run --frozen --no-sync python -B - "$path" "$PROTOCOL_ID" "$WORKFLOW_ID" \
-    "$simple1" "$simple2" "$corrective1" "$corrective2" <<'PY'
+    "$RUN_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
 identities = (
-    ("simple-repeat-1", "simple", 1, sys.argv[4]),
-    ("simple-repeat-2", "simple", 2, sys.argv[5]),
-    ("corrective-repeat-1", "corrective", 1, sys.argv[6]),
-    ("corrective-repeat-2", "corrective", 2, sys.argv[7]),
+    ("simple-repeat-1", "simple", 1),
+    ("simple-repeat-2", "simple", 2),
+    ("corrective-repeat-1", "corrective", 1),
+    ("corrective-repeat-2", "corrective", 2),
 )
 document = {
-    "schema_version": "phase-b-verifier-pilot-captures-1.0",
+    "schema_version": "phase-b-verifier-pilot-captures-2.0",
     "protocol_id": sys.argv[2],
     "workflow_id": sys.argv[3],
+    "run_id": sys.argv[4],
     "captures": [
         {
             "capture_id": capture_id,
             "mode": mode,
             "repeat": repeat,
-            "source_run_id": source_run_id,
-            "capture_root": f"inputs/pilot/captures/{capture_id}",
+            "artifact_prefix": f"pilot/{capture_id}",
         }
-        for capture_id, mode, repeat, source_run_id in identities
+        for capture_id, mode, repeat in identities
     ],
 }
 path.parent.mkdir(parents=True, exist_ok=True)
@@ -1460,17 +1558,31 @@ ensure_pilot_captures() {
   local mode
   local repeat
   local capture_id
-  local pilot_id
+  local relative_base
+  local manifest
   for mode in simple corrective; do
     for repeat in 1 2; do
       capture_id="$mode-repeat-$repeat"
-      pilot_id="$(pilot_run_id "$mode" "$repeat")"
       if ! capture_bundle_complete "$capture_id" "$mode"; then
-        prepare_pilot_run_inputs "$pilot_id"
-        bash phase_b.sh \
-          --run-id "$pilot_id" --stage pilot-live --mode "$mode" \
-          --config "$CONFIG"
-        copy_pilot_capture "$pilot_id" "$capture_id" "$mode"
+        relative_base="verifier/pilot/$capture_id/$mode"
+        manifest="manifests/verifier-pilot-$capture_id-$mode-live.json"
+        if [[ -e "$RUN_ROOT/$relative_base" || -e "$RUN_ROOT/$manifest" \
+            || -e "$RUN_ROOT/manifests/same-run-${manifest##*/}" ]]; then
+          safe_cleanup_stage "pilot-$capture_id" "$relative_base" "$manifest" \
+            "manifests/same-run-${manifest##*/}"
+        fi
+        begin_stage "pilot-$capture_id" "fresh-no-cache"
+        note "running same-run development pilot capture $capture_id"
+        uv run --frozen --no-sync python -B phase_b.py verifier \
+          --config "$CONFIG" --run-id "$RUN_ID" \
+          --mode "$mode" --execution live --model-blob "$MODEL_BLOB" \
+          --artifact-prefix "pilot/$capture_id" \
+          --sentences data-prepared/development.jsonl \
+          --candidates "$PILOT_CANDIDATES" \
+          --warmup-sentences data-prepared/development.jsonl \
+          --warmup-candidates predictions/dev/verifier-warmup-candidate.jsonl \
+          --pilot-selection "$PILOT_SELECTION"
+        finish_stage "same-run pilot capture $capture_id completed"
       fi
     done
   done
@@ -1549,12 +1661,8 @@ ensure_smoke() {
       --checkpoint-blob "checkpoints/seed-$SEED/checkpoint.pt" \
       --candidates-out "predictions/smoke/test-seed-$SEED-candidates.jsonl"
   fi
-  if [[ ! -f "$RUN_ROOT/predictions/smoke/test-candidates.jsonl" ]]; then
-    uv run --frozen --no-sync python -B smoke.py prepare \
-      --source-dev "$RUN_ROOT/predictions/dev/seed-$SEED-candidates.jsonl" \
-      --generated-test "$RUN_ROOT/predictions/smoke/test-seed-$SEED-candidates.jsonl" \
-      --destination-run "$RUN_ROOT"
-  fi
+  uv run --frozen --no-sync python -B smoke.py prepare \
+    --run-id "$RUN_ID" --seed "$SEED"
   for MODE in simple corrective; do
     if ! smoke_verifier_live_complete; then
       uv run --frozen --no-sync python -B phase_b.py verifier \
@@ -1566,12 +1674,8 @@ ensure_smoke() {
         --warmup-candidates predictions/smoke/warmup-candidate.jsonl \
         --model-blob "$MODEL_BLOB"
     fi
-    if [[ ! -f "$RUN_ROOT/verifier/smoke/$MODE/pseudo-seed-verdicts.jsonl" ]]; then
-      uv run --frozen --no-sync python -B smoke.py clone-verdicts \
-        --source "$RUN_ROOT/verifier/smoke/$MODE/verdicts.jsonl" \
-        --candidates "$RUN_ROOT/predictions/smoke/test-candidates.jsonl" \
-        --destination "$RUN_ROOT/verifier/smoke/$MODE/pseudo-seed-verdicts.jsonl"
-    fi
+    uv run --frozen --no-sync python -B smoke.py clone-verdicts \
+      --run-id "$RUN_ID" --mode "$MODE"
   done
   if [[ ! -f "$RUN_ROOT/predictions/smoke/threshold-selection.json" ]]; then
     uv run --frozen --no-sync python -B phase_b.py select-threshold \
@@ -1579,6 +1683,8 @@ ensure_smoke() {
       --candidates predictions/smoke/development-candidates.jsonl \
       --out predictions/smoke/threshold-selection.json
   fi
+  uv run --frozen --no-sync python -B smoke.py seal-threshold \
+    --run-id "$RUN_ID"
   if ! json_equals "$RUN_ROOT/smoke/score/metrics/metrics.json" nonpublication_smoke true; then
     uv run --frozen --no-sync python -B phase_b.py score \
       --config "$CONFIG" --run-id "$RUN_ID" \

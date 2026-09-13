@@ -1,9 +1,10 @@
 """Development-only B-07 verifier pilot audit.
 
-The pilot consumes two independently captured frozen response ledgers for each
-verifier mode.  It never calls a model and never admits publication execution;
-its job is to prove development-only pairing, schema/grounding behavior, and
-byte-stable normalized decisions before the user-facing go/no-go checkpoint.
+The pilot consumes two independently captured, same-run response namespaces for
+each verifier mode.  It never calls a model and never admits publication
+execution; its job is to prove development-only pairing, schema/grounding
+behavior, and byte-stable normalized decisions before the user-facing go/no-go
+checkpoint.
 """
 
 from __future__ import annotations
@@ -76,6 +77,7 @@ class _Capture:
     mode: str
     repeat: int
     source_run_id: str
+    artifact_prefix: str
     root: Path
     checkout_manifest: Path
     verifier_manifest: Path
@@ -394,13 +396,14 @@ def _capture_member(root: Path, relative: str) -> Path:
 def _load_capture_index(layout: RunLayout, path: Path) -> list[_Capture]:
     value = _exact_keys(
         load_json(path),
-        {"schema_version", "protocol_id", "workflow_id", "captures"},
+        {"schema_version", "protocol_id", "workflow_id", "run_id", "captures"},
         path.name,
     )
     expected_header = {
-        "schema_version": "phase-b-verifier-pilot-captures-1.0",
+        "schema_version": "phase-b-verifier-pilot-captures-2.0",
         "protocol_id": PROTOCOL_ID,
         "workflow_id": WORKFLOW_ID,
+        "run_id": layout.run_id,
     }
     for field, expected in expected_header.items():
         if value[field] != expected:
@@ -415,12 +418,11 @@ def _load_capture_index(layout: RunLayout, path: Path) -> list[_Capture]:
     if not isinstance(raw_captures, list) or len(raw_captures) != 4:
         raise DataContractError(f"{path.name}.captures must contain exactly four entries")
     captures: list[_Capture] = []
-    source_run_ids: set[str] = set()
     for index, (raw, expected_identity) in enumerate(zip(raw_captures, expected_order)):
         label = f"{path.name}.captures[{index}]"
         raw = _exact_keys(
             raw,
-            {"capture_id", "mode", "repeat", "source_run_id", "capture_root"},
+            {"capture_id", "mode", "repeat", "artifact_prefix"},
             label,
         )
         observed_identity = (raw["capture_id"], raw["mode"], raw["repeat"])
@@ -428,38 +430,34 @@ def _load_capture_index(layout: RunLayout, path: Path) -> list[_Capture]:
             raise DataContractError(
                 f"{label} must identify {expected_identity}, got {observed_identity}"
             )
-        source_run_id = raw["source_run_id"]
-        if not isinstance(source_run_id, str) or not source_run_id:
-            raise DataContractError(f"{label}.source_run_id must be nonempty")
-        if source_run_id in source_run_ids:
-            raise DataContractError(f"{label}.source_run_id must be unique")
-        source_run_ids.add(source_run_id)
-        capture_root = raw["capture_root"]
-        if not isinstance(capture_root, str) or not capture_root:
-            raise DataContractError(f"{label}.capture_root must be nonempty")
-        root = layout.resolve(capture_root, must_exist=True)
+        artifact_prefix = raw["artifact_prefix"]
+        expected_prefix = f"pilot/{raw['capture_id']}"
+        if artifact_prefix != expected_prefix:
+            raise DataContractError(
+                f"{label}.artifact_prefix must be {expected_prefix!r}"
+            )
+        root = layout.require_existing()
         if not root.is_dir():
-            raise DataContractError(f"{label}.capture_root must be a directory")
+            raise DataContractError(f"{label} selected run root must be a directory")
         mode = raw["mode"]
+        base = f"verifier/{artifact_prefix}/{mode}"
+        manifest_name = (
+            f"verifier-{artifact_prefix.replace('/', '-')}-{mode}-live.json"
+        )
         captures.append(
             _Capture(
                 capture_id=raw["capture_id"],
                 mode=mode,
                 repeat=raw["repeat"],
-                source_run_id=source_run_id,
+                source_run_id=layout.run_id,
+                artifact_prefix=artifact_prefix,
                 root=root,
-                checkout_manifest=_capture_member(
-                    root, "manifests/00-checkout-manifest.json"
-                ),
-                verifier_manifest=_capture_member(
-                    root, f"manifests/verifier-{mode}-live.json"
-                ),
-                environment_manifest=_capture_member(
-                    root, f"verifier/{mode}/environment-manifest.json"
-                ),
-                requests=_capture_member(root, f"verifier/{mode}/requests.jsonl"),
-                responses=_capture_member(root, f"verifier/{mode}/responses.jsonl"),
-                run_log=_capture_member(root, f"verifier/{mode}/run-log.jsonl"),
+                checkout_manifest=_capture_member(root, "manifests/00-checkout-manifest.json"),
+                verifier_manifest=_capture_member(root, f"manifests/{manifest_name}"),
+                environment_manifest=_capture_member(root, f"{base}/environment-manifest.json"),
+                requests=_capture_member(root, f"{base}/requests.jsonl"),
+                responses=_capture_member(root, f"{base}/responses.jsonl"),
+                run_log=_capture_member(root, f"{base}/run-log.jsonl"),
             )
         )
     return captures
@@ -813,17 +811,18 @@ def _validate_capture(
     outputs = stage.get("outputs")
     if not isinstance(outputs, dict):
         raise DataContractError(f"capture {capture.capture_id} outputs must be an object")
+    base = f"verifier/{capture.artifact_prefix}/{capture.mode}"
     required_outputs = {
-        f"verifier/{capture.mode}/requests.jsonl",
-        f"verifier/{capture.mode}/responses.jsonl",
-        f"verifier/{capture.mode}/environment-manifest.json",
-        f"verifier/{capture.mode}/run-log.jsonl",
-        f"verifier/{capture.mode}/verdicts.jsonl",
-        f"verifier/{capture.mode}/warmup-request.jsonl",
-        f"verifier/{capture.mode}/warmup-response.jsonl",
-        f"verifier/{capture.mode}/model/tags.json",
-        f"verifier/{capture.mode}/model/show.json",
-        f"verifier/{capture.mode}/model/ollama-modelfile.txt",
+        f"{base}/requests.jsonl",
+        f"{base}/responses.jsonl",
+        f"{base}/environment-manifest.json",
+        f"{base}/run-log.jsonl",
+        f"{base}/verdicts.jsonl",
+        f"{base}/warmup-request.jsonl",
+        f"{base}/warmup-response.jsonl",
+        f"{base}/model/tags.json",
+        f"{base}/model/show.json",
+        f"{base}/model/ollama-modelfile.txt",
     }
     if not required_outputs <= set(outputs):
         raise DataContractError(
@@ -889,7 +888,7 @@ def _validate_capture(
     captured_verdicts = [
         value
         for _, value in iter_jsonl(
-            _capture_member(capture.root, f"verifier/{capture.mode}/verdicts.jsonl")
+            _capture_member(capture.root, f"{base}/verdicts.jsonl")
         )
     ]
     if captured_verdicts != repeat.verdicts:
@@ -898,7 +897,7 @@ def _validate_capture(
         )
 
     warmup_requests_path = _capture_member(
-        capture.root, f"verifier/{capture.mode}/warmup-request.jsonl"
+        capture.root, f"{base}/warmup-request.jsonl"
     )
     warmup_request_rows = [value for _, value in iter_jsonl(warmup_requests_path)]
     if warmup_request_rows != [warmup_request]:
@@ -906,7 +905,7 @@ def _validate_capture(
             f"capture {capture.capture_id} warm-up request differs from the fixed input"
         )
     warmup_response_path = _capture_member(
-        capture.root, f"verifier/{capture.mode}/warmup-response.jsonl"
+        capture.root, f"{base}/warmup-response.jsonl"
     )
     warmup_responses = _load_response_ledger(
         warmup_response_path,
@@ -1116,7 +1115,7 @@ def _run_verifier_pilot(
     *,
     evidence_class: str,
 ) -> dict[str, Any]:
-    """Audit two independent development response ledgers per verifier mode."""
+    """Audit two independent same-run development ledgers per verifier mode."""
 
     layout.require_existing()
     if evidence_class not in PILOT_EVIDENCE_CLASSES:
@@ -1338,8 +1337,6 @@ def _run_verifier_pilot(
         != capture_provenance[offset + 1]["response_ledger_sha256"]
         and capture_provenance[offset]["verifier_manifest_sha256"]
         != capture_provenance[offset + 1]["verifier_manifest_sha256"]
-        and capture_provenance[offset]["source_run_id"]
-        != capture_provenance[offset + 1]["source_run_id"]
         for mode, offset in (("simple", 0), ("corrective", 2))
     }
 
@@ -1362,7 +1359,7 @@ def _run_verifier_pilot(
         _check(
             "live-capture-provenance",
             True,
-            "four clean completed live runs bind requests, model, outputs, and run logs",
+            "four completed same-run live namespaces bind requests, model, outputs, and run logs",
         ),
         _check(
             "retry-error-policy",
@@ -1506,6 +1503,7 @@ def _run_verifier_pilot(
     ]
     audit = {
         "schema_version": "phase-b-verifier-pilot-audit-1.0",
+        "run_id": layout.run_id,
         "protocol_id": PROTOCOL_ID,
         "workflow_id": WORKFLOW_ID,
         "evidence_class": evidence_class,

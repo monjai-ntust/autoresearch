@@ -16,6 +16,7 @@ from paths import discover_source_root
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
 SCRIPT = (SOURCE_ROOT / "phase_b.sh").read_text(encoding="utf-8")
+DISPATCHER = (SOURCE_ROOT / "phase_b.py").read_text(encoding="utf-8")
 
 REMOVED_PROVENANCE_MODULES = (
     "bench_gpu.py",
@@ -66,7 +67,8 @@ class PhaseBScriptContractTests(unittest.TestCase):
         self.assertIn('existing full-run recovery_source_commits is invalid', SCRIPT)
         self.assertIn('ALLOW_FULL_RUN_RECOVERY_DOCTOR=true', SCRIPT)
         self.assertIn(
-            'reusing the existing passing checkout manifest for full-run recovery', SCRIPT
+            'reusing the existing passing checkout manifest for same-source full-run recovery',
+            SCRIPT,
         )
         self.assertIn('ollama show --modelfile "$OLLAMA_MODEL"', SCRIPT)
         self.assertNotIn('BRANCH="refactor"', SCRIPT)
@@ -111,12 +113,39 @@ class PhaseBScriptContractTests(unittest.TestCase):
             SCRIPT,
         )
 
+    def test_all_reusable_inputs_and_pilot_captures_are_same_run_scoped(self):
+        self.assertNotIn("find_verified_archive_cache", SCRIPT)
+        self.assertNotIn("seed_archive_from_local_cache", SCRIPT)
+        self.assertNotIn("pilot_run_id", SCRIPT)
+        self.assertNotIn("prepare_pilot_run_inputs", SCRIPT)
+        self.assertNotIn("copy_pilot_capture", SCRIPT)
+        self.assertIn("reject_cross_run_model_blob", SCRIPT)
+        self.assertIn('--artifact-prefix "pilot/$capture_id"', SCRIPT)
+        self.assertIn('"run_id": sys.argv[4]', SCRIPT)
+        self.assertIn('"artifact_prefix": f"pilot/{capture_id}"', SCRIPT)
+        self.assertIn('begin_stage "pilot-$capture_id" "fresh-no-cache"', SCRIPT)
+        self.assertIn('finish_stage "same-run pilot capture $capture_id completed"', SCRIPT)
+        for removed_option in (
+            "--response-ledger",
+            "--prediction-ledger",
+            "--cache-ledger",
+        ):
+            self.assertNotIn(removed_option, SCRIPT)
+            self.assertNotIn(f'"{removed_option}"', DISPATCHER)
+        self.assertIn("verifier/$MODE/responses.jsonl", SCRIPT)
+        self.assertIn("seed-$SEED-prediction-ledger.jsonl", SCRIPT)
+        self.assertIn("--resume-from-cache", SCRIPT)
+        self.assertIn("phase-b-same-run-stage-seal-1.0", SCRIPT)
+        self.assertIn("_validate_pilot_capture_seals", DISPATCHER)
+
     def test_recovery_is_run_scoped_and_records_exact_resume(self):
         self.assertIn('[[ "$run_abs" == "$SOURCE_ROOT"/output/* ]]', SCRIPT)
         self.assertIn('[[ "$target_abs" == "$run_abs"/* ]]', SCRIPT)
         self.assertIn('[[ ! -L "$target" ]]', SCRIPT)
         self.assertIn("rm -rf -- \"$target\"", SCRIPT)
         self.assertIn("debug-recovery.jsonl", SCRIPT)
+        self.assertIn('"run_id": sys.argv[2]', SCRIPT)
+        self.assertIn("phase-b-same-run-verifier-recovery-1.0", SCRIPT)
         self.assertIn("print_resume_command", SCRIPT)
         self.assertIn("resume-from-response-cache", SCRIPT)
         self.assertIn("restart-state.pt", SCRIPT)

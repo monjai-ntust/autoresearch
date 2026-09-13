@@ -18,7 +18,7 @@ from phase_b_io import (
     sha256_file,
 )
 from paths import RunLayout, discover_source_root
-from pilot import PilotInputs, run_verifier_pilot
+from pilot import PilotInputs, _load_capture_index, run_verifier_pilot
 from records import StrictTriple, candidate_id_for
 from verifier import (
     _load_candidates,
@@ -377,10 +377,10 @@ class VerifierPilotTests(unittest.TestCase):
                     warmup_request, warmup_content, repeat=repeat + 2
                 )
                 capture_id = f"{mode}-repeat-{repeat}"
-                source_run_id = f"synthetic-{capture_id}"
-                capture_relative = f"inputs/pilot/captures/{capture_id}"
-                capture_root = layout.resolve(capture_relative)
-                verifier_root = capture_root / "verifier" / mode
+                source_run_id = layout.run_id
+                artifact_prefix = f"pilot/{capture_id}"
+                capture_root = layout.run_root
+                verifier_root = capture_root / "verifier" / artifact_prefix / mode
                 manifest_root = capture_root / "manifests"
                 requests_path = verifier_root / "requests.jsonl"
                 responses_path = verifier_root / "responses.jsonl"
@@ -541,7 +541,7 @@ class VerifierPilotTests(unittest.TestCase):
                     },
                 )
                 atomic_write_json(
-                    manifest_root / f"verifier-{mode}-live.json",
+                    manifest_root / f"verifier-pilot-{capture_id}-{mode}-live.json",
                     {
                         "protocol_id": PROTOCOL_ID,
                         "condition_id": f"VER-{mode.upper()}",
@@ -582,17 +582,17 @@ class VerifierPilotTests(unittest.TestCase):
                         "capture_id": capture_id,
                         "mode": mode,
                         "repeat": repeat,
-                        "source_run_id": source_run_id,
-                        "capture_root": capture_relative,
+                        "artifact_prefix": artifact_prefix,
                     }
                 )
 
         atomic_write_json(
             capture_index,
             {
-                "schema_version": "phase-b-verifier-pilot-captures-1.0",
+                "schema_version": "phase-b-verifier-pilot-captures-2.0",
                 "protocol_id": PROTOCOL_ID,
                 "workflow_id": "PATH-A-WORKFLOW-1.3",
+                "run_id": layout.run_id,
                 "captures": capture_entries,
             },
         )
@@ -637,6 +637,10 @@ class VerifierPilotTests(unittest.TestCase):
             self.assertEqual(correction["correction_strict_gold_valid"], 1)
             self.assertEqual(correction["original_invalid_to_final_valid"], 1)
             self.assertEqual(len(audit["capture_provenance"]), 4)
+            self.assertEqual(
+                {item["source_run_id"] for item in audit["capture_provenance"]},
+                {layout.run_id},
+            )
             self.assertTrue(audit["determinism"]["simple"]["normalized_identical"])
             self.assertTrue(audit["determinism"]["corrective"]["normalized_identical"])
             schema = json.loads(
@@ -648,6 +652,28 @@ class VerifierPilotTests(unittest.TestCase):
             self.assertIn("allOf", schema)
             for relative, digest in audit["output_sha256"].items():
                 self.assertEqual(sha256_file(layout.resolve(relative)), digest)
+
+    def test_capture_index_rejects_another_run_identity_without_writing(self):
+        with _temporary_output_directory() as temporary:
+            layout, inputs = self._fixture(temporary)
+            index = json.loads(inputs.capture_index.read_text(encoding="utf-8"))
+            index["run_id"] = "foreign-run"
+            atomic_write_json(inputs.capture_index, index)
+            audit_root = layout.resolve("audit/verifier-pilot")
+            with self.assertRaisesRegex(DataContractError, "run_id"):
+                _load_capture_index(layout, inputs.capture_index)
+            self.assertFalse(audit_root.exists())
+
+    def test_capture_index_rejects_a_different_valid_capture_namespace(self):
+        with _temporary_output_directory() as temporary:
+            layout, inputs = self._fixture(temporary)
+            index = json.loads(inputs.capture_index.read_text(encoding="utf-8"))
+            index["captures"][0]["artifact_prefix"] = "pilot/simple-repeat-2"
+            atomic_write_json(inputs.capture_index, index)
+            audit_root = layout.resolve("audit/verifier-pilot")
+            with self.assertRaises(DataContractError):
+                _load_capture_index(layout, inputs.capture_index)
+            self.assertFalse(audit_root.exists())
 
     def test_nondeterministic_repeat_is_retained_as_no_go(self):
         with _temporary_output_directory() as temporary:
@@ -676,12 +702,12 @@ class VerifierPilotTests(unittest.TestCase):
     def test_captured_verdicts_must_equal_response_replay(self):
         with _temporary_output_directory() as temporary:
             layout, inputs = self._fixture(temporary)
-            root = layout.resolve("inputs/pilot/captures/simple-repeat-1")
-            verdicts = root / "verifier/simple/verdicts.jsonl"
+            root = layout.run_root
+            verdicts = root / "verifier/pilot/simple-repeat-1/simple/verdicts.jsonl"
             atomic_write_jsonl(verdicts, [{"tampered": True}])
-            manifest_path = root / "manifests/verifier-simple-live.json"
+            manifest_path = root / "manifests/verifier-pilot-simple-repeat-1-simple-live.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["outputs"]["verifier/simple/verdicts.jsonl"] = sha256_file(
+            manifest["outputs"]["verifier/pilot/simple-repeat-1/simple/verdicts.jsonl"] = sha256_file(
                 verdicts
             )
             atomic_write_json(manifest_path, manifest)
@@ -693,14 +719,14 @@ class VerifierPilotTests(unittest.TestCase):
     def test_malformed_runtime_manifest_retains_contract_failure(self):
         with _temporary_output_directory() as temporary:
             layout, inputs = self._fixture(temporary)
-            root = layout.resolve("inputs/pilot/captures/simple-repeat-1")
-            environment_path = root / "verifier/simple/environment-manifest.json"
+            root = layout.run_root
+            environment_path = root / "verifier/pilot/simple-repeat-1/simple/environment-manifest.json"
             environment = json.loads(environment_path.read_text(encoding="utf-8"))
             environment.pop("software")
             atomic_write_json(environment_path, environment)
-            manifest_path = root / "manifests/verifier-simple-live.json"
+            manifest_path = root / "manifests/verifier-pilot-simple-repeat-1-simple-live.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["outputs"]["verifier/simple/environment-manifest.json"] = (
+            manifest["outputs"]["verifier/pilot/simple-repeat-1/simple/environment-manifest.json"] = (
                 sha256_file(environment_path)
             )
             atomic_write_json(manifest_path, manifest)
@@ -718,15 +744,15 @@ class VerifierPilotTests(unittest.TestCase):
     def test_volatile_ollama_response_hashes_do_not_split_runtime_identity(self):
         with _temporary_output_directory() as temporary:
             layout, inputs = self._fixture(temporary)
-            root = layout.resolve("inputs/pilot/captures/simple-repeat-2")
-            environment_path = root / "verifier/simple/environment-manifest.json"
+            root = layout.run_root
+            environment_path = root / "verifier/pilot/simple-repeat-2/simple/environment-manifest.json"
             environment = json.loads(environment_path.read_text(encoding="utf-8"))
             environment["model"]["tags_response_sha256"] = "b" * 64
             environment["model"]["show_response_sha256"] = "b" * 64
             atomic_write_json(environment_path, environment)
-            manifest_path = root / "manifests/verifier-simple-live.json"
+            manifest_path = root / "manifests/verifier-pilot-simple-repeat-2-simple-live.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["outputs"]["verifier/simple/environment-manifest.json"] = (
+            manifest["outputs"]["verifier/pilot/simple-repeat-2/simple/environment-manifest.json"] = (
                 sha256_file(environment_path)
             )
             atomic_write_json(manifest_path, manifest)

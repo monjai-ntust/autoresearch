@@ -12,7 +12,7 @@ from config import load_pipeline_config
 from doctor import run_doctor
 from model import generate_candidates, plan_training
 from threshold import select_threshold
-from phase_b_io import DataContractError
+from phase_b_io import DataContractError, atomic_write_json, sha256_file
 from paths import PathContractError, RunLayout, discover_source_root
 from pilot import PilotInputs, run_verifier_pilot
 from preparation import prepare_run
@@ -23,6 +23,223 @@ from verifier import run_verifier
 
 
 DEFAULT_CONFIG = "configs/phase_b_path_a.json"
+
+
+def _load_manifest(path: Path, label: str) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DataContractError(f"{label} is not valid JSON: {path}") from exc
+    if not isinstance(value, dict):
+        raise DataContractError(f"{label} must be a JSON object: {path}")
+    return value
+
+
+def _manifest_outputs(layout: RunLayout, manifest: dict) -> dict[str, str]:
+    declared = manifest.get("outputs")
+    if isinstance(declared, dict):
+        outputs = declared
+    else:
+        outputs = {}
+        for field in ("generation_plan_output", "candidates_output"):
+            relative = manifest.get(field)
+            if isinstance(relative, str):
+                path = layout.resolve(relative, must_exist=True)
+                outputs[relative] = sha256_file(path)
+        if (
+            manifest.get("stage") == "model-generate-candidates"
+            and manifest.get("execution_mode") == "live"
+        ):
+            ledger = manifest.get("inputs", {}).get("prediction_ledger")
+            if isinstance(ledger, dict) and isinstance(ledger.get("path"), str):
+                outputs[ledger["path"]] = ledger.get("sha256")
+    if not outputs:
+        raise DataContractError("stage producer manifest does not declare an output")
+    for relative, expected in outputs.items():
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            raise DataContractError("stage producer manifest has an invalid output binding")
+        path = layout.resolve(relative, must_exist=True)
+        if not path.is_file() or sha256_file(path) != expected:
+            raise DataContractError(f"stage output differs from its producer: {relative}")
+    return outputs
+
+
+def _same_run_seal_path(producer_manifest: Path) -> Path:
+    return producer_manifest.with_name(f"same-run-{producer_manifest.name}")
+
+
+def _write_same_run_seal(
+    layout: RunLayout, producer_manifest: Path, manifest: dict
+) -> Path:
+    outputs = _manifest_outputs(layout, manifest)
+    seal_path = _same_run_seal_path(producer_manifest)
+    document = {
+        "schema_version": "phase-b-same-run-stage-seal-1.0",
+        "run_id": layout.run_id,
+        "producer_manifest": {
+            "path": layout.relative_identity(producer_manifest),
+            "sha256": sha256_file(producer_manifest),
+        },
+        "outputs": outputs,
+    }
+    atomic_write_json(seal_path, document)
+    return seal_path
+
+
+def _validate_same_run_seal(
+    layout: RunLayout, producer_manifest: Path, manifest: dict
+) -> None:
+    outputs = _manifest_outputs(layout, manifest)
+    seal = _load_manifest(
+        _same_run_seal_path(producer_manifest), "same-run stage seal"
+    )
+    expected = {
+        "schema_version": "phase-b-same-run-stage-seal-1.0",
+        "run_id": layout.run_id,
+        "producer_manifest": {
+            "path": layout.relative_identity(producer_manifest),
+            "sha256": sha256_file(producer_manifest),
+        },
+        "outputs": outputs,
+    }
+    if seal != expected:
+        raise DataContractError("stage seal does not authenticate the selected run")
+
+
+def _find_written_manifest(
+    layout: RunLayout, pattern: str, manifest: dict
+) -> Path:
+    matches = [
+        path
+        for path in layout.resolve("manifests").glob(pattern)
+        if _load_manifest(path, "stage producer manifest") == manifest
+    ]
+    if len(matches) != 1:
+        raise DataContractError(
+            "could not identify exactly one newly written stage producer manifest"
+        )
+    return matches[0]
+
+
+def _same_run_prediction_replay_input(
+    layout: RunLayout,
+    checkpoint_manifest: Path,
+    sentences: Path,
+    candidates_out: Path,
+) -> Path:
+    checkpoint = _load_manifest(checkpoint_manifest, "checkpoint manifest")
+    seed = checkpoint.get("training_seed")
+    if not isinstance(seed, int):
+        raise DataContractError("checkpoint manifest lacks an integer training_seed")
+    ledger = layout.resolve(
+        candidates_out.parent.relative_to(layout.run_root)
+        / f"seed-{seed}-prediction-ledger.jsonl",
+        must_exist=True,
+    )
+    live_manifest_path = layout.resolve(
+        f"manifests/model-generate-candidates-live-seed-{seed}-{sentences.stem}.json",
+        must_exist=True,
+    )
+    live = _load_manifest(live_manifest_path, "same-run live prediction manifest")
+    ledger_binding = live.get("inputs", {}).get("prediction_ledger", {})
+    if (
+        live.get("stage") != "model-generate-candidates"
+        or live.get("execution_mode") != "live"
+        or live.get("status") != "completed"
+        or live.get("training_seed") != seed
+        or ledger_binding.get("path") != layout.relative_identity(ledger)
+        or ledger_binding.get("sha256") != sha256_file(ledger)
+        or live.get("inputs", {}).get("checkpoint_manifest", {}).get("path")
+        != layout.relative_identity(checkpoint_manifest)
+        or live.get("inputs", {}).get("checkpoint_manifest", {}).get("sha256")
+        != sha256_file(checkpoint_manifest)
+        or live.get("inputs", {}).get("prepared_sentences", {}).get("path")
+        != layout.relative_identity(sentences)
+        or live.get("inputs", {}).get("prepared_sentences", {}).get("sha256")
+        != sha256_file(sentences)
+    ):
+        raise DataContractError(
+            "prediction replay input is not authenticated by its same-run live producer"
+        )
+    _validate_same_run_seal(layout, live_manifest_path, live)
+    return ledger
+
+
+def _same_run_verifier_replay_input(layout: RunLayout, mode: str) -> Path:
+    responses = layout.resolve(f"verifier/{mode}/responses.jsonl", must_exist=True)
+    live_manifest_path = layout.resolve(
+        f"manifests/verifier-{mode}-live.json", must_exist=True
+    )
+    live = _load_manifest(live_manifest_path, "same-run live verifier manifest")
+    relative = layout.relative_identity(responses)
+    if (
+        live.get("condition_id") != f"VER-{mode.upper()}"
+        or live.get("execution_mode") != "live"
+        or live.get("status") != "completed"
+        or live.get("outputs", {}).get(relative) != sha256_file(responses)
+    ):
+        raise DataContractError(
+            "verifier replay input is not authenticated by its same-run live producer"
+        )
+    _validate_same_run_seal(layout, live_manifest_path, live)
+    return responses
+
+
+def _same_run_verifier_cache_input(layout: RunLayout, mode: str) -> Path:
+    cache = layout.resolve(
+        f"inputs/recovery/verifier-{mode}-responses.jsonl", must_exist=True
+    )
+    provenance_path = layout.resolve(
+        f"inputs/recovery/verifier-{mode}-responses.manifest.json", must_exist=True
+    )
+    checkout_path = layout.resolve(
+        "manifests/00-checkout-manifest.json", must_exist=True
+    )
+    provenance = _load_manifest(provenance_path, "verifier recovery provenance")
+    expected = {
+        "schema_version": "phase-b-same-run-verifier-recovery-1.0",
+        "run_id": layout.run_id,
+        "mode": mode,
+        "response_cache": {
+            "path": layout.relative_identity(cache),
+            "sha256": sha256_file(cache),
+        },
+        "source_response": {
+            "path": f"verifier/{mode}/responses.jsonl",
+            "sha256": sha256_file(cache),
+        },
+        "checkout_manifest": {
+            "path": layout.relative_identity(checkout_path),
+            "sha256": sha256_file(checkout_path),
+        },
+    }
+    if provenance != expected:
+        raise DataContractError(
+            "verifier recovery cache is not authenticated to the selected run"
+        )
+    return cache
+
+
+def _validate_pilot_capture_seals(layout: RunLayout, capture_index: Path) -> None:
+    index = _load_manifest(capture_index, "pilot capture index")
+    if index.get("run_id") != layout.run_id:
+        raise DataContractError("pilot capture index carries another run identity")
+    captures = index.get("captures")
+    if not isinstance(captures, list) or len(captures) != 4:
+        raise DataContractError("pilot capture index must contain four same-run captures")
+    for capture in captures:
+        if not isinstance(capture, dict):
+            raise DataContractError("pilot capture index contains a malformed capture")
+        mode = capture.get("mode")
+        prefix = capture.get("artifact_prefix")
+        if mode not in {"simple", "corrective"} or not isinstance(prefix, str):
+            raise DataContractError("pilot capture index contains an invalid namespace")
+        producer = layout.resolve(
+            f"manifests/verifier-{prefix.replace('/', '-')}-{mode}-live.json",
+            must_exist=True,
+        )
+        manifest = _load_manifest(producer, "pilot verifier producer manifest")
+        _validate_same_run_seal(layout, producer, manifest)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -89,10 +306,9 @@ def _parser() -> argparse.ArgumentParser:
         help="Run-relative single development warm-up candidate required by live execution",
     )
     verifier.add_argument(
-        "--response-ledger", help="Run-relative frozen response JSONL required by replay"
-    )
-    verifier.add_argument(
-        "--cache-ledger", help="Optional run-relative response cache used only by live execution"
+        "--resume-from-cache",
+        action="store_true",
+        help="Resume live execution from its canonical cache in the selected run",
     )
     verifier.add_argument("--ollama-url", default="http://localhost:11434")
     verifier.add_argument(
@@ -139,7 +355,7 @@ def _parser() -> argparse.ArgumentParser:
     pilot.add_argument(
         "--capture-index",
         required=True,
-        help="Run-relative index of four copied complete live-run evidence bundles",
+        help="Run-relative index of four complete same-run pilot namespaces",
     )
 
     assemble = subparsers.add_parser(
@@ -175,10 +391,6 @@ def _parser() -> argparse.ArgumentParser:
         "--checkpoint-manifest",
         required=True,
         help="Run-relative encoder checkpoint identity manifest",
-    )
-    generate.add_argument(
-        "--prediction-ledger",
-        help="Run-relative frozen encoder prediction ledger required by replay",
     )
     generate.add_argument(
         "--checkpoint-blob",
@@ -334,6 +546,13 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.stage == "verifier":
             configured = config.paths
+            if args.resume_from_cache and args.execution != "live":
+                raise DataContractError("--resume-from-cache is valid only for live verifier execution")
+            response_ledger = (
+                _same_run_verifier_replay_input(layout, args.mode)
+                if args.execution == "replay"
+                else None
+            )
             manifest = run_verifier(
                 layout,
                 config,
@@ -361,14 +580,10 @@ def main(argv: list[str] | None = None) -> int:
                     if args.execution == "live"
                     else None
                 ),
-                response_ledger_path=(
-                    layout.resolve(args.response_ledger, must_exist=True)
-                    if args.response_ledger
-                    else None
-                ),
+                response_ledger_path=response_ledger,
                 cache_ledger_path=(
-                    layout.resolve(args.cache_ledger, must_exist=True)
-                    if args.cache_ledger
+                    _same_run_verifier_cache_input(layout, args.mode)
+                    if args.resume_from_cache
                     else None
                 ),
                 ollama_url=args.ollama_url,
@@ -380,8 +595,16 @@ def main(argv: list[str] | None = None) -> int:
                     if args.pilot_selection
                     else None
                 ),
-                artifact_prefix=args.artifact_prefix or "",
+                artifact_prefix=args.artifact_prefix or (
+                    "replay" if args.execution == "replay" else ""
+                ),
             )
+            producer_manifest = _find_written_manifest(
+                layout,
+                f"verifier-*{args.mode}-{args.execution}.json",
+                manifest,
+            )
+            _write_same_run_seal(layout, producer_manifest, manifest)
             print(
                 json.dumps(
                     {
@@ -398,6 +621,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.stage == "pilot-verifier":
             configured = config.paths
+            capture_index = layout.resolve(
+                args.capture_index, must_exist=True
+            )
+            _validate_pilot_capture_seals(layout, capture_index)
             audit = run_verifier_pilot(
                 layout,
                 config,
@@ -433,7 +660,7 @@ def main(argv: list[str] | None = None) -> int:
                         args.threshold_selection or configured["threshold_selection"],
                         must_exist=True,
                     ),
-                    capture_index=layout.resolve(args.capture_index, must_exist=True),
+                    capture_index=capture_index,
                 ),
                 evidence_class=args.evidence_class,
             )
@@ -473,24 +700,31 @@ def main(argv: list[str] | None = None) -> int:
             if args.model_action != "generate-candidates":
                 raise DataContractError(f"unsupported model action: {args.model_action!r}")
             configured = config.paths
+            sentences = layout.resolve(
+                args.sentences or configured["sentences"], must_exist=True
+            )
+            checkpoint_manifest = layout.resolve(
+                args.checkpoint_manifest, must_exist=True
+            )
+            candidates_out = layout.resolve(args.candidates_out or configured["candidates"])
+            prediction_ledger = (
+                _same_run_prediction_replay_input(
+                    layout,
+                    checkpoint_manifest,
+                    sentences,
+                    candidates_out,
+                )
+                if args.execution == "replay"
+                else None
+            )
             manifest = generate_candidates(
                 layout,
                 config,
                 execution_mode=args.execution,
-                sentences_path=layout.resolve(
-                    args.sentences or configured["sentences"], must_exist=True
-                ),
-                checkpoint_manifest_path=layout.resolve(
-                    args.checkpoint_manifest, must_exist=True
-                ),
-                candidates_out_path=layout.resolve(
-                    args.candidates_out or configured["candidates"]
-                ),
-                prediction_ledger_path=(
-                    layout.resolve(args.prediction_ledger, must_exist=True)
-                    if args.prediction_ledger
-                    else None
-                ),
+                sentences_path=sentences,
+                checkpoint_manifest_path=checkpoint_manifest,
+                candidates_out_path=candidates_out,
+                prediction_ledger_path=prediction_ledger,
                 checkpoint_blob_path=(
                     layout.resolve(args.checkpoint_blob, must_exist=True)
                     if args.checkpoint_blob
@@ -499,6 +733,15 @@ def main(argv: list[str] | None = None) -> int:
                 base_model=args.base_model,
                 device=args.device,
             )
+            producer_manifest = _find_written_manifest(
+                layout,
+                (
+                    "model-generate-candidates-"
+                    f"{args.execution}-seed-{manifest['training_seed']}-*.json"
+                ),
+                manifest,
+            )
+            _write_same_run_seal(layout, producer_manifest, manifest)
             print(
                 json.dumps(
                     {

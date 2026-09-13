@@ -75,7 +75,7 @@ historical measurements to preserve a preferred result.
 | Duplicate preservation/collapse logic | Reuse with explicit views | Preserve both source rows in raw provenance; collapse the one identical typed key only in set-based strict gold and record the contributing rows. |
 | `split.py` | Reuse after input change | Regenerate, never transplant, the assignment from strict-view label presence. Bind its seed, input inventory, output membership, and tree hash to the new protocol. |
 | `scoring.py`, `metrics.py`, and `phase_b_statistics.py` | Reuse | Permit scoring only after strict gold and all candidates share the same approved data/split identities. Metric definitions do not change merely to retain a historical trend. |
-| `verifier.py`, `pilot.py`, `prompts/phase_b/`, and verifier schemas | Reuse | Preserve the frozen prompt-bundle/model/decoding identities, exact-token correction mapping, warm-up exclusion, three-attempt policy, cache semantics, separation of dry-run/live/replay, and development-only four-run determinism audit. Preserve the distinct full development candidate index, pre-call pilot subset manifest, authoritative split/gold hashes, clean checkout and live-run evidence bundles, retry logs, and strict-gold correction transitions. A protocol revision requires new prompt/schema hashes rather than in-place drift; synthetic pilot evidence never unlocks execution. |
+| `verifier.py`, `pilot.py`, `prompts/phase_b/`, and verifier schemas | Reuse | Preserve the frozen prompt-bundle/model/decoding identities, exact-token correction mapping, warm-up exclusion, three-attempt policy, cache semantics, separation of dry-run/live/replay, and development-only four-namespace same-run determinism audit. Preserve the distinct full development candidate index, pre-call pilot subset manifest, authoritative split/gold hashes, source-locked same-run evidence bundles, retry logs, and strict-gold correction transitions. A protocol revision requires new prompt/schema hashes rather than in-place drift; synthetic pilot evidence never unlocks execution. |
 | `data/code_accord.py` and historical evaluation helpers | Secondary support only | Do not use their fuzzy surface lookup or type-agnostic key for canonical gold. If reused operationally, place a versioned adapter behind canonical records and prove parity on eligible fixtures. |
 | Historical `train_span.py`, inference, and graph scripts | Migrate selectively | Reuse model behavior only through thin canonical adapters that enforce output paths, frozen splits, typed identities, seed/config capture, restart manifests, and no final-test tuning. |
 | Historical `provenance/verify_triples_llm.py` | Immutable verifier provenance | Its SciERC ontology, free-form line parser, and unrestricted output interface are incompatible with `CODE-VERIFIER-1`. Preserve the historical command/result lineage; do not wrap it as the canonical caller. Reuse would be limited to independently parity-tested transport mechanics, not its prompt, parser, or records. |
@@ -180,6 +180,14 @@ At minimum, revision is required if:
 When triggered, record the evidence, affected component and steps, whether the
 current canonical hard stop is still safe, the proposed amendment, validation
 needed, and approval status. Do not silently update protocol/config identities.
+
+## Phase E same-run supersession
+
+Phase E revision 0.6 prospectively replaces the historical four-run pilot
+design with four fixed repeat namespaces under one authenticated run. Replay
+consumes only same-run live producer outputs authenticated by their manifests;
+smoke helpers and recovery are likewise run-derived. Historical completed
+evidence and the dated revision entries below remain unchanged.
 
 ## Revision log
 

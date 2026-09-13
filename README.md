@@ -33,14 +33,17 @@ to audit the draft's displayed Table-3 aggregates.
 The only newly executable route is:
 
 ```text
-completed 173-record inference JSONL
-  -> exact original build_kg.py (confidence graph only)
+one authenticated completed refactored run
+  -> same-run prepared test/private gold and selected 0.25 threshold
+  -> same-run seed-42 confidence, corrective-verifier, and gold snapshots
+  -> deterministic representation-only projections
   -> exact table-era eval_graph_rag.py + one empty-run guard
   -> five Table-2 RAG conditions and legacy comparison
 ```
 
-A completed compatible verified graph is consumed directly. The runner has no
-path that can reconstruct it by calling the verifier.
+The runner derives every scientific input path from one selected run root. It
+has no path that can train or invoke the encoder, invoke the verifier, rebuild a
+canonical graph, accept an arbitrary stage-output path, or import another run.
 
 ## Frozen Table-2 method
 
@@ -70,26 +73,23 @@ diagnostic sample remain disclosed frozen limitations.
 - A clean clone on branch `publication-refactored-rag`, with its Git history.
 - Python 3.10 or newer.
 - `curl`.
-- A loopback Ollama endpoint containing the same model identity recorded by a
-  completed Phase B verifier environment manifest.
-- The environment manifest and its independently retained SHA-256.
-- The completed 173-record inference JSONL, SHA-256
-  `4d587f77832968a8e28b2e399d528432764567125d43ac5ca7d7fe1761ec4922`.
-- Optionally, the retained confidence graph, SHA-256
-  `e1deec394e9f15e5d98670a83034bb4357f023212076e69c7bb6dbee5e0725fb`.
-  If absent, the runner rebuilds only this graph at threshold `0.7`.
-- Either a validated completed 48-node/31-edge verified graph and its SHA-256,
-  or an explicit `--block-verified` disposition.
+- The complete authenticated `path-a-full-20260719T153901Z` tree retained at
+  `output/path-a-full-20260719T153901Z/` under its unchanged run ID, including
+  the 20,201,240,160-byte content-addressed Ollama blob bound by the corrective
+  verifier. The compact parent archive omits this oversized blob and is not by
+  itself a complete executable restore.
+- A loopback Ollama endpoint containing the same stable model identity recorded
+  by that run's corrective-verifier environment manifest.
 
 The RAG model value is not hardcoded. The runner derives its tag, registry
 manifest digest, model blob SHA-256, family, parameter size, and quantization
-from the supplied completed-verifier manifest and checks live Ollama before any
-RAG subprocess.
+from the selected run's hash-bound corrective-verifier manifest and checks live
+Ollama before creating or modifying `phase-e-rag/`.
 
 ## Validate without model calls
 
 ```bash
-python -B run_phase_e_rag.py validate-contract
+python -I -B run_phase_e_rag.py validate-contract
 python -B -m unittest tests.test_phase_e_rag_contract tests.test_phase_e_runner -v
 ```
 
@@ -99,54 +99,49 @@ The complete retained-source regression suite can also be run with:
 python -B -m unittest discover -s tests -v
 ```
 
-## Dry-run an artifact plan
-
-With a completed verified graph:
+## Dry-run the same-run plan
 
 ```bash
-python -B run_phase_e_rag.py run \
-  --run-id <run-id> \
-  --inference <completed-inference.jsonl> \
-  --verifier-environment-manifest <environment-manifest.json> \
-  --verifier-environment-sha256 <sha256> \
-  --verified-graph <completed-verified-graph.json> \
-  --verified-graph-sha256 <sha256> \
+python -I -B run_phase_e_rag.py run \
+  --run-id path-a-full-20260719T153901Z \
   --dry-run
 ```
 
-Or preserve that condition as blocked:
+Dry-run validates source ancestry/blobs; the parent and graph-child run
+identities; the complete parent artifact set; preparation, candidate, threshold,
+verifier, model-environment, and graph bindings; exact graph IDs/shapes; stable
+projection hashes; and the ten-question contract. It does not contact Ollama or
+write any output.
+
+After the dry run passes, the exact live command is:
 
 ```bash
-python -B run_phase_e_rag.py run \
-  --run-id <run-id> \
-  --inference <completed-inference.jsonl> \
-  --verifier-environment-manifest <environment-manifest.json> \
-  --verifier-environment-sha256 <sha256> \
-  --block-verified \
-  --dry-run
+python -I -B run_phase_e_rag.py run \
+  --run-id path-a-full-20260719T153901Z \
+  --ollama-url http://localhost:11434
 ```
-
-Add `--confidence-graph <retained-confidence-graph.json>` to reuse rather than
-rebuild the confidence graph. Dry-run validates source ancestry/blobs, artifact
-hashes and schemas, graph shapes, model-manifest identity, and the ten-question
-contract. It does not contact Ollama or create a run directory.
-
-A live run removes `--dry-run` and may set
-`--ollama-url http://localhost:11434`. The parent research workflow supplies
-one fully resolved external command only after the verified-graph disposition
-and external artifact locations are fixed.
 
 ## Output and failure behavior
 
-Every runtime file is confined to ignored `output/<run-id>/`: copied immutable
-inputs, generated graphs, condition results, model-identity responses, logs,
-method/environment/status manifests, hashes, and the Table-2 comparison.
+Every new runtime file is confined to
+`output/<run-id>/phase-e-rag/`: deterministic projections, condition results,
+model-identity responses, logs, method/environment/status manifests, hashes,
+and the Table-2 comparison. Earlier stages remain unchanged in the same tree.
 
 Existing stages are reused only when run identity and stored hashes still match.
-A changed source blob, unexpected input hash/schema/count, model mismatch,
-failed or empty model response, corrupt output, output collision, or identity
-change fails closed. Failed/interrupted attempts remain in the run tree for
-audit. New results are compared with legacy values without tuning.
+A same-run stage seal binds each prospectively generated encoder-candidate or
+verifier manifest and all of its outputs to the selected `run_id` without
+altering the frozen producer modules. Recovery caches, pilot captures, and
+smoke-derived candidate/verdict/threshold artifacts carry equivalent run-local
+provenance records.
+A changed source blob, run ID, seed, threshold, candidate/verdict/environment
+binding, graph ID/hash/schema/count, model identity, projection hash, failed or
+empty model response, corrupt output, output collision, or child identity fails
+closed. Before final completion, the runner re-hashes the complete parent and
+graph-child lineages and verifies every projection and raw model-identity
+capture against its manifest. Failed/interrupted attempts remain in the run
+tree for audit. New
+results are compared with legacy values without tuning.
 
 At parent-repository finalization, every run is hash-verified and moved to the
 durable result archive; no runtime output remains in `src`.

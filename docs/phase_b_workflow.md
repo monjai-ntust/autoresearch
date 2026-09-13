@@ -57,8 +57,8 @@ It owns the canonical lifecycle, assembly, pilot, scoring, and recovery flow;
   explicit `dry-run`, optional hash-gated `live`, and model-free `replay`
   execution, and retains environment, raw-response, retry, cache, token, and
   latency evidence under the selected run.
-- `pilot-verifier` audits two independently captured response ledgers for each
-  verifier mode against development-only sentences, typed gold, candidates,
+- `pilot-verifier` audits two independently captured same-run response namespaces
+  for each verifier mode against development-only sentences, typed gold, candidates,
   and the frozen development threshold. It checks exact coverage, source-only
   prompt evidence, response schemas, cache exclusion, source-grounded
   corrections, and normalized two-call determinism. It never admits publication
@@ -67,6 +67,13 @@ It owns the canonical lifecycle, assembly, pilot, scoring, and recovery flow;
   and development-threshold records; applies typed directed matcher
   `CODE-STRICT-1`; and writes candidate outcomes, sentence outcomes, confusion
   counts, and micro metrics beneath the same run.
+
+The scientific producer modules remain byte-frozen. The dispatcher therefore
+writes a `same-run-<producer-manifest>.json` seal after each candidate-generation
+or verifier invocation. The seal names the selected `run_id`, hashes the frozen
+producer manifest, and re-hashes every declared output. Replay, pilot reuse, and
+launcher completion checks require that seal; copying an otherwise valid
+producer manifest and ledger from another run does not satisfy it.
 
 The generic `CODE-SPLIT-1` iterative multilabel assignment primitive is tested
 for exact size, disjointness, repeatability, and input-order independence.
@@ -202,21 +209,20 @@ fabricate or copy missing artifacts.
 
 Every invoked stage is fail-fast and transactional. Training resumes from its
 CPU-loaded full restart state. Full live verification preserves each completely
-written response as a run-local recovery cache. A nonresumable or repeatedly
+written response as a run-local recovery cache. Its companion recovery manifest
+names the run and mode and binds the response hash plus the run's checkout
+manifest. A nonresumable or repeatedly
 failing resume is removed only from that stage's declared subtree and rerun
 from the latest validated upstream artifacts; the runner validates the resolved
 target beneath the selected run before deletion and records failure, cleanup,
 and completion events in `manifests/debug-recovery.jsonl`. It never deletes an
 upstream completed stage, another run, or an undeclared path.
 
-For a new run ID on the same checkout, the runner avoids another network
-download when any earlier `output/<other-run-id>/` contains the immutable
-CODE-ACCORD archive. It checks that candidate's configured byte size and MD5,
-hard-links it into the new run where the filesystem permits (otherwise copies
-it), and then invokes `fetch` so the new run still receives an independently
-verified acquisition manifest. It downloads only when no valid local cache is
-available. The reused archive is an immutable input, not a checkpoint,
-prediction, or verifier result; every other artifact remains run-local.
+For a new run ID, `fetch` acquires the immutable CODE-ACCORD archive directly
+into that run and verifies it before writing the acquisition manifest. The
+runner never searches another `output/<run-id>/` tree as an input cache. A
+network or upstream failure therefore blocks that run instead of composing it
+from a sibling run.
 
 ## 3. Reconcile the archived Section 5 ledgers
 
@@ -437,7 +443,9 @@ When `--model-blob-source` is omitted, the runner discovers it from the frozen
 Ollama tag. It materializes the immutable blob beneath the selected run by hard
 link when possible (copy fallback otherwise); the live verifier still
 hash-verifies it before making a request. An explicit source path remains
-available for nonstandard Ollama installations.
+available for nonstandard Ollama installations. That source may be an external
+primary-input location or the selected run itself; a path beneath another
+`output/<run-id>/` tree is rejected instead of being imported across runs.
 
 This is a code-path and environment smoke test, not scientific evidence. Its
 score manifest and metrics contain `nonpublication_smoke: true`, suppress
@@ -445,6 +453,9 @@ publication seed coverage and uncertainty/statistical output, and are never
 eligible for B-07 approval, a paper table, or an eight-seed claim. The fake
 seed copies are permitted only in this explicitly namespaced diagnostic lane;
 the publishable workflow must independently train and infer every seed 42--49.
+The smoke lane writes and revalidates run-ID-bearing manifests for its derived
+candidate set, pseudo-seed verdicts, and threshold. Existing smoke files are not
+accepted merely because their canonical paths exist.
 
 Unlike normal stages, `smoke` deliberately reuses the existing run's passing
 checkout manifest rather than requiring a new `doctor` manifest for the latest
@@ -545,10 +556,12 @@ uv run --frozen python -B phase_b.py \
   --execution dry-run
 ```
 
-Use a distinct run ID to replay a frozen live-response ledger. The ledger must
-be copied beneath that run first; its cache keys must match every newly
-materialized request exactly. Replay performs no HTTP request and emits the
-schema-valid verdict file consumed by `score`:
+Replay consumes only `verifier/<mode>/responses.jsonl` authenticated by the
+completed live-verifier manifest and its run-ID-bearing stage seal in the
+selected run; the dispatcher has no
+arbitrary ledger-path option. Its cache keys must match every newly materialized
+request exactly. Replay performs no HTTP request and emits a schema-valid
+diagnostic verdict beneath `verifier/replay/<mode>/`:
 
 ```bash
 uv run --frozen python -B phase_b.py \
@@ -556,8 +569,7 @@ uv run --frozen python -B phase_b.py \
   --config configs/phase_b_path_a.json \
   --run-id path-a-simple-replay \
   --mode simple \
-  --execution replay \
-  --response-ledger inputs/frozen-simple-responses.jsonl
+  --execution replay
 ```
 
 Run the corrective condition separately with `--mode corrective`; it uses a
@@ -626,40 +638,41 @@ test data or development labels, and freezes one warm-up candidate. The
 selection manifest binds the authoritative split, full index, exact subset
 hash, candidate IDs, examples, seed coverage, and selection rule.
 
-Use four distinct clean run IDs to execute two live calls per mode. Each call
-must receive the same predeclared selection manifest as an explicit input:
+Use four distinct namespaces under the selected run to execute two live calls
+per mode. Each call must receive the same predeclared selection manifest as an
+explicit input:
 
 ```bash
 uv run --frozen python -B phase_b.py \
   verifier \
   --config configs/phase_b_path_a.json \
-  --run-id path-a-pilot-simple-1 \
+  --run-id "$RUN_ID" \
   --mode simple \
   --execution live \
   --sentences data-prepared/development.jsonl \
   --candidates predictions/dev/pilot-candidates.jsonl \
   --pilot-selection predictions/dev/pilot-selection.json \
+  --artifact-prefix pilot/simple-repeat-1 \
   --model-blob inputs/ollama/blobs/sha256-3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312
 ```
 
-Repeat as `path-a-pilot-simple-2`, then use two more run IDs for `corrective`.
-Do not resume from a response cache. Preserve each complete run. In the audit
-run, copy its checkout/stage manifests and every verifier-stage output beneath
-`inputs/pilot/captures/<mode>-repeat-<n>/` while preserving its original
-run-relative paths. The 20 GB model-blob input remains content-addressed in its
-original run and is proven by the live preflight/environment/stage identities;
-do not duplicate it four times merely to assemble the audit. Then create the
-four-entry index defined by
-`schemas/phase_b/verifier-pilot-captures.schema.json`. The auditor verifies the
-copied checkout, stage, environment, request, response, run-log, warm-up, model,
-and verdict evidence against the source manifests; a response ledger alone is
-not pilot evidence.
+Repeat with `--artifact-prefix pilot/simple-repeat-2`, then use
+`pilot/corrective-repeat-1` and `pilot/corrective-repeat-2` with the matching
+mode. Do not resume from a response cache. All four complete capture namespaces,
+their stage manifests, the shared content-addressed model blob, and the audit
+remain inside the same selected run. Create the four-entry index defined by
+`schemas/phase_b/verifier-pilot-captures.schema.json`; its top-level `run_id`
+and each fixed artifact prefix bind the namespaces. The auditor verifies the
+same checkout, environment, request, response, run-log, warm-up, model, and
+verdict evidence against those stage manifests and their stage seals; a
+response ledger alone is not
+pilot evidence.
 
 ```bash
 uv run --frozen python -B phase_b.py \
   pilot-verifier \
   --config configs/phase_b_path_a.json \
-  --run-id path-a-development-pilot \
+  --run-id "$RUN_ID" \
   --evidence-class development-pilot \
   --capture-index inputs/pilot/capture-index.json
 ```
@@ -669,8 +682,9 @@ development split, the threshold binds development gold plus the full
 eight-file candidate index, and the pilot subset is a pre-call subset of that
 index with source candidates from seeds 42–49. It reconstructs the canonical
 requests; opens and hash-verifies every indexed seed file; verifies four
-distinct clean, completed, pinned-Qwen live runs under one identical runtime;
-and proves that each capture used the fixed warm-up input and no cache ledger.
+distinct clean, completed, pinned-Qwen live namespaces inside one run and one
+runtime; and proves that each capture used the fixed warm-up input and no cache
+ledger.
 It replays the captured responses and requires record-equivalent verdicts,
 validates retry timing against exact run-log events and source-grounded
 corrections, and compares only normalized scientific decision fields between
@@ -711,17 +725,20 @@ uv run --frozen python -B phase_b.py \
   --config configs/phase_b_path_a.json \
   --run-id path-a-example \
   --execution replay \
-  --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json \
-  --prediction-ledger predictions/test/prediction-ledger.jsonl
+  --checkpoint-manifest checkpoints/seed-42/checkpoint-manifest.json
 ```
 
-The generated candidates are publication inputs only when the prediction ledger
-and checkpoint identity were themselves produced by the gated live encoder
-inference stage; a synthetic or externally supplied ledger yields development
-evidence only. Until live inference exists, place the remaining
-externally produced, schema-valid files at their configured
-paths inside a separate development run only. Such files are not publication
-inputs unless their provenance and hashes satisfy the frozen protocol:
+Replay derives `predictions/<split>/seed-<seed>-prediction-ledger.jsonl` from
+the selected checkpoint, sentences, and output namespace, then requires the
+completed live-inference manifest plus its same-run stage seal to authenticate
+that exact ledger,
+checkpoint manifest, and prepared-sentence hash. Generated candidates are
+publication inputs only when those inputs were produced and authenticated in
+the same run by the gated live encoder inference stage. Synthetic replay inputs
+are diagnostic only.
+Missing prediction, candidate, or verdict stage outputs must be regenerated from
+authenticated earlier outputs in that run; they must never be supplied from a
+different run. The canonical downstream paths are:
 
 ```text
 output/path-a-example/

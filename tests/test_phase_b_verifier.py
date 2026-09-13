@@ -18,6 +18,11 @@ from phase_b_io import (
     sha256_file,
 )
 from paths import RunLayout, discover_source_root
+from phase_b import (
+    _same_run_verifier_cache_input,
+    _same_run_verifier_replay_input,
+    _write_same_run_seal,
+)
 from records import StrictTriple, candidate_id_for
 from verifier import HttpResult, _verify_live_model, run_verifier
 
@@ -129,6 +134,78 @@ class VerifierReplayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.config = load_pipeline_config(SOURCE_ROOT, "configs/phase_b_path_a.json")
+
+    def test_dispatcher_replay_requires_same_run_live_verifier_manifest(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "same-run-replay")
+            layout.create()
+            responses = layout.resolve("verifier/simple/responses.jsonl")
+            responses.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_jsonl(responses, [{"request_id": "request-a"}])
+            manifest_path = layout.resolve("manifests/verifier-simple-live.json")
+            atomic_write_json(
+                manifest_path,
+                {
+                    "condition_id": "VER-SIMPLE",
+                    "execution_mode": "live",
+                    "status": "completed",
+                    "outputs": {
+                        layout.relative_identity(responses): sha256_file(responses)
+                    },
+                },
+            )
+            _write_same_run_seal(
+                layout,
+                manifest_path,
+                json.loads(manifest_path.read_text(encoding="utf-8")),
+            )
+            self.assertEqual(
+                _same_run_verifier_replay_input(layout, "simple"), responses
+            )
+            document = json.loads(manifest_path.read_text(encoding="utf-8"))
+            document["outputs"][layout.relative_identity(responses)] = ZERO_HASH
+            atomic_write_json(manifest_path, document)
+            with self.assertRaisesRegex(DataContractError, "same-run live producer"):
+                _same_run_verifier_replay_input(layout, "simple")
+
+    def test_recovery_cache_requires_same_run_provenance(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "same-run-recovery")
+            layout.create()
+            cache = layout.resolve(
+                "inputs/recovery/verifier-simple-responses.jsonl"
+            )
+            checkout = layout.resolve("manifests/00-checkout-manifest.json")
+            atomic_write_jsonl(cache, [{"request_id": "request-a"}])
+            atomic_write_json(checkout, {"run_id": layout.run_id, "status": "pass"})
+            provenance = layout.resolve(
+                "inputs/recovery/verifier-simple-responses.manifest.json"
+            )
+            document = {
+                "schema_version": "phase-b-same-run-verifier-recovery-1.0",
+                "run_id": layout.run_id,
+                "mode": "simple",
+                "response_cache": {
+                    "path": layout.relative_identity(cache),
+                    "sha256": sha256_file(cache),
+                },
+                "source_response": {
+                    "path": "verifier/simple/responses.jsonl",
+                    "sha256": sha256_file(cache),
+                },
+                "checkout_manifest": {
+                    "path": layout.relative_identity(checkout),
+                    "sha256": sha256_file(checkout),
+                },
+            }
+            atomic_write_json(provenance, document)
+            self.assertEqual(
+                _same_run_verifier_cache_input(layout, "simple"), cache
+            )
+            document["run_id"] = "foreign-run"
+            atomic_write_json(provenance, document)
+            with self.assertRaisesRegex(DataContractError, "selected run"):
+                _same_run_verifier_cache_input(layout, "simple")
 
     def _planned_request(self, mode: str) -> dict:
         with _temporary_output_directory() as temporary:

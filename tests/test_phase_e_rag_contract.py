@@ -264,15 +264,18 @@ class PhaseENoTouchTests(unittest.TestCase):
             ).stdout.strip()
             self.assertEqual(actual, expected, path)
 
-    def test_graph_builder_git_blob_is_unchanged(self):
-        actual = subprocess.run(
-            ["git", "hash-object", "--path=build_kg.py", "build_kg.py"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        self.assertEqual(actual, CONTRACT["graph_builder"]["blob"])
+    def test_same_run_interface_adaptations_are_exactly_pinned(self):
+        for path, specification in CONTRACT[
+            "same_run_interface_adaptations"
+        ].items():
+            actual = subprocess.run(
+                ["git", "hash-object", f"--path={path}", path],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertEqual(actual, specification["current_blob"], path)
 
     def test_evaluator_has_only_the_approved_post_restore_guard(self):
         actual = subprocess.run(
