@@ -3,17 +3,10 @@
 import math
 import unittest
 
-from build_kg import (
-    build_entity_clusters,
-    filter_triple,
-    is_substring_match,
-    normalize_entity,
-    pluralize_match,
-    string_similarity,
-)
 from data.scierc import BIO_TAG2ID
 from eval.triple_f1 import _bio_to_spans, _is_valid_bio_transition, _prf
-from provenance.verify_triples_llm import parse_verdict_correct, parse_verdict_simple
+from graph_construction import build_table_graphs, canonical_json, project_graph
+from records import StrictTriple, candidate_id_for
 
 
 class MetricContractTests(unittest.TestCase):
@@ -53,59 +46,108 @@ class MetricContractTests(unittest.TestCase):
         )
 
 
-class GraphContractTests(unittest.TestCase):
-    def test_entity_normalization_and_guarded_similarity(self):
-        self.assertEqual(
-            normalize_entity("The machine translation -lrb- MT -rrb-"),
-            "machine translation",
-        )
-        self.assertEqual(string_similarity("neural model", "neural network"), 1 / 3)
-        self.assertTrue(is_substring_match("graph neural model", "neural model"))
-        self.assertFalse(is_substring_match("model", "neural model"))
-        self.assertTrue(pluralize_match("graph model", "graph models"))
+def _graph_inputs():
+    example_id = "example-001"
+    source_id = "document-001"
+    prepared_sha = "1" * 64
+    strict_mapping = {
+        "head": {"start": 2, "end": 2, "type": "Quality", "text": "insulation"},
+        "relation": "part-of",
+        "tail": {"start": 0, "end": 0, "type": "Object", "text": "Wall"},
+    }
+    strict = StrictTriple.from_mapping(
+        strict_mapping, example_id=example_id, label="fixture triple"
+    )
+    candidate_id = candidate_id_for(42, strict)
+    prepared = [{
+        "dataset_id": "CODE-ACCORD-v1.0.0",
+        "example_id": example_id,
+        "source_document_id": source_id,
+        "content": "Wall contains insulation .",
+        "words": ["Wall", "contains", "insulation", "."],
+    }]
+    gold = [{
+        "protocol_id": "B04-PATH-A-1.3",
+        "split_id": "CODE-SPLIT-1",
+        "example_id": example_id,
+        "source_document_id": source_id,
+        "gold_triples": [strict_mapping],
+        "input_hashes": {"prepared_sentences": prepared_sha},
+    }]
+    candidates = [{
+        "protocol_id": "B04-PATH-A-1.3",
+        "split_id": "CODE-SPLIT-1",
+        "training_seed": 42,
+        "example_id": example_id,
+        "source_document_id": source_id,
+        "candidate_id": candidate_id,
+        **strict_mapping,
+        "triple_confidence": 0.75,
+        "input_hashes": {"prepared_sentences": prepared_sha},
+    }]
+    verdicts = [{
+        "protocol_id": "B04-PATH-A-1.3",
+        "condition_id": "VER-CORRECTIVE",
+        "training_seed": 42,
+        "candidate_id": candidate_id,
+        "response_status": "valid_response",
+        "action": "KEEP",
+        "reason_code": "SUPPORTED",
+        "corrected": None,
+        "correction_validation_status": "not_applicable",
+        "raw_response_sha256": "2" * 64,
+        "prompt_sha256": "3" * 64,
+        "model_manifest_sha256": "4" * 64,
+        "decoding_sha256": "5" * 64,
+        "attempts": 1,
+        "error_category": None,
+        "telemetry": {},
+    }]
+    return prepared, gold, candidates, verdicts, prepared_sha
 
-    def test_cluster_canonical_is_the_most_informative_mention(self):
-        mapping, clusters = build_entity_clusters(
-            ["the neural network", "neural network", "dataset"],
-            sim_threshold=0.8,
-        )
-        self.assertEqual(mapping["the neural network"], "the neural network")
-        self.assertEqual(mapping["neural network"], "the neural network")
-        self.assertEqual(len(clusters), 2)
 
-    def test_filter_modes_encode_the_documented_threshold_contract(self):
-        triple = {"triple_conf": 0.5, "llm_verdict": "yes"}
-        self.assertTrue(filter_triple(triple, "all", 0.9))
-        self.assertTrue(filter_triple(triple, "confidence", 0.5))
-        self.assertFalse(filter_triple(triple, "confidence", 0.6))
-        self.assertTrue(filter_triple(triple, "llm", 0.9))
-        self.assertTrue(filter_triple(triple, "verified", 0.5))
+def _build_graphs(run_id: str):
+    prepared, gold, candidates, verdicts, prepared_sha = _graph_inputs()
+    return build_table_graphs(
+        run_id=run_id,
+        prepared_rows=prepared,
+        gold_rows=gold,
+        candidate_rows=candidates,
+        corrective_rows=verdicts,
+        selected_threshold=0.25,
+        seed=42,
+        prepared_sha256=prepared_sha,
+        split_sha256="6" * 64,
+        gold_sha256="7" * 64,
+        candidate_sha256="8" * 64,
+        corrective_sha256="9" * 64,
+    )
 
-class VerifierContractTests(unittest.TestCase):
-    def test_simple_verdict_parser_is_prefix_based(self):
-        self.assertEqual(parse_verdict_simple("Yes."), {"action": "keep"})
-        self.assertEqual(parse_verdict_simple("No - unsupported"), {"action": "discard"})
-        self.assertEqual(
-            parse_verdict_simple("Uncertain"), {"action": "uncertain"}
-        )
-        self.assertEqual(parse_verdict_simple("Maybe"), {"action": "unknown"})
 
-    def test_correct_verdict_parser_normalizes_relation(self):
-        self.assertEqual(
-            parse_verdict_correct("CORRECT: ('encoder', used for, \"extraction\")"),
-            {
-                "action": "correct",
-                "corrected_head": "encoder",
-                "corrected_relation": "USED-FOR",
-                "corrected_tail": "extraction",
-            },
+class CanonicalGraphContractTests(unittest.TestCase):
+    def test_fixed_fixture_is_deterministic_and_preserves_all_three_conditions(self):
+        first = _build_graphs("research-run-alpha")
+        second = _build_graphs("research-run-alpha")
+        self.assertEqual(canonical_json(first), canonical_json(second))
+        self.assertEqual(list(first), ["confidence", "corrective", "gold"])
+        for snapshot in first.values():
+            self.assertEqual(len(snapshot["entities"]), 2)
+            self.assertEqual(len(snapshot["relations"]), 1)
+            self.assertEqual(len(snapshot["triples"]), 1)
+            self.assertEqual(
+                project_graph(snapshot)["edges"][0]["relation"], "part-of"
+            )
+
+    def test_run_namespace_changes_identity_but_not_evaluator_projection(self):
+        first = _build_graphs("research-run-alpha")
+        other = _build_graphs("research-run-beta")
+        self.assertNotEqual(
+            first["confidence"]["graph_id"], other["confidence"]["graph_id"]
         )
-        self.assertEqual(
-            parse_verdict_correct("CORRECT: (only, two)"),
-            {"action": "correct_failed", "raw": "only, two"},
-        )
-        self.assertEqual(parse_verdict_correct("KEEP\nexplanation"), {"action": "keep"})
-        self.assertEqual(parse_verdict_correct("DISCARD"), {"action": "discard"})
+        for condition in first:
+            self.assertEqual(
+                project_graph(first[condition]), project_graph(other[condition])
+            )
 
 
 if __name__ == "__main__":

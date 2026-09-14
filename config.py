@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import re
 
 from constants import (
     CODE_ACCORD_ANNOTATION_FILES,
@@ -21,7 +22,7 @@ from constants import (
     TRAINING_SEEDS,
     WORKFLOW_ID,
 )
-from phase_b_io import DataContractError, load_json, sha256_file
+from artifact_io import DataContractError, load_json, sha256_file
 from paths import resolve_tracked_path
 
 
@@ -151,7 +152,6 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     training = _object(_required(value, "training", "config"), "config.training")
     expected_training = {
         "base_model": "microsoft/deberta-large",
-        "base_model_revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
         "max_steps": 3500,
         "evaluation_every_steps": 100,
         "batch_size": 16,
@@ -175,6 +175,11 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     for field, expected in expected_training.items():
         if training.get(field) != expected:
             raise DataContractError(f"config.training.{field} differs from the approved recipe")
+    base_revision = training.get("base_model_revision")
+    if not isinstance(base_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", base_revision):
+        raise DataContractError(
+            "config.training.base_model_revision must identify one immutable encoder revision"
+        )
     expected_boost = {
         "initial": 5.0,
         "adaptive_step": 1000,
@@ -191,25 +196,21 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     verifier = _object(_required(value, "verifier", "config"), "config.verifier")
     expected_verifier = {
         "model": "qwen3:32b",
-        "registry_manifest_sha256": (
-            "030ee887880fc378860c2dd35101da424377520441ae4bfe7be6deff8ade7840"
-        ),
-        "model_blob_sha256": "3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
         "prompt_status": "materialized_b06",
         "prompt_revision": "CODE-VERIFIER-1",
-        "system_prompt": "prompts/phase_b/code-verifier-1-system.txt",
+        "system_prompt": "prompts/verifier/code-verifier-1-system.txt",
         "system_prompt_sha256": "d5be0378a4f0c68bb7e8038ca4008490fafb27934c0996b8d022200567126a04",
-        "simple_prompt": "prompts/phase_b/code-verifier-1-simple.txt",
+        "simple_prompt": "prompts/verifier/code-verifier-1-simple.txt",
         "simple_prompt_sha256": "6f53d575c990571a882e6e6b0fabf4a8c2ca7049b8af2fb0cc15abd1f54aa537",
-        "corrective_prompt": "prompts/phase_b/code-verifier-1-corrective.txt",
+        "corrective_prompt": "prompts/verifier/code-verifier-1-corrective.txt",
         "corrective_prompt_sha256": (
             "180e39c5a6cebd51620ee378a45c4da1cc2a5727d06de24a6717445f58fd36a3"
         ),
-        "simple_response_schema": "schemas/phase_b/verifier-simple-response.schema.json",
+        "simple_response_schema": "schemas/pipeline/verifier-simple-response.schema.json",
         "simple_response_schema_sha256": (
             "86a93ff4227d65800e76704454f0e1b1a8c7729df506c18cc66a1018cbc253d9"
         ),
-        "corrective_response_schema": "schemas/phase_b/verifier-corrective-response.schema.json",
+        "corrective_response_schema": "schemas/pipeline/verifier-corrective-response.schema.json",
         "corrective_response_schema_sha256": (
             "ff2a0e41359c230c98b8f754e57c28a4518d8bfbdd17114d8b743ab932065236"
         ),
@@ -234,6 +235,15 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     for field, expected in expected_verifier.items():
         if verifier.get(field) != expected:
             raise DataContractError(f"config.verifier.{field} differs from the approved protocol")
+    for field in (
+        "reference_registry_manifest_sha256",
+        "reference_model_blob_sha256",
+    ):
+        digest = verifier.get(field)
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise DataContractError(
+                f"config.verifier.{field} must be a historical SHA-256 reference"
+            )
     verifier_resources = {
         "system_prompt": "system_prompt_sha256",
         "simple_prompt": "simple_prompt_sha256",
@@ -247,6 +257,13 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
             raise DataContractError(
                 f"config.verifier.{hash_field} does not match {verifier[path_field]}"
             )
+    # These aliases are runtime slots. A full run replaces them with the
+    # authenticated model it actually discovers; the tracked values remain
+    # explicitly named historical references in the JSON configuration.
+    verifier["registry_manifest_sha256"] = verifier[
+        "reference_registry_manifest_sha256"
+    ]
+    verifier["model_blob_sha256"] = verifier["reference_model_blob_sha256"]
 
     environment = _object(
         _required(value, "environment", "config"), "config.environment"

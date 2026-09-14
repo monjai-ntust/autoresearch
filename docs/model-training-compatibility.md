@@ -1,4 +1,4 @@
-# Phase B model-training compatibility contract
+# Model-training compatibility contract
 
 This document freezes the evidence and minimal-difference boundary for B-05C.
 It describes implementation compatibility, not a completed experiment or a
@@ -56,7 +56,7 @@ comparison is interpreted that way.
 | Span-NER and relation heads | Existing `train_span.py` construction, including the 3H context-between-spans relation head. |
 | Entity/relation label order | Existing `data.code_accord` four entity types and `NO_REL` plus nine relation types. |
 | Span enumeration and pair construction | Existing `forward_span_ner`, loss, and evaluation functions. |
-| Losses and weights | Existing focal/label-smoothing/RE loss code with A20+A21+A12 values supplied from `phase_b_path_a.json`. |
+| Losses and weights | Existing focal/label-smoothing/RE loss code with A20+A21+A12 values supplied from `configs/pipeline.json`. |
 | Optimizer and schedule | Existing AdamW, weight decay `0.01`, linear warm-up/decay, 3,500 steps, 250 warm-up steps. |
 | Batch size and negative sampling | Existing batch size 16 and NER/RE sampling logic; canonical input uses the same dataset/collate classes. |
 | Seed initialization | Existing Python and Torch seed path, plus CUDA `manual_seed_all`; actual runtime settings are recorded. |

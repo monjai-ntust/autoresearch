@@ -12,7 +12,7 @@ from typing import Any
 
 from config import PipelineConfig
 from constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from phase_b_io import atomic_write_json
+from artifact_io import atomic_write_json
 from paths import RunLayout, resolve_tracked_path
 
 
@@ -108,11 +108,11 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
 
     positive = _command(
         source_root,
-        ["git", "check-ignore", "-q", "--", "output/__phase_b_probe__/nested.json"],
+        ["git", "check-ignore", "-q", "--", "output/__pipeline_probe__/nested.json"],
     )
     negative = _command(
         source_root,
-        ["git", "check-ignore", "-q", "--", "nested/output/__phase_b_probe__.json"],
+        ["git", "check-ignore", "-q", "--", "nested/output/__pipeline_probe__.json"],
     )
     checks.append(
         _check(

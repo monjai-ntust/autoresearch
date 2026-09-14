@@ -1,159 +1,130 @@
-# Refactored Table Artifact and Original Graph RAG Reproduction
+# Reproducible Tables 1–3 Artifact
 
-This branch is the publication artifact for the paper's in-scope Results and
-Discussion Tables 1-3. It starts from the completed refactored Phase B
-encoder/LLM-verifier commit and adds only the original downstream Graph RAG
-workflow used for Table 2.
+This branch contains the table-producing closure for the paper's in-scope
+Results and Discussion Tables 1–3. `pipeline.py` is the single supported
+entry point. It replaces the former Python dispatcher and shell launcher.
 
-Only Table-2 graph construction and RAG answer generation are active in Phase E.
-The repository retains the table-reachable encoder/verifier source for audit, but
-the Phase E command cannot train or run an encoder, regenerate inference, or call
-the LLM verifier. Table 4, all zh work, later dataset-neutral Graph RAG code, and
-non-table experiment families are excluded.
+The pipeline retains the established CODE-ACCORD encoder, threshold, local
+Qwen verifier, strict scoring, and original Table-2 Graph RAG methods. Table 4,
+Traditional-Chinese work, unrelated experiments, diagnostics, and standalone
+artifact-path entry points are excluded.
 
-## Release lineage
+## Scientific boundary
 
-- Base: `c01003a875bbb4c36393647c6d5fa1cc84d71d2c`
-  (`Finalize standalone Phase B launcher and cleanup`).
-- Branch: `publication-refactored-rag`.
-- Bounded RAG patch evidence: `6e28882fc3b7328895ac89a9165d2e57c8bdd2c8`
-  and `607f9f3672175c42f4b76c6145c654c5ed5cf577` on the preserved
-  wrong-base historical branch.
-- The later Phase C Graph RAG line beginning at `240805b…` is not merged or
-  copied into this artifact.
-
-## Included result routes
-
-Tables 1 and 3 are completed upstream evidence. Their canonical refactored route
-is retained under `phase_b.sh`, `phase_b.py`, and the supporting modules,
-configuration, prompts, and schemas. Phase E does not execute that route.
-Historical SciERC inference/verifier producers remain under `provenance/` only
-to audit the draft's displayed Table-3 aggregates.
-
-The only newly executable route is:
+The full route is:
 
 ```text
-one authenticated completed refactored run
-  -> same-run prepared test/private gold and selected 0.25 threshold
-  -> same-run seed-42 confidence, corrective-verifier, and gold snapshots
-  -> deterministic representation-only projections
-  -> exact table-era eval_graph_rag.py + one empty-run guard
-  -> five Table-2 RAG conditions and legacy comparison
+immutable CODE-ACCORD input
+  -> deterministic CODE-SPLIT-1 preparation
+  -> eight DeBERTa-large training and candidate runs
+  -> development-only threshold and verifier pilot gate
+  -> simple and corrective Qwen verification
+  -> strict metrics for Tables 1 and 3
+  -> same-run confidence, corrective, and gold graphs
+  -> frozen five-mode answer evaluation for Table 2
 ```
 
-The runner derives every scientific input path from one selected run root. It
-has no path that can train or invoke the encoder, invoke the verifier, rebuild a
-canonical graph, accept an arbitrary stage-output path, or import another run.
+Every generated or downloaded artifact lives under one
+`output/<run-id>/` tree. Downstream stages derive their inputs from that tree
+and validate producer hashes and manifests. A run cannot import an output from
+another run.
 
-## Frozen Table-2 method
+The encoder revision and Qwen registry/blob digests must each remain internally
+consistent wherever they are consumed within one run. They do not have to equal
+the historical reference digests recorded by this project. Hardware and
+historical digest comparisons are logged separately and do not admit or reject
+a run. Matching statistics are expected only when the method, data, split,
+seed, threshold, hardware, encoder, and Qwen determinants match, and equality
+must still be confirmed from the generated outputs.
 
-The prompt authority is historical `eval_graph_rag.py` blob
-`964893546b28f04e34e8c546bcbbfd4cfbc27354`, established from the
-result-producing dates in project history rather than the paper draft's
-incomplete one-line description. The evaluator preserves:
+## Install and validate
 
-- 13 generic case-folded relation-question templates;
-- modes in order: `llm_only`, `text_retrieval`, `kg_1hop`, `kg_2hop`,
-  and `hybrid`;
-- the exact five prompt constructors, user role, labels, whitespace,
-  punctuation, and context assembly;
-- `think=false`, temperature `0.0`, `num_predict=50`, seed 42, and ten
-  questions; and
-- historical retrieval, matching, metric, aggregation, and output semantics.
-
-The later seven explicit CODE templates are excluded. The sole added evaluator
-behavior is a fail-closed guard that refuses to serialize an empty question run.
-
-The historical text condition is whitespace-token set overlap, not BM25. The
-answer-derived query, unequal evidence access, lenient score, and small
-diagnostic sample remain disclosed frozen limitations.
-
-## Runtime requirements
-
-- A clean clone on branch `publication-refactored-rag`, with its Git history.
-- Python 3.10 or newer.
-- `curl`.
-- The complete authenticated `path-a-full-20260719T153901Z` tree retained at
-  `output/path-a-full-20260719T153901Z/` under its unchanged run ID, including
-  the 20,201,240,160-byte content-addressed Ollama blob bound by the corrective
-  verifier. The compact parent archive omits this oversized blob and is not by
-  itself a complete executable restore.
-- A loopback Ollama endpoint containing the same stable model identity recorded
-  by that run's corrective-verifier environment manifest.
-
-The RAG model value is not hardcoded. The runner derives its tag, registry
-manifest digest, model blob SHA-256, family, parameter size, and quantization
-from the selected run's hash-bound corrective-verifier manifest and checks live
-Ollama before creating or modifying `phase-e-rag/`.
-
-## Validate without model calls
+Use Python 3.10 or newer from a clean clone of branch
+`publication-refactored-rag`:
 
 ```bash
-python -I -B run_phase_e_rag.py validate-contract
-python -B -m unittest tests.test_phase_e_rag_contract tests.test_phase_e_runner -v
+uv sync --frozen
+uv run --frozen --no-sync python -I -B pipeline.py validate-table2
+uv run --frozen --no-sync python -B -m unittest discover -s tests -v
 ```
 
-The complete retained-source regression suite can also be run with:
+The tracked configuration is `configs/pipeline.json`. Its explicitly named
+Qwen reference digests are comparison metadata. The default encoder revision
+matches the historical reference, but configuration validation accepts any
+immutable 40-hex revision; that configured value becomes the new run's actual
+encoder input. A full run discovers and hashes the Qwen model that is actually
+served, copies its bytes into the run's content-addressed input area, and binds
+all verifier consumers to that run-local identity.
+
+## Generate Tables 1–3 from a new run
+
+Choose a new run ID containing 1–64 letters, digits, `.`, `_`, or `-`, beginning
+with a letter or digit. Start Ollama with the configured Qwen model, then run:
 
 ```bash
-python -B -m unittest discover -s tests -v
-```
-
-## Dry-run the same-run plan
-
-```bash
-python -I -B run_phase_e_rag.py run \
-  --run-id path-a-full-20260719T153901Z \
-  --dry-run
-```
-
-Dry-run validates source ancestry/blobs; the parent and graph-child run
-identities; the complete parent artifact set; preparation, candidate, threshold,
-verifier, model-environment, and graph bindings; exact graph IDs/shapes; stable
-projection hashes; and the ten-question contract. It does not contact Ollama or
-write any output.
-
-After the dry run passes, the exact live command is:
-
-```bash
-python -I -B run_phase_e_rag.py run \
-  --run-id path-a-full-20260719T153901Z \
+uv run --frozen --no-sync python -I -B pipeline.py full \
+  --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```
 
-## Output and failure behavior
+If Ollama's `FROM` path is not directly accessible, add
+`--model-blob-source /absolute/path/to/the/model/blob`. The source must be an
+external immutable input, not a file under any `output/<run-id>/` tree.
 
-Every new runtime file is confined to
-`output/<run-id>/phase-e-rag/`: deterministic projections, condition results,
-model-identity responses, logs, method/environment/status manifests, hashes,
-and the Table-2 comparison. Earlier stages remain unchanged in the same tree.
+The Python entry point performs and resumes the complete ordered workflow. It
+does not replace a different existing artifact, bypass the development pilot,
+or reuse a stage whose manifest/hash binding has changed.
 
-Existing stages are reused only when run identity and stored hashes still match.
-A same-run stage seal binds each prospectively generated encoder-candidate or
-verifier manifest and all of its outputs to the selected `run_id` without
-altering the frozen producer modules. Recovery caches, pilot captures, and
-smoke-derived candidate/verdict/threshold artifacts carry equivalent run-local
-provenance records.
-A changed source blob, run ID, seed, threshold, candidate/verdict/environment
-binding, graph ID/hash/schema/count, model identity, projection hash, failed or
-empty model response, corrupt output, output collision, or child identity fails
-closed. Before final completion, the runner re-hashes the complete parent and
-graph-child lineages and verifies every projection and raw model-identity
-capture against its manifest. Failed/interrupted attempts remain in the run
-tree for audit. New
-results are compared with legacy values without tuning.
+## Run only downstream Table 2
 
-At parent-repository finalization, every run is hash-verified and moved to the
-durable result archive; no runtime output remains in `src`.
+Use this route when a complete authenticated run already contains the encoder,
+candidate, threshold, verifier, and score outputs. It never trains the encoder
+or invokes the verifier.
 
-## Completed upstream evidence
+First validate the same-run plan without writes or model calls:
 
-The retained Phase B source and frozen `configs/phase_b_path_a.json` describe
-the completed canonical CODE-ACCORD encoder/verifier evaluation. Its archived
-machine-readable metrics and publication views are indexed by the parent
-research repository. They are distinct from, and are not silently substituted
-for, the legacy development-only Table-1 or SciERC Table-3 aggregates.
+```bash
+uv run --frozen --no-sync python -I -B pipeline.py table2 \
+  --run-id research-run-001 \
+  --dry-run
+```
 
-See `docs/phase_b_workflow.md` and `docs/model-training-compatibility.md` for
-the upstream protocol and its known comparability limits. These documents are
-audit evidence, not authorization to execute upstream work in Phase E.
+Then execute the frozen answer evaluator against the same Qwen identity that
+the selected run's corrective verifier recorded:
+
+```bash
+uv run --frozen --no-sync python -I -B pipeline.py table2 \
+  --run-id research-run-001 \
+  --ollama-url http://localhost:11434
+```
+
+Table-2 output is confined to `output/<run-id>/table2/`. Missing canonical
+graphs are deterministically reconstructed only from authenticated prepared
+data, gold, seed-42 candidates, the development-selected threshold, and
+corrective verdicts in that same run. If a canonical graph already exists, its
+canonical JSON must exactly equal the reconstruction before it is reused.
+
+## Frozen Table-2 evaluator
+
+Historical source blob `964893546b28f04e34e8c546bcbbfd4cfbc27354`
+is the prompt and method authority. The internal evaluator preserves its 13
+case-folded relation templates, seed-42 ten-question selection, five mode order,
+retrieval behavior, exact prompt construction, `think=false`, temperature
+`0.0`, `num_predict=50`, lenient answer matcher, aggregation, and output
+semantics. The only added behavior is a fail-closed guard for an empty supported
+question set.
+
+The text condition is historical unique-word overlap, not BM25. The small
+sample, answer-derived retrieval query, unequal evidence access, and lenient
+matching are retained limitations rather than corrected methodology.
+
+## Failure and output handling
+
+The workflow fails closed on cross-run paths, manifest or hash drift, mixed
+encoder/Qwen identities, graph mismatch, unsafe links, model-call errors,
+empty responses, or an output collision. Interrupted Table-2 results stay in a
+run-local recovery namespace and are never silently accepted. Legacy displayed
+values are comparison metadata only; they are not inputs or tuning targets.
+
+See `docs/workflow.md` for the artifact and resume contract and
+`docs/model-training-compatibility.md` for the encoder compatibility boundary.

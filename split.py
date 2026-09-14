@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Iterable
 
-from phase_b_io import DataContractError
+from artifact_io import DataContractError
 
 
 SPLIT_ID = "CODE-SPLIT-1"

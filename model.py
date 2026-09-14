@@ -1,15 +1,10 @@
 """Canonical encoder candidate-generation adapter for ``CODE-STRICT-1``.
 
-This B-05U slice adds the ``phase_b.py model generate-candidates`` stage. It is
-the canonical successor to the historical ``provenance/inference_kg.py`` script named in
-``docs/historical-transition-map.md``. The historical script loaded an arbitrary
-checkpoint, ran span NER plus relation extraction over a runtime-selected
-dataset, and wrote a free-form ``results/kg_inference.jsonl`` outside the output
-contract. This adapter keeps the same extraction *semantics* the paper draft
-depends on -- the encoder proposes entity spans and relations with confidence
-scores, and a triple's confidence is the encoder softmax product (draft
-Section 3.1) -- while binding every emitted record to the typed strict data,
-split, and checkpoint identities and confining all output beneath the ignored
+This module provides encoder training and candidate generation for the main
+pipeline. It keeps the retained extraction *semantics*: the encoder proposes
+entity spans and relations with confidence scores, and a triple's confidence
+is the encoder softmax product. Every emitted record is bound to typed strict
+data, split, and checkpoint identities beneath one ignored
 ``output/<run-id>/`` tree.
 
 The stage has three implemented executions:
@@ -50,7 +45,7 @@ from hf_cache import (
     write_cache_manifest,
 )
 from paths import RunLayout
-from phase_b_io import (
+from artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -1016,7 +1011,8 @@ def _training_command(
     command = [
         sys.executable,
         "-B",
-        "train_span.py",
+        "pipeline.py",
+        "_train-encoder",
         "--canonical-mode",
         "--dataset",
         "accord",

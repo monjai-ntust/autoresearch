@@ -1,0 +1,109 @@
+{
+  "schema_version": 3,
+  "workflow": "table-production",
+  "task": "E-T02",
+  "source_baseline": {
+    "commit": "c01003a875bbb4c36393647c6d5fa1cc84d71d2c",
+    "tree": "7ac7136842d9446c066aa40bd7c463ef2af45a2d",
+    "branch": "publication-refactored-rag",
+    "rag_patch_source": ["6e28882fc3b7328895ac89a9165d2e57c8bdd2c8", "607f9f3672175c42f4b76c6145c654c5ed5cf577"]
+  },
+  "evaluator": {
+    "table_era_blob": "964893546b28f04e34e8c546bcbbfd4cfbc27354",
+    "excluded_post_table_blob": "c06b753433681f13140d288c7e642c20e1eab851",
+    "max_questions": 10,
+    "sampling_seed": 42,
+    "model_identity_policy": "match-selected-same-run-corrective-verifier-environment",
+    "think": false,
+    "temperature": 0.0,
+    "num_predict": 50,
+    "modes": ["llm_only", "text_retrieval", "kg_1hop", "kg_2hop", "hybrid"]
+  },
+  "pipeline": {
+    "protocol_id": "B04-PATH-A-1.3",
+    "workflow_id": "PATH-A-WORKFLOW-1.3",
+    "matcher_id": "CODE-STRICT-1",
+    "dataset_id": "CODE-ACCORD-v1.0.0",
+    "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49],
+    "table2_seed": 42,
+    "split_seed": 42,
+    "test_records": 173,
+    "artifacts": {
+      "checkout_manifest": "manifests/00-checkout-manifest.json",
+      "full_run_manifest": "manifests/debug-full-run.json",
+      "preparation_manifest": "manifests/03-data-preparation-manifest.json",
+      "prepared_test": "data-prepared/test.jsonl",
+      "private_gold": "data-prepared/test-gold.jsonl",
+      "split_manifest": "data-prepared/split-manifest.json",
+      "development_gold": "data-prepared/development-gold.jsonl",
+      "threshold_selection": "predictions/dev/threshold-selection.json",
+      "development_candidate_index": "predictions/dev/candidate-index.json",
+      "candidates": "predictions/test/candidates.jsonl",
+      "sentence_outcomes": "outcomes/sentence-outcomes.jsonl",
+      "metrics": "metrics/metrics.json",
+      "score_manifest": "manifests/score-manifest.json",
+      "simple_verifier_manifest": "manifests/verifier-simple-live.json",
+      "corrective_verifier_manifest": "manifests/verifier-corrective-live.json",
+      "simple_environment": "verifier/simple/environment-manifest.json",
+      "corrective_environment": "verifier/corrective/environment-manifest.json",
+      "simple_verdicts": "verifier/simple/verdicts.jsonl",
+      "corrective_verdicts": "verifier/corrective/verdicts.jsonl",
+      "checkpoint_manifest": "checkpoints/seed-{seed}/checkpoint-manifest.json",
+      "checkpoint_blob": "checkpoints/seed-{seed}/checkpoint.pt",
+      "candidate_generation_manifest": "manifests/model-generate-candidates-live-seed-{seed}-test.json"
+    },
+    "existing_graphs": {
+      "confidence": "graph-rag/graphs/confidence_filtered/seed-{seed}/manifest.json",
+      "corrective": "graph-rag/graphs/corrective_verifier/seed-{seed}/manifest.json",
+      "gold": "graph-rag/graphs/gold_graph_oracle/manifest.json"
+    }
+  },
+  "reference_profile": {
+    "hardware": {
+      "machine": "aarch64",
+      "platform": "Linux-6.17.0-1014-nvidia-aarch64-with-glibc2.39",
+      "cuda_device": "NVIDIA GB10",
+      "cuda_runtime": "13.0",
+      "torch": "2.9.1+cu130"
+    },
+    "encoder": {
+      "base_model": "microsoft/deberta-large",
+      "base_model_revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b"
+    },
+    "qwen": {
+      "name": "qwen3:32b",
+      "tag_digest": "030ee887880fc378860c2dd35101da424377520441ae4bfe7be6deff8ade7840",
+      "blob_sha256": "3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
+      "details": {"family": "qwen3", "parameter_size": "32.8B", "quantization_level": "Q4_K_M"}
+    }
+  },
+  "legacy_table2_accuracy": {
+    "confidence": {"llm_only": 0.0, "text_retrieval": 0.2, "kg_1hop": 0.0, "kg_2hop": 0.0, "hybrid": 0.3},
+    "verified": {"llm_only": 0.0, "text_retrieval": 0.2, "kg_1hop": 0.0, "kg_2hop": 0.0, "hybrid": 0.2},
+    "gold": {"llm_only": 0.0, "text_retrieval": 0.2, "kg_1hop": 0.6, "kg_2hop": 0.6, "hybrid": 0.5}
+  },
+  "frozen_upstream_blobs": {
+    "artifact_io.py": "0468e5f5ff104602d2e97eda95da1ca4ef74f74d",
+    "constants.py": "dbb1ce27f9b9c23a0cb361247e24ec6f98a1bdd7",
+    "data/code_accord.py": "cd413401d0068c30087b48ed69d924e11d4e5688",
+    "data/code_accord/entities/train.csv": "1b74f4a7d3693a903d93690adffcc2ef4f276bea",
+    "data/scierc.py": "84c7497192515f84598d7826883ac357f0ba03dc",
+    "eval/triple_f1.py": "bf87dc4416a161c9ea61759b7b18e85d21661652",
+    "graph_construction.py": "7c8d04256664cabdb3009da9667eb42a6f68a51e",
+    "metrics.py": "c6b3fb87c367fc3e0a1293febf6162a755eef8e8",
+    "model.py": "8471979bb9db0d521b31e163b9cf32d9d54e92d7",
+    "models/bert_kg_encoder.py": "e4d78070cc245b603b12a0dc293fc2be069c25c2",
+    "pipeline.py": "4dd0ae81c1db4a3c942ef2364bfb57c281afe61a",
+    "preparation.py": "4ac47677bf978fa6bf9bb1230bc221a323123a18",
+    "publication.py": "f2ed57478ca258f0d87b928a5d3a34ccd4d124bc",
+    "publication_statistics.py": "6b645b0d377ae62a5d0644c9e1644d4dcfb626a4",
+    "records.py": "1c6103714392507d3fac16e1232e9bcbe26f626b",
+    "scoring.py": "38f485888dc0aa3efb9c01391420436dd83642c0",
+    "split.py": "08d685c47290136f06ec3bad6b10345363e2c7bb",
+    "table2_runner.py": "96975e9df4d7693529725018b917b3c9312bb508",
+    "table_evaluator.py": "a19ea39eb657c74e0964e47eaac538fccb8891f9",
+    "threshold.py": "daf94084d9301caf9ae4912f70972465633d960f",
+    "train_span.py": "ba16ad21f24f8f34cf977bfd0a8bb5f800780a4b",
+    "verifier.py": "7114284f7e1dcec1970410d0c15620f640b9231d"
+  }
+}

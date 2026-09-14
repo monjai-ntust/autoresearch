@@ -9,9 +9,8 @@ to SpERT (Eberts & Ulges, 2020).
 The RE head is unchanged — it still takes pairs of predicted entity
 spans and classifies relations.
 
-Usage:
-    uv run python train_span.py --dataset scierc --max-steps 1500
-    uv run python train_span.py --dataset conll04 --max-steps 1500
+This module is invoked only through the private trainer route in
+``pipeline.py``.
 """
 import argparse
 import importlib
@@ -1956,7 +1955,3 @@ def main(argv=None):
     if args.run_summary_out:
         _atomic_json_write(summary, args.run_summary_out)
     return summary
-
-
-if __name__ == "__main__":
-    main()

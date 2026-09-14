@@ -26,7 +26,7 @@ from typing import Any
 from config import PipelineConfig
 from constants import PROTOCOL_ID, TRAINING_SEEDS
 from paths import RunLayout
-from phase_b_io import DataContractError, atomic_write_json, sha256_file
+from artifact_io import DataContractError, atomic_write_json, sha256_file
 from scoring import _load_candidates, _load_gold
 
 _DEV_SPLIT = "CODE-SPLIT-1:development"

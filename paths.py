@@ -1,4 +1,4 @@
-"""Path containment for the standalone Phase B output contract."""
+"""Path containment for the standalone publication output contract."""
 
 from __future__ import annotations
 
@@ -27,12 +27,12 @@ def discover_source_root(start: Path | None = None) -> Path:
         if (
             (candidate / "pyproject.toml").is_file()
             and (candidate / "uv.lock").is_file()
-            and (candidate / "phase_b.py").is_file()
+            and (candidate / "pipeline.py").is_file()
         ):
             return candidate.resolve()
     raise PathContractError(
         "could not locate the standalone source root containing pyproject.toml, "
-        "uv.lock, and phase_b.py"
+        "uv.lock, and pipeline.py"
     )
 
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from phase_b_io import DataContractError, atomic_write_json, canonical_json_bytes, load_json, sha256_file
+from artifact_io import DataContractError, atomic_write_json, canonical_json_bytes, load_json, sha256_file
 from paths import RunLayout
 
 

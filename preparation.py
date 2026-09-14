@@ -30,7 +30,7 @@ from constants import (
     RELATION_TYPES,
     TREE_HASH_REVISION,
 )
-from phase_b_io import (
+from artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,

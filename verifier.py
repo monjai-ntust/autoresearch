@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 from config import PipelineConfig
 from constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES
-from phase_b_io import (
+from artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
