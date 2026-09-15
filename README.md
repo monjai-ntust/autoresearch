@@ -1,11 +1,12 @@
-# Reproducible Tables 1–3 Artifact
+# CODE-ACCORD publication artifact
 
-This branch contains the table-producing closure for the paper's in-scope
-Results and Discussion Tables 1–3. `pipeline.py` is the single supported
-entry point. It replaces the former Python dispatcher and shell launcher.
+This branch contains the canonical CODE-ACCORD publication workflow and the
+same-run reproduction path for the paper's Table 2. `pipeline.py` is the
+single supported entry point.
 
 The pipeline retains the established CODE-ACCORD encoder, threshold, local
-Qwen verifier, strict scoring, and original Table-2 Graph RAG methods. Table 4,
+Qwen verifier, strict scoring, and original Table-2 Graph RAG methods. It does
+not claim to regenerate every historical table. Table 4,
 Traditional-Chinese work, unrelated experiments, diagnostics, and standalone
 artifact-path entry points are excluded.
 
@@ -19,10 +20,17 @@ immutable CODE-ACCORD input
   -> eight DeBERTa-large training and candidate runs
   -> development-only threshold and verifier pilot gate
   -> simple and corrective Qwen verification
-  -> strict metrics for Tables 1 and 3
+  -> canonical CODE-ACCORD encoder/verifier metrics
   -> same-run confidence, corrective, and gold graphs
   -> frozen five-mode answer evaluation for Table 2
 ```
+
+| Paper artifact | Implemented route and data contract | Comparison evidence and missing work |
+| --- | --- | --- |
+| Historical Table 1 | Not regenerated. Its canonical successor is the eight-seed CODE-ACCORD `CODE-SPLIT-1` held-out encoder evaluation under `CODE-STRICT-1`. | Legacy displayed aggregates are comparison evidence only; the historical BERT-base/DeBERTa-base table, split memberships, and checkpoints are not reproduced. |
+| Table 2 | Newly evaluated from one run's CODE-ACCORD test records and confidence/corrective/gold graphs, projected into the frozen five-mode table-era evaluator. | Legacy displayed cells are comparison references only. External E-07 execution and comparison remain pending. |
+| Historical Table 3 | Not regenerated. Its canonical successor is the CODE-ACCORD `CODE-SPLIT-1` simple/corrective Qwen evaluation under `CODE-STRICT-1`. | Legacy SciERC text-tuple aggregates are comparison evidence only; their source data/checkpoints/verdict ledgers are not reproduced. |
+| Table 4 | No route. | Excluded from this artifact. |
 
 Every generated or downloaded artifact lives under one
 `output/<run-id>/` tree. Downstream stages derive their inputs from that tree
@@ -56,9 +64,9 @@ encoder input. A full run discovers and hashes the Qwen model that is actually
 served, copies its bytes into the run's content-addressed input area, and binds
 all verifier consumers to that run-local identity.
 
-## Generate Tables 1–3 from a new run
+## Generate the canonical upstream artifacts and Table 2
 
-Choose a new run ID containing 1–64 letters, digits, `.`, `_`, or `-`, beginning
+Choose a new run ID containing 1-64 letters, digits, `.`, `_`, or `-`, beginning
 with a letter or digit. Start Ollama with the configured Qwen model, then run:
 
 ```bash

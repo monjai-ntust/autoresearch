@@ -997,6 +997,96 @@ def _live_response(
     }
 
 
+def validate_response_cache(
+    layout: RunLayout,
+    config: PipelineConfig,
+    *,
+    mode: str,
+    sentences_path: Path,
+    candidates_path: Path,
+    cache_ledger_path: Path,
+) -> None:
+    """Validate an interrupted response ledger without writing or calling a model."""
+
+    layout.require_existing()
+    if mode not in MODE_CONDITIONS:
+        raise DataContractError(f"unsupported verifier mode: {mode!r}")
+    layout.relative_identity(cache_ledger_path)
+    sentences = _load_sentences(sentences_path)
+    candidate_rows = _load_candidates(candidates_path, sentences)
+    bundle = _prompt_bundle(config, mode)
+    requests_by_id = {
+        candidate.candidate_id: _request_record(
+            candidate, raw, sentence, bundle, config
+        )
+        for candidate, raw, sentence in candidate_rows
+    }
+    _load_response_ledger(
+        cache_ledger_path, MODE_CONDITIONS[mode], requests_by_id
+    )
+
+
+def validate_verifier_artifacts(
+    *,
+    mode: str,
+    sentences_path: Path,
+    candidates_path: Path,
+    requests_path: Path,
+    responses_path: Path,
+    verdicts_path: Path,
+) -> None:
+    """Reconstruct completed verdicts from authenticated requests/responses."""
+
+    if mode not in MODE_CONDITIONS:
+        raise DataContractError(f"unsupported verifier mode: {mode!r}")
+    sentences = _load_sentences(sentences_path)
+    candidate_rows = _load_candidates(candidates_path, sentences)
+    requests = [value for _, value in iter_jsonl(requests_path)]
+    requests_by_id = {
+        request.get("candidate_id"): request
+        for request in requests
+        if isinstance(request, dict)
+    }
+    candidate_ids = {candidate.candidate_id for candidate, _, _ in candidate_rows}
+    if (
+        len(requests_by_id) != len(requests)
+        or set(requests_by_id) != candidate_ids
+    ):
+        raise DataContractError(
+            "completed verifier requests do not cover the candidate ledger exactly"
+        )
+    responses = _load_response_ledger(
+        responses_path, MODE_CONDITIONS[mode], requests_by_id
+    )
+    if set(responses) != candidate_ids:
+        raise DataContractError(
+            "completed verifier responses do not cover the candidate ledger exactly"
+        )
+    expected = []
+    for candidate, _raw, sentence in sorted(
+        candidate_rows,
+        key=lambda item: (item[0].training_seed, item[0].candidate_id),
+    ):
+        verdict = _verdict_from_response(
+            mode,
+            responses[candidate.candidate_id],
+            requests_by_id[candidate.candidate_id],
+            candidate,
+            sentence,
+        )
+        Verdict.from_mapping(
+            verdict,
+            f"reconstructed verdict {candidate.candidate_id}",
+            candidate,
+        )
+        expected.append(verdict)
+    observed = [value for _, value in iter_jsonl(verdicts_path)]
+    if observed != expected:
+        raise DataContractError(
+            "verdict output differs from deterministic response interpretation"
+        )
+
+
 def run_verifier(
     layout: RunLayout,
     config: PipelineConfig,
@@ -1116,6 +1206,13 @@ def run_verifier(
         key=lambda item: (item["training_seed"], item["candidate_id"]),
     )
     requests_by_id = {record["candidate_id"]: record for record in serialized_requests}
+    cached: dict[str, dict[str, Any]] = {}
+    if execution_mode == "live" and cache_ledger_path is not None:
+        # Validate recovery before event-log creation, output writes, warm-up,
+        # model discovery, or any live request.
+        cached = _load_response_ledger(
+            cache_ledger_path, condition, requests_by_id
+        )
     warmup_runtime: dict[str, Any] | None = None
     if execution_mode == "live":
         assert warmup_sentences_path is not None and warmup_candidates_path is not None
@@ -1234,11 +1331,6 @@ def run_verifier(
                     f"missing={len(missing)}, extra={len(extra)}"
                 )
         elif execution_mode == "live":
-            cached: dict[str, dict[str, Any]] = {}
-            if cache_ledger_path is not None:
-                cached = _load_response_ledger(
-                    cache_ledger_path, condition, requests_by_id
-                )
             with paths["responses"].open("ab") as response_handle:
                 for runtime in verdict_runtime_requests:
                     candidate_id = runtime["candidate_id"]
@@ -1352,7 +1444,28 @@ def run_verifier(
                     else {}
                 ),
                 **(
-                    {layout.relative_identity(cache_ledger_path): sha256_file(cache_ledger_path)}
+                    {
+                        layout.relative_identity(cache_ledger_path): sha256_file(
+                            cache_ledger_path
+                        ),
+                        **(
+                            {
+                                layout.relative_identity(
+                                    cache_ledger_path.with_suffix(
+                                        cache_ledger_path.suffix + ".manifest.json"
+                                    )
+                                ): sha256_file(
+                                    cache_ledger_path.with_suffix(
+                                        cache_ledger_path.suffix + ".manifest.json"
+                                    )
+                                )
+                            }
+                            if cache_ledger_path.with_suffix(
+                                cache_ledger_path.suffix + ".manifest.json"
+                            ).is_file()
+                            else {}
+                        ),
+                    }
                     if cache_ledger_path is not None
                     else {}
                 ),

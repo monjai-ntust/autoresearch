@@ -48,7 +48,9 @@
         "checkpoint_manifest": {"$ref": "#/$defs/input_reference"},
         "prediction_ledger": {
           "oneOf": [{"type": "null"}, {"$ref": "#/$defs/input_reference"}]
-        }
+        },
+        "recovery_prediction_ledger": {"$ref": "#/$defs/input_reference"},
+        "recovery_prediction_ledger_provenance": {"$ref": "#/$defs/input_reference"}
       },
       "additionalProperties": false
     },

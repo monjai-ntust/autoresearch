@@ -22,9 +22,6 @@ from typing import Any, Iterable
 from config import PipelineConfig
 from constants import (
     CODE_ACCORD_ANNOTATION_FILES,
-    CODE_ACCORD_COUNTS,
-    CODE_ACCORD_RELATION_SPLIT_AUDIT,
-    CODE_ACCORD_REPAIRED_UUID,
     ENTITY_TYPES,
     PROTOCOL_ID,
     RELATION_TYPES,
@@ -1276,17 +1273,3 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
     }
     atomic_write_json(manifest_path, manifest)
     return manifest
-
-
-def official_contract_defaults() -> DatasetContract:
-    """Expose the immutable official values for focused fixture construction."""
-
-    return DatasetContract(
-        dataset_id="CODE-ACCORD-v1.0.0",
-        archive_bytes=101265616,
-        archive_md5="57e2efa465f41e2f582db62810fb50f5",
-        annotation_files=CODE_ACCORD_ANNOTATION_FILES,
-        counts=CODE_ACCORD_COUNTS,
-        relation_split_audit=CODE_ACCORD_RELATION_SPLIT_AUDIT,
-        repaired_uuid=CODE_ACCORD_REPAIRED_UUID,
-    )

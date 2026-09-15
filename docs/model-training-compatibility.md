@@ -13,7 +13,7 @@ claim that canonical results equal the historical statistics.
   `3485686` (context between spans), `37e7fea` (adaptive curriculum), `d6bc904`
   (A20 staircase plus A21 label smoothing), and `292b269` (dataset-directory
   control). The seed-propagation correction is `67d1eb2`.
-- The frozen base model is `microsoft/deberta-large` revision
+- The historical reference/default base model is `microsoft/deberta-large` revision
   `28c23d9eb93ea6cf11f845501ab7aeb2a497658b`. This is the first immutable
   model-repository revision that contains `vocab.json` and `merges.txt` for the
   DeBERTa v1 tokenizer. Its `pytorch_model.bin` SHA-256 is
@@ -68,8 +68,8 @@ comparison is interpreted that way.
 | Difference | Reason and expected effect |
 | --- | --- |
 | Prepared `train.jsonl`/`development.jsonl` adapter | Prevents the historical per-model-seed random repartition and relation-task overlap. It deliberately changes membership from the historical experiment, so numeric equality is not assumed. |
-| No test loader/evaluation in canonical mode | Prevents final-test access during training and checkpoint selection. Direct historical invocation retains its final test evaluation. |
-| Immutable model revision | Removes upstream model-repository drift without changing architecture. Callers that omit it retain historical behavior. |
+| No test loader/evaluation in canonical mode | Prevents final-test access during training and checkpoint selection. The repository exposes no public noncanonical trainer route. |
+| Immutable model revision | Removes upstream model-repository drift without changing architecture. Any valid new run may select another immutable 40-hex revision; that run-local identity must remain consistent downstream. |
 | Run-local frozen Hugging Face cache | Canonical mode downloads the same pinned revision beneath `output/<run-id>/inputs/huggingface`, freezes a file/tree manifest, and forces later seeds/inference to local-only loading. Historical callers that omit the cache controls retain their defaults. |
 | Serializable shuffle sampler | Preserves canonical random-shuffle semantics while storing current order/cursor for exact next-batch resume with zero data-loader workers. The historical CSV path still uses PyTorch's default sampler. |
 | Full atomic restart state | Adds optimizer, scheduler, RNG, sampler, adaptive-gate, and best-selection state beside the unchanged inference checkpoint. It affects recovery, not the loss objective. |
@@ -82,6 +82,8 @@ Focused offline tests prove prepared-record order/span/relation adaptation,
 split substitution rejection, sampler continuation, opt-in defaults, model-
 revision forwarding, interrupted orchestration retry, no-test summary checks,
 and checkpoint/data/code identity binding. They do not prove accelerator
-numerics. The next evidence-producing action is a clean-clone seed-42
-train/interruption/resume smoke on the external accelerator. B-07 review is
-required before seeds 42–49, final-test inference, or live-verifier execution.
+numerics. The publication run's encoder training/inference and verifier stages
+are completed immutable prerequisites and must not be rerun. The remaining
+external gate is E-07: restore the complete authenticated run tree, execute the
+Table-2 dry run and live evaluator only, compare with legacy Table-2 evidence,
+and archive the verified output.

@@ -18,13 +18,13 @@ from artifact_io import (
     sha256_file,
 )
 from paths import RunLayout, discover_source_root
-from pipeline import (
-    _same_run_verifier_cache_input,
-    _same_run_verifier_replay_input,
-    _write_same_run_seal,
-)
 from records import StrictTriple, candidate_id_for
-from verifier import HttpResult, _verify_live_model, run_verifier
+from verifier import (
+    HttpResult,
+    _verify_live_model,
+    run_verifier,
+    validate_verifier_artifacts,
+)
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -135,77 +135,45 @@ class VerifierReplayTests(unittest.TestCase):
     def setUpClass(cls):
         cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
 
-    def test_dispatcher_replay_requires_same_run_live_verifier_manifest(self):
+    def test_invalid_live_cache_fails_before_writes_or_model_calls(self):
         with _temporary_output_directory() as temporary:
-            layout = RunLayout(Path(temporary), "same-run-replay")
+            layout = RunLayout(Path(temporary), "invalid-live-cache")
             layout.create()
-            responses = layout.resolve("verifier/simple/responses.jsonl")
-            responses.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_jsonl(responses, [{"request_id": "request-a"}])
-            manifest_path = layout.resolve("manifests/verifier-simple-live.json")
-            atomic_write_json(
-                manifest_path,
-                {
-                    "condition_id": "VER-SIMPLE",
-                    "execution_mode": "live",
-                    "status": "completed",
-                    "outputs": {
-                        layout.relative_identity(responses): sha256_file(responses)
-                    },
-                },
+            sentences, candidates = _write_inputs(layout)
+            warmup_sentences = layout.resolve("data-prepared/development.jsonl")
+            warmup_candidates = layout.resolve(
+                "predictions/dev/verifier-warmup-candidate.jsonl"
             )
-            _write_same_run_seal(
-                layout,
-                manifest_path,
-                json.loads(manifest_path.read_text(encoding="utf-8")),
+            atomic_write_jsonl(
+                warmup_sentences,
+                [_sentence(example_id="ex-warm", split="development")],
             )
-            self.assertEqual(
-                _same_run_verifier_replay_input(layout, "simple"), responses
+            atomic_write_jsonl(
+                warmup_candidates,
+                [_candidate(example_id="ex-warm", split="development")],
             )
-            document = json.loads(manifest_path.read_text(encoding="utf-8"))
-            document["outputs"][layout.relative_identity(responses)] = ZERO_HASH
-            atomic_write_json(manifest_path, document)
-            with self.assertRaisesRegex(DataContractError, "same-run live producer"):
-                _same_run_verifier_replay_input(layout, "simple")
-
-    def test_recovery_cache_requires_same_run_provenance(self):
-        with _temporary_output_directory() as temporary:
-            layout = RunLayout(Path(temporary), "same-run-recovery")
-            layout.create()
-            cache = layout.resolve(
-                "inputs/recovery/verifier-simple-responses.jsonl"
-            )
-            checkout = layout.resolve("manifests/00-checkout-manifest.json")
-            atomic_write_jsonl(cache, [{"request_id": "request-a"}])
-            atomic_write_json(checkout, {"run_id": layout.run_id, "status": "pass"})
-            provenance = layout.resolve(
-                "inputs/recovery/verifier-simple-responses.manifest.json"
-            )
-            document = {
-                "schema_version": "phase-b-same-run-verifier-recovery-1.0",
-                "run_id": layout.run_id,
-                "mode": "simple",
-                "response_cache": {
-                    "path": layout.relative_identity(cache),
-                    "sha256": sha256_file(cache),
-                },
-                "source_response": {
-                    "path": "verifier/simple/responses.jsonl",
-                    "sha256": sha256_file(cache),
-                },
-                "checkout_manifest": {
-                    "path": layout.relative_identity(checkout),
-                    "sha256": sha256_file(checkout),
-                },
-            }
-            atomic_write_json(provenance, document)
-            self.assertEqual(
-                _same_run_verifier_cache_input(layout, "simple"), cache
-            )
-            document["run_id"] = "foreign-run"
-            atomic_write_json(provenance, document)
-            with self.assertRaisesRegex(DataContractError, "selected run"):
-                _same_run_verifier_cache_input(layout, "simple")
+            cache = layout.resolve("inputs/recovery/invalid-responses.jsonl")
+            atomic_write_jsonl(cache, [{}])
+            model_blob = layout.resolve("inputs/ollama/model-blob")
+            model_blob.parent.mkdir(parents=True)
+            model_blob.write_bytes(b"fixture")
+            with patch("verifier._verify_live_model") as verify_model, \
+                 self.assertRaises(DataContractError):
+                run_verifier(
+                    layout,
+                    self.config,
+                    mode="simple",
+                    execution_mode="live",
+                    sentences_path=sentences,
+                    candidates_path=candidates,
+                    warmup_sentences_path=warmup_sentences,
+                    warmup_candidates_path=warmup_candidates,
+                    cache_ledger_path=cache,
+                    model_blob_path=model_blob,
+                )
+            verify_model.assert_not_called()
+            self.assertFalse(layout.resolve("verifier/simple/requests.jsonl").exists())
+            self.assertFalse(layout.resolve("verifier/simple/run-log.jsonl").exists())
 
     def _planned_request(self, mode: str) -> dict:
         with _temporary_output_directory() as temporary:
@@ -344,6 +312,29 @@ class VerifierReplayTests(unittest.TestCase):
             self.assertEqual(verdict["reason_code"], "SUPPORTED")
             self.assertEqual(verdict["attempts"], 2)
             self.assertTrue(verdict["telemetry"]["latency_observation_included"])
+            requests_path = layout.resolve("verifier/simple/requests.jsonl")
+            verdicts_path = layout.resolve("verifier/simple/verdicts.jsonl")
+            validate_verifier_artifacts(
+                mode="simple",
+                sentences_path=sentences,
+                candidates_path=candidates,
+                requests_path=requests_path,
+                responses_path=response_path,
+                verdicts_path=verdicts_path,
+            )
+            verdict["action"] = "DISCARD"
+            atomic_write_jsonl(verdicts_path, [verdict])
+            with self.assertRaisesRegex(
+                DataContractError, "differs from deterministic response"
+            ):
+                validate_verifier_artifacts(
+                    mode="simple",
+                    sentences_path=sentences,
+                    candidates_path=candidates,
+                    requests_path=requests_path,
+                    responses_path=response_path,
+                    verdicts_path=verdicts_path,
+                )
 
     def test_pilot_live_execution_rejects_any_cache_ledger(self):
         with _temporary_output_directory() as temporary:

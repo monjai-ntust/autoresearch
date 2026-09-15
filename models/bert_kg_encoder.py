@@ -49,7 +49,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from transformers import AutoModel
 
-from data.scierc import NUM_BIO_TAGS, NUM_RELATIONS, NO_REL_ID, BIO_TAG2ID, ID2BIO
+from data.scierc import NUM_BIO_TAGS, NUM_RELATIONS, ID2BIO
 
 
 # ─── Phase B3: Evidence Graph Attention Layer ────────────────────────────
@@ -379,10 +379,6 @@ class BertKGExtractor(nn.Module):
             raise ValueError(f"Adapter '{name}' already registered. "
                              "Unregister first or use a different name.")
         self.adapters[name] = adapter
-
-    def unregister_adapter(self, name: str) -> None:
-        if name in self.adapters:
-            del self.adapters[name]
 
     # ── Forward passes ──────────────────────────────────────────────────
 
@@ -847,79 +843,3 @@ class BertKGExtractor(nn.Module):
             results.append(self.re_head(self.dropout(feats_t)))
 
         return results
-
-
-# ─── Loss ────────────────────────────────────────────────────────────────
-
-
-def compute_loss(model, batch, device, re_weight: float = 1.0):
-    """
-    Compute Stage 2 loss = NER CE + re_weight · RE CE.
-
-    NER: per-token cross entropy (ignore -100).
-    RE:  Stage 2-004 fix — enumerate ALL ordered pairs of gold entity spans.
-         Pairs that have an annotated relation get the rel id (1..7).
-         Pairs without an annotated relation get NO_REL_ID = 0.
-    """
-    input_ids = batch["input_ids"].to(device)
-    attention_mask = batch["attention_mask"].to(device)
-    ner_labels = batch["ner_labels"].to(device)
-    word_ids_list = batch["word_ids"]
-    gold_entities_list = batch["gold_entities"]
-    gold_relations_list = batch["gold_relations"]
-
-    # Stage 2: text modality. Stage 3 will pass modality="image" or similar
-    # from a different training loop.
-    hidden = model.encode(modality="text", input_ids=input_ids, attention_mask=attention_mask)
-
-    # NER loss
-    ner_logits = model.forward_ner(hidden)
-    if model.use_crf and model.crf is not None:
-        # CRF requires: (1) mask first timestep = True, (2) no -100 in tags.
-        # Use attention_mask as the CRF mask (first token [CLS] is always 1).
-        # Replace -100 labels with O-tag (0) — CRF mask will handle ignoring
-        # special tokens; the O-tag assignment is just to keep tags in-range.
-        crf_mask = attention_mask.bool()  # (B, T)
-        crf_labels = ner_labels.clone()
-        crf_labels[ner_labels == -100] = 0  # O tag
-        ner_loss = -model.crf(ner_logits, crf_labels, mask=crf_mask, reduction="mean")
-    else:
-        ner_loss = F.cross_entropy(
-            ner_logits.view(-1, ner_logits.size(-1)),
-            ner_labels.view(-1),
-            ignore_index=-100,
-        )
-
-    # RE loss — every ordered pair of gold spans, NO_REL for unannotated pairs
-    re_losses = []
-    for b_idx in range(len(gold_entities_list)):
-        ents = gold_entities_list[b_idx]
-        rels = gold_relations_list[b_idx]
-        if len(ents) < 2:
-            continue
-
-        rel_lookup = {(h, t): rid for (h, t, rid) in rels}
-        spans = [(s, e) for (s, e, _) in ents]
-        pairs = []
-        targets = []
-        for h in spans:
-            for t in spans:
-                if h == t:
-                    continue
-                pairs.append((h, t))
-                targets.append(rel_lookup.get((h, t), NO_REL_ID))
-
-        if not pairs:
-            continue
-
-        targets_t = torch.tensor(targets, device=device, dtype=torch.long)
-        re_logits = model.forward_re(hidden[b_idx], word_ids_list[b_idx], pairs)
-        re_losses.append(F.cross_entropy(re_logits, targets_t))
-
-    if re_losses:
-        re_loss = torch.stack(re_losses).mean()
-    else:
-        re_loss = ner_loss.new_tensor(0.0)
-
-    total = ner_loss + re_weight * re_loss
-    return total, ner_loss.detach(), re_loss.detach(), ner_logits

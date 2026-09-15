@@ -18,12 +18,10 @@ The stage has three implemented executions:
   greedy non-overlapping NER selection and ``min(head, tail) * re`` confidence
   product on typed CODE spans.
 * ``live`` runs the retained encoder (``models.bert_kg_encoder`` under the
-  frozen recipe) over the prepared sentences to produce that prediction ledger,
+  configured canonical recipe) over the prepared sentences to produce that prediction ledger,
   then applies the same deterministic ledger->candidate transform as ``replay``.
-  Its forward outputs cannot be validated offline, so live execution remains
-  externally gated on the accelerator + real checkpoint, and ``provenance/inference_kg.py``
-  stays retained as provenance until external output parity is confirmed (see
-  ``docs/historical-transition-map.md``).
+  Its forward outputs cannot be validated offline, so live execution requires
+  the selected run's authenticated accelerator checkpoint and model cache.
 """
 
 from __future__ import annotations
@@ -134,6 +132,14 @@ class ScoredSpan:
     end: int
     entity_type: str
     confidence: float
+
+
+@dataclass(frozen=True)
+class PredictionLedgerIdentity:
+    """Minimal immutable checkpoint identity needed for offline ledger replay."""
+
+    training_seed: int
+    max_span_width: int
 
 
 def _sha256_hex(value: Any, label: str) -> str:
@@ -396,7 +402,7 @@ def _sentence_candidates(
 def _load_prediction_ledger(
     path: Path,
     sentences: dict[str, PreparedSentence],
-    checkpoint: CheckpointIdentity,
+    checkpoint: CheckpointIdentity | PredictionLedgerIdentity,
     input_hashes: dict[str, str],
 ) -> tuple[list[dict[str, Any]], int, int, int]:
     seen: set[str] = set()
@@ -463,6 +469,13 @@ def _load_prediction_ledger(
                     collected[candidate_id] = record
     if observed_order != sorted(observed_order):
         raise DataContractError(f"{path.name} must be sorted by example_id")
+    if seen != set(sentences):
+        missing = sorted(set(sentences) - seen)
+        extra = sorted(seen - set(sentences))
+        raise DataContractError(
+            "prediction ledger coverage mismatch; "
+            f"missing={len(missing)}, extra={len(extra)}"
+        )
     candidates = sorted(
         collected.values(),
         key=lambda record: (record["training_seed"], record["example_id"], record["candidate_id"]),
@@ -483,11 +496,12 @@ def _live_inference_records(
 
     This is the externally gated `live` execution. It reuses the retained
     ``models.bert_kg_encoder.BertKGExtractor`` and the exact
-    ``provenance/inference_kg.py`` forward logic (greedy non-overlapping span selection, then
-    relation extraction over the selected pairs with a softmax-product
-    confidence), but binds the CODE label space and writes the canonical
-    prediction-ledger schema. Torch and the model are imported lazily so the
-    module remains importable without an accelerator stack.
+    forward logic established by the retained source history (greedy
+    non-overlapping span selection, then relation extraction over the selected
+    pairs with a softmax-product confidence), but binds the CODE label space and
+    writes the canonical prediction-ledger schema. Torch and the model are
+    imported lazily so the module remains importable without an accelerator
+    stack.
 
     Assumptions (documented for external verification): the checkpoint was trained
     with the same CODE label space (``data.code_accord``), ``re_context_span``
@@ -741,6 +755,7 @@ def generate_candidates(
     checkpoint_manifest_path: Path,
     candidates_out_path: Path,
     prediction_ledger_path: Path | None = None,
+    cache_ledger_path: Path | None = None,
     checkpoint_blob_path: Path | None = None,
     base_model: str | None = None,
     device: str | None = None,
@@ -760,6 +775,8 @@ def generate_candidates(
         raise DataContractError("replay requires a run-relative prediction ledger")
     if execution_mode != "replay" and prediction_ledger_path is not None:
         raise DataContractError("a supplied prediction ledger is accepted only by replay execution")
+    if execution_mode != "live" and cache_ledger_path is not None:
+        raise DataContractError("a recovery prediction cache is accepted only by live execution")
     if execution_mode == "live" and checkpoint_blob_path is None:
         raise DataContractError("live execution requires the run-relative checkpoint blob")
     if execution_mode != "live" and checkpoint_blob_path is not None:
@@ -804,6 +821,34 @@ def generate_candidates(
         },
         "prediction_ledger": None,
     }
+    recovery_records: list[dict[str, Any]] | None = None
+    if cache_ledger_path is not None:
+        cache_sha = sha256_file(cache_ledger_path)
+        # Validate the full same-run sentence/seed contract before creating any
+        # new stage artifact or loading the encoder.
+        _load_prediction_ledger(
+            cache_ledger_path,
+            sentences,
+            checkpoint,
+            {
+                "prepared_sentences": inputs["prepared_sentences"]["sha256"],
+                "checkpoint_manifest": inputs["checkpoint_manifest"]["sha256"],
+                "prediction_ledger": cache_sha,
+            },
+        )
+        recovery_records = [value for _, value in iter_jsonl(cache_ledger_path)]
+        inputs["recovery_prediction_ledger"] = {
+            "path": layout.relative_identity(cache_ledger_path),
+            "sha256": cache_sha,
+        }
+        recovery_provenance = cache_ledger_path.with_suffix(
+            cache_ledger_path.suffix + ".manifest.json"
+        )
+        if recovery_provenance.is_file():
+            inputs["recovery_prediction_ledger_provenance"] = {
+                "path": layout.relative_identity(recovery_provenance),
+                "sha256": sha256_file(recovery_provenance),
+            }
 
     manifest: dict[str, Any] = {
         "protocol_id": PROTOCOL_ID,
@@ -859,15 +904,17 @@ def generate_candidates(
             raise DataContractError(
                 "run-local Hugging Face cache differs from the checkpoint identity"
             )
-        records = _live_inference_records(
-            config,
-            checkpoint,
-            sentences,
-            checkpoint_blob_path,
-            base_model or config.value["training"]["base_model"],
-            device,
-            layout.resolve(CACHE_RELATIVE, must_exist=True),
-        )
+        records = recovery_records
+        if records is None:
+            records = _live_inference_records(
+                config,
+                checkpoint,
+                sentences,
+                checkpoint_blob_path,
+                base_model or config.value["training"]["base_model"],
+                device,
+                layout.resolve(CACHE_RELATIVE, must_exist=True),
+            )
         atomic_write_jsonl(
             live_ledger_path,
             sorted(records, key=lambda record: record["example_id"]),
@@ -902,6 +949,61 @@ def generate_candidates(
     )
     atomic_write_json(manifest_path, manifest)
     return manifest
+
+
+def validate_prediction_cache(
+    layout: RunLayout,
+    config: PipelineConfig,
+    *,
+    sentences_path: Path,
+    checkpoint_manifest_path: Path,
+    cache_ledger_path: Path,
+) -> None:
+    """Validate an interrupted live ledger without loading the encoder."""
+
+    layout.require_existing()
+    sentences = _load_sentences(sentences_path)
+    checkpoint = _load_checkpoint_manifest(checkpoint_manifest_path, config)
+    _validate_checkpoint_run_identity(layout, config, checkpoint)
+    cache_sha = sha256_file(cache_ledger_path)
+    _load_prediction_ledger(
+        cache_ledger_path,
+        sentences,
+        checkpoint,
+        {
+            "prepared_sentences": sha256_file(sentences_path),
+            "checkpoint_manifest": sha256_file(checkpoint_manifest_path),
+            "prediction_ledger": cache_sha,
+        },
+    )
+
+
+def validate_prediction_artifacts(
+    *,
+    sentences_path: Path,
+    prediction_ledger_path: Path,
+    candidates_path: Path,
+    training_seed: int,
+    max_span_width: int,
+    input_hashes: dict[str, str],
+) -> None:
+    """Reconstruct and authenticate an inference ledger's candidate output."""
+
+    sentences = _load_sentences(sentences_path)
+    expected, _sentence_count, _selected, _duplicates = _load_prediction_ledger(
+        prediction_ledger_path,
+        sentences,
+        PredictionLedgerIdentity(
+            training_seed=training_seed,
+            max_span_width=max_span_width,
+        ),
+        input_hashes,
+    )
+    observed = [value for _, value in iter_jsonl(candidates_path)]
+    if observed != expected:
+        raise DataContractError(
+            "candidate output differs from deterministic prediction-ledger replay"
+        )
 
 
 def _normalized_lf_sha256(path: Path) -> str:
@@ -996,23 +1098,25 @@ def _dataset_compatibility_report(
     return path, report
 
 
-def _training_command(
+def canonical_trainer_arguments(
     layout: RunLayout,
     config: PipelineConfig,
     training_seed: int,
-    checkpoint_path: Path,
-    restart_path: Path,
-    progress_path: Path,
-    summary_path: Path,
-    model_local_files_only: bool,
 ) -> list[str]:
+    """Derive every trainer argument from one validated run namespace."""
+
+    if training_seed not in config.value.get("training_seeds", []):
+        raise DataContractError(
+            f"training_seed {training_seed} is not approved by the selected run config"
+        )
     training = config.value["training"]
     boost = training["comparison_boost"]
+    checkpoint_dir = layout.resolve(f"checkpoints/seed-{training_seed}")
+    checkpoint_path = checkpoint_dir / "checkpoint.pt"
+    restart_path = checkpoint_dir / "restart-state.pt"
+    progress_path = layout.resolve(f"logs/model-train-seed-{training_seed}.log")
+    summary_path = checkpoint_dir / "training-summary.json"
     command = [
-        sys.executable,
-        "-B",
-        "pipeline.py",
-        "_train-encoder",
         "--canonical-mode",
         "--dataset",
         "accord",
@@ -1081,11 +1185,32 @@ def _training_command(
         "--run-summary-out",
         str(summary_path),
     ]
-    if model_local_files_only:
+    if layout.resolve(HF_CACHE_MANIFEST_RELATIVE).is_file():
         command.append("--model-local-files-only")
     if restart_path.exists() and not summary_path.exists():
         command.extend(["--resume-from", str(restart_path)])
     return command
+
+
+def _training_command(
+    layout: RunLayout,
+    config: PipelineConfig,
+    training_seed: int,
+) -> list[str]:
+    """Invoke the private trainer with namespace keys, never artifact paths."""
+
+    return [
+        sys.executable,
+        "-B",
+        "pipeline.py",
+        "_train-encoder",
+        "--run-id",
+        layout.run_id,
+        "--training-seed",
+        str(training_seed),
+        "--config",
+        str(config.path.resolve()),
+    ]
 
 
 def plan_training(
@@ -1185,16 +1310,7 @@ def plan_training(
     if checkpoint_path.exists() and not restart_path.exists() and not summary_path.exists():
         raise DataContractError("orphan checkpoint without restart or summary blocks training")
 
-    command = _training_command(
-        layout,
-        config,
-        training_seed,
-        checkpoint_path,
-        restart_path,
-        progress_path,
-        summary_path,
-        cache_is_frozen,
-    )
+    command = _training_command(layout, config, training_seed)
     if not summary_path.exists():
         try:
             command_runner(command, cwd=layout.source_root, check=True)

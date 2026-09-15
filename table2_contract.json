@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "workflow": "table-production",
   "task": "E-T02",
   "source_baseline": {
@@ -32,6 +32,8 @@
       "checkout_manifest": "manifests/00-checkout-manifest.json",
       "full_run_manifest": "manifests/debug-full-run.json",
       "preparation_manifest": "manifests/03-data-preparation-manifest.json",
+      "prepared_train": "data-prepared/train.jsonl",
+      "prepared_development": "data-prepared/development.jsonl",
       "prepared_test": "data-prepared/test.jsonl",
       "private_gold": "data-prepared/test-gold.jsonl",
       "split_manifest": "data-prepared/split-manifest.json",
@@ -91,19 +93,19 @@
     "eval/triple_f1.py": "bf87dc4416a161c9ea61759b7b18e85d21661652",
     "graph_construction.py": "7c8d04256664cabdb3009da9667eb42a6f68a51e",
     "metrics.py": "c6b3fb87c367fc3e0a1293febf6162a755eef8e8",
-    "model.py": "8471979bb9db0d521b31e163b9cf32d9d54e92d7",
-    "models/bert_kg_encoder.py": "e4d78070cc245b603b12a0dc293fc2be069c25c2",
-    "pipeline.py": "4dd0ae81c1db4a3c942ef2364bfb57c281afe61a",
-    "preparation.py": "4ac47677bf978fa6bf9bb1230bc221a323123a18",
+    "model.py": "a30ba23837f0b4f8d3187050515fcc8d26df2f87",
+    "models/bert_kg_encoder.py": "b088035bc3f1d1d6738809c402cdc07e36abdce3",
+    "pipeline.py": "6d01828a91b36a9ffa24295aec58cd4a0446d59f",
+    "preparation.py": "4329121f78a1126d1e149cdf5ad1c8d4dc3f5eae",
     "publication.py": "f2ed57478ca258f0d87b928a5d3a34ccd4d124bc",
     "publication_statistics.py": "6b645b0d377ae62a5d0644c9e1644d4dcfb626a4",
     "records.py": "1c6103714392507d3fac16e1232e9bcbe26f626b",
     "scoring.py": "38f485888dc0aa3efb9c01391420436dd83642c0",
     "split.py": "08d685c47290136f06ec3bad6b10345363e2c7bb",
-    "table2_runner.py": "96975e9df4d7693529725018b917b3c9312bb508",
-    "table_evaluator.py": "a19ea39eb657c74e0964e47eaac538fccb8891f9",
+    "table2_runner.py": "8623e352018d0f5a14922996101f29a5bde54b5d",
+    "table_evaluator.py": "a31a15d0a4899d2f36da04f929850a6801d123c2",
     "threshold.py": "daf94084d9301caf9ae4912f70972465633d960f",
     "train_span.py": "ba16ad21f24f8f34cf977bfd0a8bb5f800780a4b",
-    "verifier.py": "7114284f7e1dcec1970410d0c15620f640b9231d"
+    "verifier.py": "e0952ca75530533cbb84e1cb829313ae8b4ffef1"
   }
 }

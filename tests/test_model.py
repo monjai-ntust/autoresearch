@@ -8,16 +8,18 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest import mock
 
 from config import load_pipeline_config
 from constants import PROTOCOL_ID
 from hf_cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE, write_cache_manifest
-from model import generate_candidates, plan_training
-from pipeline import (
-    _same_run_prediction_replay_input,
-    _validate_training_stage,
-    _write_same_run_seal,
+from model import (
+    canonical_trainer_arguments,
+    generate_candidates,
+    plan_training,
+    validate_prediction_artifacts,
 )
+from pipeline import _validate_training_stage
 from artifact_io import (
     DataContractError,
     atomic_write_bytes,
@@ -244,61 +246,6 @@ class ModelAdapterTests(unittest.TestCase):
             self.assertEqual(set(plan[0]), _schema_required("model-generation-plan.schema.json"))
             self.assertEqual(plan[0]["token_count"], len(WORDS))
 
-    def test_dispatcher_replay_requires_same_run_live_producer_manifest(self):
-        with _temporary_output_directory() as temporary:
-            layout = RunLayout(Path(temporary), "same-run-replay")
-            layout.create()
-            sentences, checkpoint, candidates = self._prepare(layout)
-            ledger = layout.resolve("predictions/test/seed-42-prediction-ledger.jsonl")
-            atomic_write_jsonl(ledger, [_ledger_record()])
-            live_manifest = layout.resolve(
-                "manifests/model-generate-candidates-live-seed-42-test.json"
-            )
-            atomic_write_json(
-                live_manifest,
-                {
-                    "stage": "model-generate-candidates",
-                    "execution_mode": "live",
-                    "status": "completed",
-                    "training_seed": 42,
-                    "inputs": {
-                        "prediction_ledger": {
-                            "path": layout.relative_identity(ledger),
-                            "sha256": sha256_file(ledger),
-                        },
-                        "checkpoint_manifest": {
-                            "path": layout.relative_identity(checkpoint),
-                            "sha256": sha256_file(checkpoint),
-                        },
-                        "prepared_sentences": {
-                            "path": layout.relative_identity(sentences),
-                            "sha256": sha256_file(sentences),
-                        },
-                    },
-                },
-            )
-            _write_same_run_seal(
-                layout,
-                live_manifest,
-                json.loads(live_manifest.read_text(encoding="utf-8")),
-            )
-            self.assertEqual(
-                _same_run_prediction_replay_input(
-                    layout, checkpoint, sentences, candidates
-                ),
-                ledger,
-            )
-            document = json.loads(live_manifest.read_text(encoding="utf-8"))
-            document["inputs"]["prediction_ledger"]["sha256"] = "0" * 64
-            atomic_write_json(live_manifest, document)
-            with self.assertRaisesRegex(DataContractError, "same-run live producer"):
-                _same_run_prediction_replay_input(
-                    layout, checkpoint, sentences, candidates
-                )
-            for path in layout.run_root.rglob("*"):
-                if path.is_file():
-                    self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))
-
     def test_replay_reproduces_greedy_confidence_and_dedup(self):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "replay")
@@ -340,6 +287,57 @@ class ModelAdapterTests(unittest.TestCase):
             loaded_sentences = _load_sentences(sentences)
             rows = _load_candidates(candidates, loaded_sentences)
             self.assertEqual(len(rows), 2)
+            validate_prediction_artifacts(
+                sentences_path=sentences,
+                prediction_ledger_path=ledger,
+                candidates_path=candidates,
+                training_seed=42,
+                max_span_width=8,
+                input_hashes=emitted[0]["input_hashes"],
+            )
+            emitted[0]["triple_confidence"] = 0.01
+            atomic_write_jsonl(candidates, emitted)
+            with self.assertRaisesRegex(
+                DataContractError, "differs from deterministic prediction"
+            ):
+                validate_prediction_artifacts(
+                    sentences_path=sentences,
+                    prediction_ledger_path=ledger,
+                    candidates_path=candidates,
+                    training_seed=42,
+                    max_span_width=8,
+                    input_hashes=emitted[0]["input_hashes"],
+                )
+
+    def test_valid_live_recovery_cache_skips_encoder_execution(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "live-cache")
+            layout.create()
+            sentences, checkpoint, candidates = self._prepare(layout)
+            checkpoint_blob = layout.resolve("checkpoints/seed-42/checkpoint.pt")
+            atomic_write_bytes(checkpoint_blob, b"checkpoint fixture")
+            checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
+            checkpoint_document["checkpoint_sha256"] = sha256_file(checkpoint_blob)
+            atomic_write_json(checkpoint, checkpoint_document)
+            cache = layout.resolve("inputs/recovery/prediction-ledger.jsonl")
+            atomic_write_jsonl(cache, [_ledger_record()])
+            with mock.patch("model._live_inference_records") as inference:
+                manifest = generate_candidates(
+                    layout,
+                    self.config,
+                    execution_mode="live",
+                    sentences_path=sentences,
+                    checkpoint_manifest_path=checkpoint,
+                    candidates_out_path=candidates,
+                    cache_ledger_path=cache,
+                    checkpoint_blob_path=checkpoint_blob,
+                )
+            inference.assert_not_called()
+            self.assertEqual(manifest["status"], "completed")
+            self.assertEqual(
+                manifest["inputs"]["recovery_prediction_ledger"]["sha256"],
+                sha256_file(cache),
+            )
 
     def test_replay_rejects_relation_over_unselected_span(self):
         with _temporary_output_directory() as temporary:
@@ -582,10 +580,15 @@ class ModelTrainTests(unittest.TestCase):
                 "inputs/huggingface/models--fixture/blobs/model.bin", must_exist=True
             ).unlink()
             observed_commands = []
+            observed_trainer_commands = []
 
             def interrupted(command, *, cwd, check):
                 observed_commands.append(command)
-                restart = Path(command[command.index("--save-last-to") + 1])
+                trainer_command = canonical_trainer_arguments(layout, self.config, 42)
+                observed_trainer_commands.append(trainer_command)
+                restart = Path(
+                    trainer_command[trainer_command.index("--save-last-to") + 1]
+                )
                 atomic_write_bytes(restart, b"partial restart")
                 raise subprocess.CalledProcessError(9, command)
 
@@ -600,12 +603,14 @@ class ModelTrainTests(unittest.TestCase):
 
             def completed(command, *, cwd, check):
                 observed_commands.append(command)
-                self.assertIn("--resume-from", command)
-                checkpoint = Path(command[command.index("--save-best-to") + 1])
-                restart = Path(command[command.index("--save-last-to") + 1])
-                summary = Path(command[command.index("--run-summary-out") + 1])
-                progress = Path(command[command.index("--progress-log") + 1])
-                cache_dir = Path(command[command.index("--model-cache-dir") + 1])
+                trainer_command = canonical_trainer_arguments(layout, self.config, 42)
+                observed_trainer_commands.append(trainer_command)
+                self.assertIn("--resume-from", trainer_command)
+                checkpoint = Path(trainer_command[trainer_command.index("--save-best-to") + 1])
+                restart = Path(trainer_command[trainer_command.index("--save-last-to") + 1])
+                summary = Path(trainer_command[trainer_command.index("--run-summary-out") + 1])
+                progress = Path(trainer_command[trainer_command.index("--progress-log") + 1])
+                cache_dir = Path(trainer_command[trainer_command.index("--model-cache-dir") + 1])
                 atomic_write_bytes(cache_dir / "models--fixture/blobs/model.bin", b"model\n")
                 atomic_write_bytes(checkpoint, b"checkpoint")
                 atomic_write_bytes(restart, b"restart")
@@ -643,9 +648,11 @@ class ModelTrainTests(unittest.TestCase):
                 "partial_match_full_legacy_equivalence_unavailable",
             )
             self.assertTrue(manifest["resume"]["resumed"])
-            self.assertIn("--canonical-mode", observed_commands[-1])
-            self.assertIn("--skip-test-eval", observed_commands[-1])
-            self.assertIn("--model-cache-dir", observed_commands[-1])
+            self.assertEqual(observed_commands[-1][3], "_train-encoder")
+            self.assertNotIn("--prepared-dir", observed_commands[-1])
+            self.assertIn("--canonical-mode", observed_trainer_commands[-1])
+            self.assertIn("--skip-test-eval", observed_trainer_commands[-1])
+            self.assertIn("--model-cache-dir", observed_trainer_commands[-1])
             checkpoint_manifest = layout.resolve(
                 "checkpoints/seed-42/checkpoint-manifest.json"
             )

@@ -1,4 +1,4 @@
-"""Primary reproducible table-production pipeline."""
+"""Primary CODE-ACCORD publication and same-run Table-2 pipeline."""
 
 from __future__ import annotations
 
@@ -22,7 +22,12 @@ if str(_ENTRY_ROOT) not in sys.path:
 from acquisition import fetch_run
 from config import load_pipeline_config
 from doctor import run_doctor
-from model import generate_candidates, plan_training
+from model import (
+    canonical_trainer_arguments,
+    generate_candidates,
+    plan_training,
+    validate_prediction_cache,
+)
 from threshold import select_threshold
 from artifact_io import DataContractError, atomic_write_json, iter_jsonl, sha256_file
 from paths import PathContractError, RunLayout, discover_source_root
@@ -32,7 +37,7 @@ from publication import assemble_seed_candidates, prepare_verifier_pilot
 from reconciliation import reconcile_section5_evidence
 from records import Candidate
 from scoring import ScoreInputs, score_run
-from verifier import run_verifier
+from verifier import run_verifier, validate_response_cache
 import table2_runner
 
 
@@ -120,120 +125,6 @@ def _validate_same_run_seal(
         raise DataContractError("stage seal does not authenticate the selected run")
 
 
-def _find_written_manifest(
-    layout: RunLayout, pattern: str, manifest: dict
-) -> Path:
-    matches = [
-        path
-        for path in layout.resolve("manifests").glob(pattern)
-        if _load_manifest(path, "stage producer manifest") == manifest
-    ]
-    if len(matches) != 1:
-        raise DataContractError(
-            "could not identify exactly one newly written stage producer manifest"
-        )
-    return matches[0]
-
-
-def _same_run_prediction_replay_input(
-    layout: RunLayout,
-    checkpoint_manifest: Path,
-    sentences: Path,
-    candidates_out: Path,
-) -> Path:
-    checkpoint = _load_manifest(checkpoint_manifest, "checkpoint manifest")
-    seed = checkpoint.get("training_seed")
-    if not isinstance(seed, int):
-        raise DataContractError("checkpoint manifest lacks an integer training_seed")
-    ledger = layout.resolve(
-        candidates_out.parent.relative_to(layout.run_root)
-        / f"seed-{seed}-prediction-ledger.jsonl",
-        must_exist=True,
-    )
-    live_manifest_path = layout.resolve(
-        f"manifests/model-generate-candidates-live-seed-{seed}-{sentences.stem}.json",
-        must_exist=True,
-    )
-    live = _load_manifest(live_manifest_path, "same-run live prediction manifest")
-    ledger_binding = live.get("inputs", {}).get("prediction_ledger", {})
-    if (
-        live.get("stage") != "model-generate-candidates"
-        or live.get("execution_mode") != "live"
-        or live.get("status") != "completed"
-        or live.get("training_seed") != seed
-        or ledger_binding.get("path") != layout.relative_identity(ledger)
-        or ledger_binding.get("sha256") != sha256_file(ledger)
-        or live.get("inputs", {}).get("checkpoint_manifest", {}).get("path")
-        != layout.relative_identity(checkpoint_manifest)
-        or live.get("inputs", {}).get("checkpoint_manifest", {}).get("sha256")
-        != sha256_file(checkpoint_manifest)
-        or live.get("inputs", {}).get("prepared_sentences", {}).get("path")
-        != layout.relative_identity(sentences)
-        or live.get("inputs", {}).get("prepared_sentences", {}).get("sha256")
-        != sha256_file(sentences)
-    ):
-        raise DataContractError(
-            "prediction replay input is not authenticated by its same-run live producer"
-        )
-    _validate_same_run_seal(layout, live_manifest_path, live)
-    return ledger
-
-
-def _same_run_verifier_replay_input(layout: RunLayout, mode: str) -> Path:
-    responses = layout.resolve(f"verifier/{mode}/responses.jsonl", must_exist=True)
-    live_manifest_path = layout.resolve(
-        f"manifests/verifier-{mode}-live.json", must_exist=True
-    )
-    live = _load_manifest(live_manifest_path, "same-run live verifier manifest")
-    relative = layout.relative_identity(responses)
-    if (
-        live.get("condition_id") != f"VER-{mode.upper()}"
-        or live.get("execution_mode") != "live"
-        or live.get("status") != "completed"
-        or live.get("outputs", {}).get(relative) != sha256_file(responses)
-    ):
-        raise DataContractError(
-            "verifier replay input is not authenticated by its same-run live producer"
-        )
-    _validate_same_run_seal(layout, live_manifest_path, live)
-    return responses
-
-
-def _same_run_verifier_cache_input(layout: RunLayout, mode: str) -> Path:
-    cache = layout.resolve(
-        f"inputs/recovery/verifier-{mode}-responses.jsonl", must_exist=True
-    )
-    provenance_path = layout.resolve(
-        f"inputs/recovery/verifier-{mode}-responses.manifest.json", must_exist=True
-    )
-    checkout_path = layout.resolve(
-        "manifests/00-checkout-manifest.json", must_exist=True
-    )
-    provenance = _load_manifest(provenance_path, "verifier recovery provenance")
-    expected = {
-        "schema_version": "phase-b-same-run-verifier-recovery-1.0",
-        "run_id": layout.run_id,
-        "mode": mode,
-        "response_cache": {
-            "path": layout.relative_identity(cache),
-            "sha256": sha256_file(cache),
-        },
-        "source_response": {
-            "path": f"verifier/{mode}/responses.jsonl",
-            "sha256": sha256_file(cache),
-        },
-        "checkout_manifest": {
-            "path": layout.relative_identity(checkout_path),
-            "sha256": sha256_file(checkout_path),
-        },
-    }
-    if provenance != expected:
-        raise DataContractError(
-            "verifier recovery cache is not authenticated to the selected run"
-        )
-    return cache
-
-
 def _validate_pilot_capture_seals(layout: RunLayout, capture_index: Path) -> None:
     index = _load_manifest(capture_index, "pilot capture index")
     if index.get("run_id") != layout.run_id:
@@ -299,7 +190,79 @@ def _validate_existing_checkout(layout: RunLayout, config) -> dict:
         raise DataContractError(
             "existing run checkout differs from the current clean source commit"
         )
+    config_relative = config.path.resolve().relative_to(layout.source_root).as_posix()
+    tracked = manifest.get("tracked_artifact_sha256")
+    if (
+        not isinstance(tracked, dict)
+        or tracked.get(config_relative) != sha256_file(config.path)
+    ):
+        raise DataContractError(
+            "existing run checkout does not authenticate its selected config"
+        )
     return manifest
+
+
+def _validate_private_training_inputs(layout: RunLayout, config) -> None:
+    """Authenticate the run-local files consumed by the internal trainer."""
+
+    acquisition_path = layout.resolve(
+        "manifests/02-input-acquisition-manifest.json", must_exist=True
+    )
+    preparation_path = layout.resolve(
+        "manifests/03-data-preparation-manifest.json", must_exist=True
+    )
+    acquisition = _load_manifest(acquisition_path, "acquisition manifest")
+    preparation = _load_manifest(preparation_path, "preparation manifest")
+    archive = acquisition.get("archive")
+    if not isinstance(archive, dict) or not isinstance(archive.get("path"), str):
+        raise DataContractError("training acquisition manifest lacks archive identity")
+    archive_path = layout.resolve(archive["path"], must_exist=True)
+    if (
+        acquisition.get("dataset_id") != config.value["dataset"]["dataset_id"]
+        or archive.get("sha256") != sha256_file(archive_path)
+        or preparation.get("protocol_id") != config.value["protocol_id"]
+        or preparation.get("dataset_id") != config.value["dataset"]["dataset_id"]
+        or preparation.get("byte_identical_independent_materializations") is not True
+        or preparation.get("acquisition_manifest_sha256")
+        != sha256_file(acquisition_path)
+        or preparation.get("archive_sha256") != archive.get("sha256")
+    ):
+        raise DataContractError(
+            "private trainer inputs are not bound to one acquisition/preparation"
+        )
+    artifacts = preparation.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise DataContractError("preparation manifest lacks its artifact ledger")
+    by_path = {
+        item.get("path"): item
+        for item in artifacts
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    for relative in ("train.jsonl", "development.jsonl", "split-manifest.json"):
+        record = by_path.get(relative)
+        path = layout.resolve(f"data-prepared/{relative}", must_exist=True)
+        if (
+            not isinstance(record, dict)
+            or record.get("bytes") != path.stat().st_size
+            or record.get("sha256") != sha256_file(path)
+        ):
+            raise DataContractError(
+                f"private trainer input differs from preparation: {relative}"
+            )
+    split = _load_manifest(
+        layout.resolve("data-prepared/split-manifest.json", must_exist=True),
+        "split manifest",
+    )
+    expected_split = config.value["split"]
+    if (
+        split.get("split_id") != expected_split["split_id"]
+        or split.get("seed") != expected_split["seed"]
+        or split.get("train_count") != expected_split["train_sentences"]
+        or split.get("development_count")
+        != expected_split["development_sentences"]
+        or split.get("test_count") != expected_split["test_sentences"]
+    ):
+        raise DataContractError("private trainer split differs from the selected config")
 
 
 def _validate_reconciliation(layout: RunLayout, config) -> dict:
@@ -449,7 +412,12 @@ def _validate_training_stage(
 
 
 def _validate_generation_stage(
-    layout: RunLayout, config, seed: int, split: str
+    layout: RunLayout,
+    config,
+    seed: int,
+    split: str,
+    *,
+    require_seal: bool = True,
 ) -> dict:
     manifest_path = layout.resolve(
         f"manifests/model-generate-candidates-live-seed-{seed}-{split}.json",
@@ -491,7 +459,8 @@ def _validate_generation_stage(
         "checkpoint_sha256"
     ):
         raise DataContractError(f"seed-{seed} {split} checkpoint identity differs")
-    _validate_same_run_seal(layout, manifest_path, manifest)
+    if require_seal:
+        _validate_same_run_seal(layout, manifest_path, manifest)
     return manifest
 
 
@@ -653,6 +622,7 @@ def _validate_verifier_stage(
     *,
     mode: str,
     artifact_prefix: str,
+    require_seal: bool = True,
 ) -> dict:
     manifest = _load_manifest(manifest_path, "verifier manifest")
     _require_fields(
@@ -700,8 +670,347 @@ def _validate_verifier_stage(
         or identity["blob_sha256"] != expected_blob
     ):
         raise DataContractError(f"{mode} verifier environment uses another Qwen")
-    _validate_same_run_seal(layout, manifest_path, manifest)
+    if require_seal:
+        _validate_same_run_seal(layout, manifest_path, manifest)
     return manifest
+
+
+def _next_recovery_path(layout: RunLayout, category: str, filename: str) -> Path:
+    directory = layout.resolve(f"inputs/recovery/{category}")
+    directory.mkdir(parents=True, exist_ok=True)
+    existing = list(directory.glob(f"*-{filename}"))
+    return directory / f"{len(existing) + 1:03d}-{filename}"
+
+
+def _quarantine_run_artifact(
+    layout: RunLayout, path: Path, category: str
+) -> Path | None:
+    if not path.exists():
+        return None
+    layout.relative_identity(path)
+    if not path.is_file() or path.is_symlink():
+        raise DataContractError(f"recovery target is not a physical file: {path}")
+    destination = _next_recovery_path(layout, f"quarantine/{category}", path.name)
+    os.replace(path, destination)
+    return destination
+
+
+def _write_recovery_provenance(
+    layout: RunLayout,
+    cache: Path,
+    *,
+    kind: str,
+    identity: dict[str, object],
+    bindings: dict[str, Path],
+) -> Path:
+    provenance = cache.with_suffix(cache.suffix + ".manifest.json")
+    checkout = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
+    document = {
+        "schema_version": "phase-b-same-run-recovery-2.0",
+        "run_id": layout.run_id,
+        "kind": kind,
+        "identity": identity,
+        "cache": {
+            "path": layout.relative_identity(cache),
+            "sha256": sha256_file(cache),
+        },
+        "checkout_manifest": {
+            "path": layout.relative_identity(checkout),
+            "sha256": sha256_file(checkout),
+        },
+        "bindings": {
+            name: {
+                "path": layout.relative_identity(path),
+                "sha256": sha256_file(path),
+            }
+            for name, path in sorted(bindings.items())
+        },
+    }
+    atomic_write_json(provenance, document)
+    return provenance
+
+
+def _validate_recovery_provenance(
+    layout: RunLayout,
+    cache: Path,
+    *,
+    kind: str,
+    identity: dict[str, object],
+    bindings: dict[str, Path],
+) -> None:
+    provenance_path = cache.with_suffix(cache.suffix + ".manifest.json")
+    provenance = _load_manifest(provenance_path, "recovery provenance")
+    checkout = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
+    expected = {
+        "schema_version": "phase-b-same-run-recovery-2.0",
+        "run_id": layout.run_id,
+        "kind": kind,
+        "identity": identity,
+        "cache": {
+            "path": layout.relative_identity(cache),
+            "sha256": sha256_file(cache),
+        },
+        "checkout_manifest": {
+            "path": layout.relative_identity(checkout),
+            "sha256": sha256_file(checkout),
+        },
+        "bindings": {
+            name: {
+                "path": layout.relative_identity(path),
+                "sha256": sha256_file(path),
+            }
+            for name, path in sorted(bindings.items())
+        },
+    }
+    if provenance != expected:
+        raise DataContractError("recovery cache is not bound to the selected run")
+
+
+def _resume_generation_stage(
+    layout: RunLayout, config, *, seed: int, split: str
+) -> dict:
+    manifest_path = layout.resolve(
+        f"manifests/model-generate-candidates-live-seed-{seed}-{split}.json"
+    )
+    seal_path = _same_run_seal_path(manifest_path)
+    if manifest_path.is_file():
+        manifest = _validate_generation_stage(
+            layout, config, seed, split, require_seal=False
+        )
+        if not seal_path.is_file():
+            _write_same_run_seal(layout, manifest_path, manifest)
+        return _validate_generation_stage(layout, config, seed, split)
+
+    directory = "dev" if split == "development" else "test"
+    prepared = layout.resolve(f"data-prepared/{split}.jsonl", must_exist=True)
+    checkpoint_manifest = layout.resolve(
+        f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
+    )
+    checkpoint_blob = layout.resolve(
+        f"checkpoints/seed-{seed}/checkpoint.pt", must_exist=True
+    )
+    candidates = layout.resolve(f"predictions/{directory}/seed-{seed}-candidates.jsonl")
+    live_ledger = layout.resolve(
+        f"predictions/{directory}/seed-{seed}-prediction-ledger.jsonl"
+    )
+    bindings = {"prepared": prepared, "checkpoint_manifest": checkpoint_manifest}
+    identity: dict[str, object] = {"training_seed": seed, "split": split}
+    cache: Path | None = None
+    if live_ledger.is_file():
+        try:
+            validate_prediction_cache(
+                layout,
+                config,
+                sentences_path=prepared,
+                checkpoint_manifest_path=checkpoint_manifest,
+                cache_ledger_path=live_ledger,
+            )
+        except DataContractError:
+            _quarantine_run_artifact(
+                layout, live_ledger, f"generation-seed-{seed}-{split}"
+            )
+        else:
+            cache = _next_recovery_path(
+                layout,
+                f"generation-seed-{seed}-{split}",
+                "prediction-ledger.jsonl",
+            )
+            os.replace(live_ledger, cache)
+            _write_recovery_provenance(
+                layout,
+                cache,
+                kind="prediction-ledger",
+                identity=identity,
+                bindings=bindings,
+            )
+    if cache is None:
+        directory_path = layout.resolve(
+            f"inputs/recovery/generation-seed-{seed}-{split}"
+        )
+        if directory_path.is_dir():
+            for recovery_candidate in sorted(
+                directory_path.glob("*-prediction-ledger.jsonl"), reverse=True
+            ):
+                try:
+                    _validate_recovery_provenance(
+                        layout,
+                        recovery_candidate,
+                        kind="prediction-ledger",
+                        identity=identity,
+                        bindings=bindings,
+                    )
+                    validate_prediction_cache(
+                        layout,
+                        config,
+                        sentences_path=prepared,
+                        checkpoint_manifest_path=checkpoint_manifest,
+                        cache_ledger_path=recovery_candidate,
+                    )
+                except DataContractError:
+                    continue
+                cache = recovery_candidate
+                break
+    for partial in (candidates, seal_path):
+        _quarantine_run_artifact(
+            layout, partial, f"generation-seed-{seed}-{split}"
+        )
+    manifest = generate_candidates(
+        layout,
+        config,
+        execution_mode="live",
+        sentences_path=prepared,
+        checkpoint_manifest_path=checkpoint_manifest,
+        candidates_out_path=candidates,
+        prediction_ledger_path=None,
+        cache_ledger_path=cache,
+        checkpoint_blob_path=checkpoint_blob,
+        base_model=None,
+        device=None,
+    )
+    _write_same_run_seal(layout, manifest_path, manifest)
+    return _validate_generation_stage(layout, config, seed, split)
+
+
+def _resume_verifier_stage(
+    layout: RunLayout,
+    config,
+    *,
+    mode: str,
+    sentences: Path,
+    candidates: Path,
+    development: Path,
+    warmup_candidates: Path,
+    model_blob: Path,
+    ollama_url: str,
+    artifact_prefix: str = "",
+    pilot_selection: Path | None = None,
+    allow_response_cache: bool = True,
+) -> dict:
+    prefix = artifact_prefix.strip("/")
+    manifest_name = (
+        f"verifier-{prefix.replace('/', '-')}-{mode}-live.json"
+        if prefix
+        else f"verifier-{mode}-live.json"
+    )
+    manifest_path = layout.resolve(f"manifests/{manifest_name}")
+    seal_path = _same_run_seal_path(manifest_path)
+    if manifest_path.is_file():
+        manifest = _validate_verifier_stage(
+            layout,
+            config,
+            manifest_path,
+            mode=mode,
+            artifact_prefix=prefix,
+            require_seal=False,
+        )
+        if not seal_path.is_file():
+            _write_same_run_seal(layout, manifest_path, manifest)
+        return _validate_verifier_stage(
+            layout, config, manifest_path, mode=mode, artifact_prefix=prefix
+        )
+
+    bindings = {"sentences": sentences, "candidates": candidates}
+    identity: dict[str, object] = {
+        "mode": mode,
+        "condition_id": f"VER-{mode.upper()}",
+    }
+    if prefix:
+        identity["artifact_prefix"] = prefix
+    base = f"verifier/{prefix}/{mode}" if prefix else f"verifier/{mode}"
+    response_path = layout.resolve(f"{base}/responses.jsonl")
+    recovery_label = f"verifier-{prefix.replace('/', '-') + '-' if prefix else ''}{mode}"
+    cache: Path | None = None
+    if (
+        allow_response_cache
+        and response_path.is_file()
+        and response_path.stat().st_size
+    ):
+        try:
+            validate_response_cache(
+                layout,
+                config,
+                mode=mode,
+                sentences_path=sentences,
+                candidates_path=candidates,
+                cache_ledger_path=response_path,
+            )
+        except DataContractError:
+            _quarantine_run_artifact(layout, response_path, recovery_label)
+        else:
+            cache = _next_recovery_path(
+                layout, recovery_label, "responses.jsonl"
+            )
+            os.replace(response_path, cache)
+            _write_recovery_provenance(
+                layout,
+                cache,
+                kind="verifier-responses",
+                identity=identity,
+                bindings=bindings,
+            )
+    if cache is None:
+        directory = layout.resolve(f"inputs/recovery/{recovery_label}")
+        if allow_response_cache and directory.is_dir():
+            for recovery_candidate in sorted(
+                directory.glob("*-responses.jsonl"), reverse=True
+            ):
+                try:
+                    _validate_recovery_provenance(
+                        layout,
+                        recovery_candidate,
+                        kind="verifier-responses",
+                        identity=identity,
+                        bindings=bindings,
+                    )
+                    validate_response_cache(
+                        layout,
+                        config,
+                        mode=mode,
+                        sentences_path=sentences,
+                        candidates_path=candidates,
+                        cache_ledger_path=recovery_candidate,
+                    )
+                except DataContractError:
+                    continue
+                cache = recovery_candidate
+                break
+    partials = [
+        layout.resolve(f"{base}/{name}")
+        for name in (
+            "requests.jsonl",
+            "warmup-request.jsonl",
+            "warmup-response.jsonl",
+            "verdicts.jsonl",
+            "environment-manifest.json",
+            "run-log.jsonl",
+            "model/tags.json",
+            "model/show.json",
+            "model/ollama-modelfile.txt",
+        )
+    ]
+    partials.extend([response_path, seal_path])
+    for partial in partials:
+        _quarantine_run_artifact(layout, partial, recovery_label)
+    manifest = run_verifier(
+        layout,
+        config,
+        mode=mode,
+        execution_mode="live",
+        sentences_path=sentences,
+        candidates_path=candidates,
+        warmup_sentences_path=development,
+        warmup_candidates_path=warmup_candidates,
+        response_ledger_path=None,
+        cache_ledger_path=cache,
+        ollama_url=ollama_url,
+        model_blob_path=model_blob,
+        pilot_selection_path=pilot_selection,
+        artifact_prefix=prefix,
+    )
+    _write_same_run_seal(layout, manifest_path, manifest)
+    return _validate_verifier_stage(
+        layout, config, manifest_path, mode=mode, artifact_prefix=prefix
+    )
 
 
 def _validate_pilot_audit(layout: RunLayout, config) -> dict:
@@ -940,7 +1249,7 @@ def _run_full_pipeline(
     ollama_url: str,
     model_blob_source: str | None,
 ) -> int:
-    """Run the sole supported end-to-end Tables 1-3 workflow."""
+    """Run the sole supported canonical CODE-ACCORD and Table-2 workflow."""
     doctor_path = layout.resolve("manifests/00-checkout-manifest.json")
     if doctor_path.is_file():
         _validate_existing_checkout(layout, config)
@@ -988,33 +1297,9 @@ def _run_full_pipeline(
         )
         if not training_hardware and isinstance(training.get("environment"), dict):
             training_hardware = training["environment"]
-        checkpoint_manifest = layout.resolve(
-            f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
+        _resume_generation_stage(
+            layout, config, seed=seed, split="development"
         )
-        checkpoint_blob = layout.resolve(f"checkpoints/seed-{seed}/checkpoint.pt", must_exist=True)
-        development = layout.resolve("data-prepared/development.jsonl", must_exist=True)
-        development_out = layout.resolve(f"predictions/dev/seed-{seed}-candidates.jsonl")
-        generation_manifest = layout.resolve(
-            f"manifests/model-generate-candidates-live-seed-{seed}-development.json"
-        )
-        if not generation_manifest.is_file():
-            manifest = generate_candidates(
-                layout,
-                config,
-                execution_mode="live",
-                sentences_path=development,
-                checkpoint_manifest_path=checkpoint_manifest,
-                candidates_out_path=development_out,
-                prediction_ledger_path=None,
-                checkpoint_blob_path=checkpoint_blob,
-                base_model=None,
-                device=None,
-            )
-            producer = _find_written_manifest(
-                layout, f"model-generate-candidates-live-seed-{seed}-*.json", manifest
-            )
-            _write_same_run_seal(layout, producer, manifest)
-        _validate_generation_stage(layout, config, seed, "development")
 
     encoder_identity = table2_runner.require_consistent_encoder_identity(
         encoder_identities
@@ -1072,34 +1357,19 @@ def _run_full_pipeline(
         for repeat in (1, 2):
             capture_id = f"{mode}-repeat-{repeat}"
             prefix = f"pilot/{capture_id}"
-            expected_manifest = layout.resolve(
-                f"manifests/verifier-{prefix.replace('/', '-')}-{mode}-live.json"
-            )
-            if not expected_manifest.is_file():
-                manifest = run_verifier(
-                    layout,
-                    config,
-                    mode=mode,
-                    execution_mode="live",
-                    sentences_path=development,
-                    candidates_path=pilot_candidates,
-                    warmup_sentences_path=development,
-                    warmup_candidates_path=warmup_candidates,
-                    response_ledger_path=None,
-                    cache_ledger_path=None,
-                    ollama_url=ollama_url,
-                    model_blob_path=model_blob,
-                    pilot_selection_path=pilot_selection,
-                    artifact_prefix=prefix,
-                )
-                producer = _find_written_manifest(layout, f"verifier-*{mode}-live.json", manifest)
-                _write_same_run_seal(layout, producer, manifest)
-            _validate_verifier_stage(
+            _resume_verifier_stage(
                 layout,
                 config,
-                expected_manifest,
                 mode=mode,
+                sentences=development,
+                candidates=pilot_candidates,
+                development=development,
+                warmup_candidates=warmup_candidates,
+                model_blob=model_blob,
+                ollama_url=ollama_url,
                 artifact_prefix=prefix,
+                pilot_selection=pilot_selection,
+                allow_response_cache=False,
             )
             capture_rows.append(
                 {"capture_id": capture_id, "mode": mode, "repeat": repeat, "artifact_prefix": prefix}
@@ -1141,61 +1411,23 @@ def _run_full_pipeline(
     _validate_pilot_audit(layout, config)
 
     for seed in config.value["training_seeds"]:
-        test_manifest = layout.resolve(
-            f"manifests/model-generate-candidates-live-seed-{seed}-test.json"
-        )
-        if not test_manifest.is_file():
-            manifest = generate_candidates(
-                layout,
-                config,
-                execution_mode="live",
-                sentences_path=layout.resolve("data-prepared/test.jsonl", must_exist=True),
-                checkpoint_manifest_path=layout.resolve(
-                    f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
-                ),
-                candidates_out_path=layout.resolve(f"predictions/test/seed-{seed}-candidates.jsonl"),
-                prediction_ledger_path=None,
-                checkpoint_blob_path=layout.resolve(f"checkpoints/seed-{seed}/checkpoint.pt", must_exist=True),
-                base_model=None,
-                device=None,
-            )
-            producer = _find_written_manifest(
-                layout, f"model-generate-candidates-live-seed-{seed}-test.json", manifest
-            )
-            _write_same_run_seal(layout, producer, manifest)
-        _validate_generation_stage(layout, config, seed, "test")
+        _resume_generation_stage(layout, config, seed=seed, split="test")
     test_candidates = layout.resolve("predictions/test/candidates.jsonl")
     if not test_candidates.is_file():
         assemble_seed_candidates(layout, config, split="test")
     _validate_candidate_assembly(layout, config, "test")
 
     for mode in ("simple", "corrective"):
-        manifest_path = layout.resolve(f"manifests/verifier-{mode}-live.json")
-        if not manifest_path.is_file():
-            manifest = run_verifier(
-                layout,
-                config,
-                mode=mode,
-                execution_mode="live",
-                sentences_path=layout.resolve("data-prepared/test.jsonl", must_exist=True),
-                candidates_path=test_candidates,
-                warmup_sentences_path=development,
-                warmup_candidates_path=warmup_candidates,
-                response_ledger_path=None,
-                cache_ledger_path=None,
-                ollama_url=ollama_url,
-                model_blob_path=model_blob,
-                pilot_selection_path=None,
-                artifact_prefix="",
-            )
-            producer = _find_written_manifest(layout, f"verifier-*{mode}-live.json", manifest)
-            _write_same_run_seal(layout, producer, manifest)
-        _validate_verifier_stage(
+        _resume_verifier_stage(
             layout,
             config,
-            manifest_path,
             mode=mode,
-            artifact_prefix="",
+            sentences=layout.resolve("data-prepared/test.jsonl", must_exist=True),
+            candidates=test_candidates,
+            development=development,
+            warmup_candidates=warmup_candidates,
+            model_blob=model_blob,
+            ollama_url=ollama_url,
         )
     score_manifest = layout.resolve("manifests/score-manifest.json")
     if not score_manifest.is_file():
@@ -1225,7 +1457,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python pipeline.py",
         description=(
-            "Reproducible Tables 1-3 pipeline with a complete-run route and "
+            "Canonical CODE-ACCORD pipeline with a complete-run route and "
             "a same-run downstream Table-2 route."
         ),
     )
@@ -1236,7 +1468,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="stage", required=True)
 
     full = subparsers.add_parser(
-        "full", help="Run or resume the complete Tables 1-3 production pipeline"
+        "full", help="Run or resume the canonical CODE-ACCORD and Table-2 pipeline"
     )
     full.add_argument("--config", default=DEFAULT_CONFIG)
     full.add_argument("--run-id", required=True)
@@ -1257,15 +1489,43 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_private_trainer(arguments: list[str]) -> int:
+    """Resolve the trainer only from a run ID, approved seed, and tracked config."""
+
+    parser = argparse.ArgumentParser(prog="pipeline.py _train-encoder")
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--training-seed", required=True, type=int)
+    parser.add_argument("--config", default=DEFAULT_CONFIG)
+    args = parser.parse_args(arguments)
+    source_root = discover_source_root()
+    config = load_pipeline_config(source_root, args.config)
+    layout = RunLayout(source_root=source_root, run_id=args.run_id)
+    layout.require_existing()
+    if args.training_seed not in config.value["training_seeds"]:
+        raise DataContractError(
+            f"training seed {args.training_seed} is not approved by the run config"
+        )
+    _validate_existing_checkout(layout, config)
+    _validate_training_stage(
+        layout, config, args.training_seed, execution_mode="dry-run"
+    )
+    _validate_private_training_inputs(layout, config)
+    # Import only after the narrow namespace contract has passed.  The trainer
+    # never sees user-supplied artifact paths.
+    from train_span import main as train_encoder
+
+    train_encoder(canonical_trainer_arguments(layout, config, args.training_seed))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == "_train-encoder":
-        # Keep the trainer in a separate process while preserving pipeline.py
-        # as the checkout's only executable Python entry point.
-        from train_span import main as train_encoder
-
-        train_encoder(arguments[1:])
-        return 0
+        try:
+            return _run_private_trainer(arguments[1:])
+        except (DataContractError, PathContractError, OSError, ValueError) as exc:
+            print(f"pipeline: error: {exc}", file=sys.stderr)
+            return 2
     args = _parser().parse_args(arguments)
     try:
         if args.stage in {"table2", "validate-table2"}:

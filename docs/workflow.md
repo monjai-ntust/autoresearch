@@ -6,7 +6,7 @@ confined to the ignored `output/<run-id>/` tree.
 
 ## Run identity and same-run lineage
 
-A run ID is a namespace, not a scientific identity. It contains 1–64 letters,
+A run ID is a namespace, not a scientific identity. It contains 1-64 letters,
 digits, `.`, `_`, or `-`, and begins with a letter or digit. Every stage uses
 the same `RunLayout` and derives all paths beneath that run root.
 
@@ -56,7 +56,7 @@ uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --dry-run
 ```
 
-## Full Tables 1–3 pipeline
+## Full canonical CODE-ACCORD pipeline
 
 Start the configured Qwen model in Ollama. Then execute:
 
@@ -85,6 +85,11 @@ The command runs or resumes these stages in order:
 10. Simple and corrective verifier execution.
 11. Strict scoring and publication metrics.
 12. Same-run graph construction/projection and frozen Table-2 evaluation.
+
+This route produces the canonical CODE-ACCORD successors to the encoder and
+verifier analyses plus a new same-run Table 2. It does not regenerate the
+paper's historical Table 1 or SciERC Table 3; those remain legacy comparison
+evidence. Table 4 is outside this artifact.
 
 Encoder training remains hosted by `train_span.py`, but the main process starts
 it through the private `pipeline.py _train-encoder` route. `train_span.py` is an
@@ -116,10 +121,15 @@ and record projections feed the frozen evaluator.
 ## Resume and failure behavior
 
 Completed upstream stages are reused only when their expected manifests,
-identities, and output hashes still validate. Training restart state includes
+identities, stage seals, and transitive input/output hashes still validate.
+Training restart state includes
 optimizer, scheduler, random generators, sampler, adaptive gate, and selection
-state. Verifier response recovery is confined to the selected run and bound to
-its checkout.
+state. Interrupted inference ledgers and verifier responses are first
+validated, preserved under `inputs/recovery/`, and bound to the selected run's
+checkout and stage inputs before reuse. Invalid partial files are quarantined
+and never used as caches. Missing seals may be reconstructed only after the
+complete producer manifest and every declared output validate.
+Development-pilot calls never use recovery caches.
 
 Table-2 stages record a run identity before their first write. A validated
 completed stage is reusable. An unverified interrupted result is moved into

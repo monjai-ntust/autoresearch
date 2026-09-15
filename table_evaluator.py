@@ -154,26 +154,6 @@ def check_answer(predicted, gold):
     return overlap >= 0.5
 
 
-def build_gold_kg(records):
-    """Build KG directly from gold triples (ceiling test)."""
-    edges = []
-    nodes = {}
-    for rec in records:
-        for t in rec.get("gold_triples", []):
-            h = t["head_text"].lower().strip()
-            tl = t["tail_text"].lower().strip()
-            rel = t["relation"]
-            if not h or not tl or rel == "CONJUNCTION":
-                continue
-            edge = {"head": h, "relation": rel, "tail": tl, "confidence": 1.0, "n_sources": 1}
-            edges.append(edge)
-            for e in [h, tl]:
-                if e not in nodes:
-                    nodes[e] = {"id": e, "frequency": 0}
-                nodes[e]["frequency"] += 1
-    return {"nodes": list(nodes.values()), "edges": edges}
-
-
 def evaluate(
     records: list[dict[str, Any]],
     kg: dict[str, Any],
