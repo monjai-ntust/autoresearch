@@ -37,6 +37,12 @@ Every generated or downloaded artifact lives under one
 and validate producer hashes and manifests. A run cannot import an output from
 another run.
 
+Tracked source is authenticated once by a clean full Git commit. Manifests do
+not repeat hashes for individual Python files or the lockfile. Content hashes
+remain mandatory for runtime inputs, model blobs, prompts, prepared data, and
+stage outputs. The only retained JSON Schemas are the two response formats sent
+to Ollama; other record contracts are enforced directly by their consumers.
+
 The encoder revision and Qwen registry/blob digests must each remain internally
 consistent wherever they are consumed within one run. They do not have to equal
 the historical reference digests recorded by this project. Hardware and

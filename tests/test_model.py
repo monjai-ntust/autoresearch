@@ -33,7 +33,6 @@ from verifier import _load_candidates, _load_sentences
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
-SCHEMA_ROOT = SOURCE_ROOT / "schemas" / "pipeline"
 EXAMPLE_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "phase-b-model-test-a"))
 WORDS = ["Door", "shall", "be", "fire", "rated", "and", "steel", "framed", "."]
 
@@ -204,10 +203,6 @@ def _expected_candidate_id(head: tuple, relation: str, tail: tuple) -> str:
     return candidate_id_for(42, triple)
 
 
-def _schema_required(name: str) -> set[str]:
-    return set(json.loads((SCHEMA_ROOT / name).read_text(encoding="utf-8"))["required"])
-
-
 class ModelAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -239,11 +234,9 @@ class ModelAdapterTests(unittest.TestCase):
             self.assertEqual(manifest["candidate_count"], 0)
             self.assertIsNone(manifest["candidates_output"])
             self.assertFalse(candidates.exists())
-            self.assertEqual(set(manifest), _schema_required("model-generation-manifest.schema.json"))
             plan_path = layout.resolve("predictions/test/seed-42-generation-plan.jsonl")
             plan = [json.loads(line) for line in plan_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(plan), 1)
-            self.assertEqual(set(plan[0]), _schema_required("model-generation-plan.schema.json"))
             self.assertEqual(plan[0]["token_count"], len(WORDS))
 
     def test_replay_reproduces_greedy_confidence_and_dedup(self):
@@ -266,7 +259,6 @@ class ModelAdapterTests(unittest.TestCase):
             self.assertEqual(manifest["selected_entity_count"], 3)
             self.assertEqual(manifest["candidate_count"], 2)
             self.assertEqual(manifest["duplicate_candidate_collapsed"], 1)
-            self.assertEqual(set(manifest), _schema_required("model-generation-manifest.schema.json"))
 
             emitted = [
                 json.loads(line)
@@ -522,12 +514,10 @@ class ModelTrainTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "planned")
             self.assertEqual(manifest["training_seed"], 42)
             self.assertTrue(manifest["final_test_selection_forbidden"])
-            self.assertEqual(manifest["live_execution_status"], "gated_external_accelerator")
             self.assertEqual(manifest["expected_checkpoint_dir"], "checkpoints/seed-42")
             # The plan is bound to the exact frozen recipe and split.
             self.assertEqual(manifest["recipe"], self.config.value["training"])
             self.assertEqual(manifest["split"], self.config.value["split"])
-            self.assertEqual(set(manifest), _schema_required("model-train-manifest.schema.json"))
             for path in Path(temporary).rglob("*"):
                 if path.is_file():
                     self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))
@@ -650,8 +640,6 @@ class ModelTrainTests(unittest.TestCase):
             self.assertTrue(manifest["resume"]["resumed"])
             self.assertEqual(observed_commands[-1][3], "_train-encoder")
             self.assertNotIn("--prepared-dir", observed_commands[-1])
-            self.assertIn("--canonical-mode", observed_trainer_commands[-1])
-            self.assertIn("--skip-test-eval", observed_trainer_commands[-1])
             self.assertIn("--model-cache-dir", observed_trainer_commands[-1])
             checkpoint_manifest = layout.resolve(
                 "checkpoints/seed-42/checkpoint-manifest.json"
@@ -660,9 +648,12 @@ class ModelTrainTests(unittest.TestCase):
                 checkpoint_manifest.read_text(encoding="utf-8")
             )
             self.assertEqual(
-                set(checkpoint_value),
-                _schema_required("model-checkpoint-manifest.schema.json"),
+                checkpoint_value["schema_version"],
+                "phase-b-model-checkpoint-manifest-4.0",
             )
+            self.assertNotIn("trainer_sha256", checkpoint_value)
+            self.assertNotIn("data_adapter_sha256", checkpoint_value)
+            self.assertNotIn("model_helper_sha256", checkpoint_value)
             self.assertEqual(checkpoint_value["checkpoint_step"], 100)
             self.assertFalse(
                 json.loads(

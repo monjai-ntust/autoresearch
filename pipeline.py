@@ -157,10 +157,14 @@ def _validate_existing_checkout(layout: RunLayout, config) -> dict:
     """Authenticate an existing run namespace before any downstream work."""
     path = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
     manifest = _load_manifest(path, "checkout manifest")
+    if manifest.get("schema_version") not in {
+        "phase-b-checkout-manifest-1.0",
+        "phase-b-checkout-manifest-2.0",
+    }:
+        raise DataContractError("checkout manifest schema_version is unsupported")
     _require_fields(
         manifest,
         {
-            "schema_version": "phase-b-checkout-manifest-1.0",
             "protocol_id": config.value["protocol_id"],
             "workflow_id": config.value["workflow_id"],
             "matcher_id": config.value["matcher_id"],
@@ -191,11 +195,15 @@ def _validate_existing_checkout(layout: RunLayout, config) -> dict:
             "existing run checkout differs from the current clean source commit"
         )
     config_relative = config.path.resolve().relative_to(layout.source_root).as_posix()
+    source_config = source.get("config")
     tracked = manifest.get("tracked_artifact_sha256")
-    if (
-        not isinstance(tracked, dict)
-        or tracked.get(config_relative) != sha256_file(config.path)
-    ):
+    recorded_config_hash = (
+        source_config.get("sha256")
+        if isinstance(source_config, dict)
+        and source_config.get("path") == config_relative
+        else tracked.get(config_relative) if isinstance(tracked, dict) else None
+    )
+    if recorded_config_hash != sha256_file(config.path):
         raise DataContractError(
             "existing run checkout does not authenticate its selected config"
         )
@@ -340,6 +348,7 @@ def _validate_training_stage(
     if identity.get("schema_version") not in {
         "phase-b-model-checkpoint-manifest-2.0",
         "phase-b-model-checkpoint-manifest-3.0",
+        "phase-b-model-checkpoint-manifest-4.0",
     }:
         raise DataContractError(f"seed-{seed} checkpoint schema is unsupported")
     _require_fields(

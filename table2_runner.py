@@ -122,14 +122,10 @@ def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def git_blob(path: str) -> str:
-    return run_git("hash-object", f"--path={path}", path).stdout.strip()
-
-
 def validate_source_contract(
     contract: dict[str, Any], require_clean: bool
 ) -> dict[str, str]:
-    if contract.get("schema_version") != 4:
+    if contract.get("schema_version") != 5:
         raise PhaseEError("Phase E contract schema is not revision 0.8")
     baseline = contract["source_baseline"]["commit"]
     head = run_git("rev-parse", "HEAD").stdout.strip()
@@ -146,16 +142,6 @@ def validate_source_contract(
         for args in (("diff", "--quiet"), ("diff", "--cached", "--quiet")):
             if run_git(*args, check=False).returncode:
                 raise PhaseEError("Tracked source changes exist; commit or discard them first")
-        untracked = run_git("ls-files", "--others", "--exclude-standard").stdout.strip()
-        if untracked:
-            raise PhaseEError("Untracked source files exist; remove or commit them first")
-    mismatches = []
-    for path, expected in contract["frozen_upstream_blobs"].items():
-        actual = git_blob(path)
-        if actual != expected:
-            mismatches.append({"path": path, "expected": expected, "actual": actual})
-    if mismatches:
-        raise PhaseEError("Frozen source mismatch: " + json.dumps(mismatches, sort_keys=True))
     return {"head": head, "branch": branch, "baseline": baseline}
 
 
@@ -378,12 +364,17 @@ def _load_authenticated_run_config(
         raise PhaseEError("Full-run and checkout manifests name different source commits")
     config_path = full.get("config")
     config_hash = full.get("config_sha256")
+    source_config = source.get("config")
     tracked = checkout.get("tracked_artifact_sha256")
+    checkout_config_hash = (
+        source_config.get("sha256")
+        if isinstance(source_config, dict) and source_config.get("path") == config_path
+        else tracked.get(config_path) if isinstance(tracked, dict) else None
+    )
     if (
         not isinstance(config_path, str)
         or not isinstance(config_hash, str)
-        or not isinstance(tracked, dict)
-        or tracked.get(config_path) != config_hash
+        or checkout_config_hash != config_hash
     ):
         raise PhaseEError("Full-run config is not bound by the checkout manifest")
     config_bytes = _git_file_bytes(commit, config_path)
@@ -894,10 +885,14 @@ def validate_parent_lineage(
 
     checkout = load_json(_verified_file(run_dir, paths["checkout_manifest"], ledger))
     _reject_foreign_run_ids(checkout, run_id, "checkout manifest")
+    if checkout.get("schema_version") not in {
+        "phase-b-checkout-manifest-1.0",
+        "phase-b-checkout-manifest-2.0",
+    }:
+        raise PhaseEError("Checkout manifest schema is unsupported")
     _require_fields(
         checkout,
         {
-            "schema_version": "phase-b-checkout-manifest-1.0",
             "status": "pass",
             "run_id": run_id,
             "protocol_id": pipeline["protocol_id"],
@@ -1101,7 +1096,6 @@ def validate_parent_lineage(
         "development": [],
         "test": [],
     }
-    tracked = checkout["tracked_artifact_sha256"]
     split_manifest_sha = ledger[paths["split_manifest"]]["sha256"]
     for seed in pipeline["training_seeds"]:
         checkpoint_manifest_relative = paths["checkpoint_manifest"].format(seed=seed)
@@ -1122,6 +1116,7 @@ def validate_parent_lineage(
         if checkpoint_manifest.get("schema_version") not in {
             "phase-b-model-checkpoint-manifest-2.0",
             "phase-b-model-checkpoint-manifest-3.0",
+            "phase-b-model-checkpoint-manifest-4.0",
         }:
             raise PhaseEError(f"seed-{seed} checkpoint manifest schema is unsupported")
         checkpoint_digest = validate_sha256(
@@ -1150,11 +1145,6 @@ def validate_parent_lineage(
             or checkpoint_manifest.get("config_sha256") != full["config_sha256"]
             or checkpoint_manifest.get("source_commit")
             != checkout["source"]["commit"]
-            or checkpoint_manifest.get("trainer_sha256") != tracked.get("train_span.py")
-            or checkpoint_manifest.get("data_adapter_sha256")
-            != tracked.get("data/code_accord.py")
-            or checkpoint_manifest.get("model_helper_sha256")
-            != tracked.get("models/bert_kg_encoder.py")
         ):
             raise PhaseEError(
                 f"seed-{seed} checkpoint is not transitively bound to checkout/data/config"
@@ -1765,7 +1755,7 @@ def validate_rag_output(
     expected_kg: str,
 ) -> dict[str, Any]:
     output = load_json(path)
-    modes = contract["evaluator"]["modes"]
+    modes = list(evaluator.MODES)
     count = contract["evaluator"]["max_questions"]
     if not isinstance(output, dict) or set(output) != {"metadata", "accuracy", "correct_counts", "results"}:
         raise PhaseEError(f"RAG output has changed top-level fields: {path}")

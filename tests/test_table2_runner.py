@@ -97,7 +97,7 @@ def live_model_capture(summary: dict) -> tuple[dict, bytes, bytes]:
 
 
 def rag_result(summary: dict, kg_identity: str) -> dict:
-    modes = CONTRACT["evaluator"]["modes"]
+    modes = runner.evaluator.MODES
     questions = summary["records"]["question_contract"]
     results = {
         mode: [
@@ -231,8 +231,10 @@ class Table2RunnerTests(unittest.TestCase):
         path = "configs/pipeline.json"
         digest = runner.sha256_bytes(runner._git_file_bytes(commit, path))
         checkout = {
-            "source": {"commit": commit},
-            "tracked_artifact_sha256": {path: digest},
+            "source": {
+                "commit": commit,
+                "config": {"path": path, "sha256": digest},
+            },
         }
         full = {"source_commit": commit, "config": path, "config_sha256": digest}
         config, legacy = runner._load_authenticated_run_config(
@@ -321,7 +323,7 @@ class Table2RunnerTests(unittest.TestCase):
             self.assertFalse((run_dir / "table2").exists())
 
     def test_rag_output_rejects_failed_model_calls_and_identity_substitution(self):
-        modes = CONTRACT["evaluator"]["modes"]
+        modes = runner.evaluator.MODES
         count = CONTRACT["evaluator"]["max_questions"]
         questions = [{"q": f"question-{index}", "gold": "gold"} for index in range(count)]
         expected_kg = "output/example/table2/projections/confidence.json"
@@ -439,14 +441,17 @@ class Table2RunnerTests(unittest.TestCase):
             write(
                 paths["checkout_manifest"],
                 {
-                    "schema_version": "phase-b-checkout-manifest-1.0",
+                    "schema_version": "phase-b-checkout-manifest-2.0",
                     "status": "pass",
                     "run_id": run_id,
                     "protocol_id": CONTRACT["pipeline"]["protocol_id"],
                     "workflow_id": CONTRACT["pipeline"]["workflow_id"],
                     "matcher_id": CONTRACT["pipeline"]["matcher_id"],
-                    "source": {"commit": commit, "worktree_clean": True},
-                    "tracked_artifact_sha256": {config_path: config_sha},
+                    "source": {
+                        "commit": commit,
+                        "worktree_clean": True,
+                        "config": {"path": config_path, "sha256": config_sha},
+                    },
                 },
             )
             write(

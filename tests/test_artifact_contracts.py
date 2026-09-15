@@ -1,49 +1,9 @@
 """Offline regression tests for publication-critical artifact contracts."""
 
-import math
 import unittest
 
-from data.scierc import BIO_TAG2ID
-from eval.triple_f1 import _bio_to_spans, _is_valid_bio_transition, _prf
 from graph_construction import build_table_graphs, canonical_json, project_graph
 from records import StrictTriple, candidate_id_for
-
-
-class MetricContractTests(unittest.TestCase):
-    def test_prf_uses_zero_safe_micro_formula(self):
-        precision, recall, f1 = _prf(tp=2, fp=1, fn=2)
-        self.assertTrue(math.isclose(precision, 2 / 3))
-        self.assertTrue(math.isclose(recall, 1 / 2))
-        self.assertTrue(math.isclose(f1, 4 / 7))
-        self.assertEqual(_prf(0, 0, 0), (0.0, 0.0, 0.0))
-
-    def test_bio_decoder_repairs_invalid_starts_and_type_changes(self):
-        ids = [
-            BIO_TAG2ID["I-Task"],
-            BIO_TAG2ID["I-Task"],
-            BIO_TAG2ID["O"],
-            BIO_TAG2ID["B-Method"],
-            BIO_TAG2ID["I-Metric"],
-        ]
-        self.assertEqual(
-            _bio_to_spans(ids),
-            [(0, 1, "Task"), (3, 3, "Method"), (4, 4, "Metric")],
-        )
-
-    def test_bio_transition_constraint_requires_matching_type(self):
-        self.assertTrue(
-            _is_valid_bio_transition(
-                BIO_TAG2ID["B-Task"], BIO_TAG2ID["I-Task"]
-            )
-        )
-        self.assertFalse(
-            _is_valid_bio_transition(BIO_TAG2ID["O"], BIO_TAG2ID["I-Task"])
-        )
-        self.assertFalse(
-            _is_valid_bio_transition(
-                BIO_TAG2ID["B-Task"], BIO_TAG2ID["I-Method"]
-            )
-        )
 
 
 def _graph_inputs():

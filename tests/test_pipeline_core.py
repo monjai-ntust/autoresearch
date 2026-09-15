@@ -171,52 +171,23 @@ class ConfigContractTests(unittest.TestCase):
         )
         self.assertNotIn("TBD_", json.dumps(config.value, sort_keys=True))
 
-    def test_every_tracked_json_contract_parses(self):
-        for relative in (
-            "configs/pipeline.json",
-            "configs/experiment_matrix.json",
-            "configs/section5_evidence.json",
-            "schemas/pipeline/config.schema.json",
-            "schemas/pipeline/experiment-matrix.schema.json",
-            "schemas/pipeline/records.schema.json",
-            "schemas/pipeline/threshold-selection.schema.json",
-            "schemas/pipeline/outcomes.schema.json",
-            "schemas/pipeline/metrics.schema.json",
-            "schemas/pipeline/checkout-manifest.schema.json",
-            "schemas/pipeline/score-manifest.schema.json",
-            "schemas/pipeline/input-acquisition-manifest.schema.json",
-            "schemas/pipeline/data-preparation-manifest.schema.json",
-            "schemas/pipeline/gold-alignment-audit.schema.json",
-            "schemas/pipeline/prepared-sentence.schema.json",
-            "schemas/pipeline/section5-evidence-register.schema.json",
-            "schemas/pipeline/section5-evidence-reconciliation.schema.json",
-            "schemas/pipeline/verifier-simple-response.schema.json",
-            "schemas/pipeline/verifier-corrective-response.schema.json",
-            "schemas/pipeline/verifier-run-log.schema.json",
-            "schemas/pipeline/verifier-environment.schema.json",
-            "schemas/pipeline/verifier-replay.schema.json",
-            "schemas/pipeline/verifier-manifest.schema.json",
-            "schemas/pipeline/candidate-index.schema.json",
-            "schemas/pipeline/verifier-pilot-selection.schema.json",
-            "schemas/pipeline/verifier-pilot-captures.schema.json",
-            "schemas/pipeline/verifier-pilot-audit.schema.json",
-            "schemas/pipeline/verifier-pilot-failure.schema.json",
-        ):
-            with self.subTest(path=relative):
-                with (SOURCE_ROOT / relative).open(encoding="utf-8") as handle:
-                    self.assertIsInstance(json.load(handle), dict)
+    def test_only_model_payload_schemas_are_retained(self):
+        schema_root = SOURCE_ROOT / "schemas" / "pipeline"
+        self.assertEqual(
+            {path.name for path in schema_root.glob("*.json")},
+            {
+                "verifier-simple-response.schema.json",
+                "verifier-corrective-response.schema.json",
+            },
+        )
+        for path in schema_root.glob("*.json"):
+            with self.subTest(path=path.name):
+                self.assertIsInstance(json.loads(path.read_text(encoding="utf-8")), dict)
 
-    def test_closed_dataset_schema_declares_every_required_property(self):
-        with (SOURCE_ROOT / "schemas/pipeline/config.schema.json").open(
-            encoding="utf-8"
-        ) as handle:
-            schema = json.load(handle)
-        dataset = schema["properties"]["dataset"]
-        self.assertFalse(dataset["additionalProperties"])
-        self.assertLessEqual(set(dataset["required"]), set(dataset["properties"]))
-        verifier = schema["properties"]["verifier"]
-        self.assertFalse(verifier["additionalProperties"])
-        self.assertLessEqual(set(verifier["required"]), set(verifier["properties"]))
+    def test_config_has_no_source_inventory_or_schema_pointer(self):
+        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        self.assertNotIn("tracked_artifacts", config.value)
+        self.assertNotIn("$schema", config.value)
 
 
 class StrictMatcherTests(unittest.TestCase):

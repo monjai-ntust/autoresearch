@@ -733,7 +733,10 @@ def _validate_capture(
     checkout = load_json(capture.checkout_manifest)
     if (
         not isinstance(checkout, dict)
-        or checkout.get("schema_version") != "phase-b-checkout-manifest-1.0"
+        or checkout.get("schema_version") not in {
+            "phase-b-checkout-manifest-1.0",
+            "phase-b-checkout-manifest-2.0",
+        }
         or checkout.get("protocol_id") != PROTOCOL_ID
         or checkout.get("workflow_id") != WORKFLOW_ID
         or checkout.get("run_id") != capture.source_run_id

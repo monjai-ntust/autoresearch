@@ -1,10 +1,7 @@
 {
-  "$schema": "../schemas/pipeline/config.schema.json",
-  "config_revision": "PATH-A-CONFIG-1.0",
   "protocol_id": "B04-PATH-A-1.3",
   "workflow_id": "PATH-A-WORKFLOW-1.3",
   "matcher_id": "CODE-STRICT-1",
-  "implementation_status": "b07_verifier_pilot_audit_development",
   "experiment_matrix": "configs/experiment_matrix.json",
   "section5_evidence_register": "configs/section5_evidence.json",
   "dataset": {
@@ -69,13 +66,7 @@
     "seed": 42,
     "train_sentences": 586,
     "development_sentences": 103,
-    "test_sentences": 173,
-    "labels": [
-      "entity_type_presence",
-      "positive_relation_type_presence",
-      "source_country"
-    ],
-    "tie_break": "seeded_generator_then_ascending_uuid"
+    "test_sentences": 173
   },
   "evaluation_split_id": "CODE-SPLIT-1:test",
   "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49],
@@ -94,23 +85,15 @@
     "label_smoothing": 0.1,
     "re_loss_weight": 1.0,
     "re_no_rel_weight": 1.0,
-    "re_focal_gamma": 0.0,
-    "re_negative_subsample": 0.0,
     "context_between_spans": true,
-    "document_window_size": 1,
-    "synthetic_data": "none",
     "comparison_boost": {
       "initial": 5.0,
       "adaptive_step": 1000,
       "threshold_low": 0.35,
       "threshold_high": 0.4,
       "middle": 3.5,
-      "low": 2.0,
-      "middle_applies_to_gate_batch_only": true,
-      "post_gate_boost_after_middle": 2.0
-    },
-    "checkpoint_metric": "development_strict_triple_f1",
-    "checkpoint_tie_rule": "earliest_step"
+      "low": 2.0
+    }
   },
   "threshold_selection": {
     "selection_split": "development",
@@ -140,15 +123,9 @@
     "tie_rule": "higher_threshold"
   },
   "statistics": {
-    "aggregation": "per_seed_then_arithmetic_mean",
-    "bootstrap_method": "paired_hierarchical_percentile",
     "bootstrap_replicates": 10000,
     "bootstrap_seed": 20260717,
-    "undefined_replicate_limit": 0.05,
-    "primary_test": "WILCOX-EXACT-1",
-    "sensitivity_test": "paired_t_test",
-    "multiplicity": "holm",
-    "alpha": 0.05
+    "undefined_replicate_limit": 0.05
   },
   "verifier": {
     "model": "qwen3:32b",
@@ -184,9 +161,7 @@
   },
   "environment": {
     "python": "3.10.20",
-    "uv": "0.11.26",
-    "torch": "2.9.1",
-    "cuda_wheel_index": "https://download.pytorch.org/whl/cu130"
+    "uv": "0.11.26"
   },
   "runtime_paths": {
     "sentences": "data-prepared/test.jsonl",
@@ -202,72 +177,5 @@
     "simple_verdicts": "verifier/simple/verdicts.jsonl",
     "corrective_verdicts": "verifier/corrective/verdicts.jsonl",
     "threshold_selection": "predictions/dev/threshold-selection.json"
-  },
-  "tracked_artifacts": [
-    ".gitattributes",
-    ".gitignore",
-    ".python-version",
-    "uv.lock",
-    "pyproject.toml",
-    "docs/workflow.md",
-    "docs/model-training-compatibility.md",
-    "configs/section5_evidence.json",
-    "schemas/pipeline/config.schema.json",
-    "schemas/pipeline/experiment-matrix.schema.json",
-    "schemas/pipeline/records.schema.json",
-    "schemas/pipeline/threshold-selection.schema.json",
-    "schemas/pipeline/outcomes.schema.json",
-    "schemas/pipeline/metrics.schema.json",
-    "schemas/pipeline/checkout-manifest.schema.json",
-    "schemas/pipeline/score-manifest.schema.json",
-    "schemas/pipeline/input-acquisition-manifest.schema.json",
-    "schemas/pipeline/data-preparation-manifest.schema.json",
-    "schemas/pipeline/model-train-manifest.schema.json",
-    "schemas/pipeline/huggingface-cache.schema.json",
-    "schemas/pipeline/model-checkpoint-manifest.schema.json",
-    "schemas/pipeline/gold-alignment-audit.schema.json",
-    "schemas/pipeline/prepared-sentence.schema.json",
-    "schemas/pipeline/section5-evidence-register.schema.json",
-    "schemas/pipeline/section5-evidence-reconciliation.schema.json",
-    "schemas/pipeline/verifier-simple-response.schema.json",
-    "schemas/pipeline/verifier-corrective-response.schema.json",
-    "schemas/pipeline/verifier-run-log.schema.json",
-    "schemas/pipeline/verifier-environment.schema.json",
-    "schemas/pipeline/verifier-replay.schema.json",
-    "schemas/pipeline/verifier-manifest.schema.json",
-    "schemas/pipeline/candidate-index.schema.json",
-    "schemas/pipeline/verifier-pilot-selection.schema.json",
-    "schemas/pipeline/verifier-pilot-captures.schema.json",
-    "schemas/pipeline/verifier-pilot-audit.schema.json",
-    "schemas/pipeline/verifier-pilot-failure.schema.json",
-    "prompts/verifier/code-verifier-1-system.txt",
-    "prompts/verifier/code-verifier-1-simple.txt",
-    "prompts/verifier/code-verifier-1-corrective.txt",
-    "acquisition.py",
-    "pipeline.py",
-    "table2_runner.py",
-    "table_evaluator.py",
-    "graph_construction.py",
-    "table2_contract.json",
-    "model.py",
-    "train_span.py",
-    "data/code_accord.py",
-    "models/bert_kg_encoder.py",
-    "config.py",
-    "constants.py",
-    "doctor.py",
-    "artifact_io.py",
-    "metrics.py",
-    "hf_cache.py",
-    "paths.py",
-    "pilot.py",
-    "preparation.py",
-    "publication.py",
-    "records.py",
-    "reconciliation.py",
-    "scoring.py",
-    "split.py",
-    "publication_statistics.py",
-    "verifier.py"
-  ]
+  }
 }

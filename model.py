@@ -58,7 +58,6 @@ EXECUTION_MODES = {"dry-run", "replay", "live"}
 TRAIN_EXECUTION_MODES = {"dry-run", "live"}
 _SPLIT_ID = "CODE-SPLIT-1"
 _CONFIDENCE_PRECISION = 6
-_CHECKPOINT_MANIFEST_CONTRACT = "urn:phase-b:model-checkpoint-manifest:3.0"
 _HISTORICAL_ENTITY_TRAIN_SHA256 = (
     "c13ad02ab72f0f3a3ddca588c02bcd5d7db1622ae81351d967431623963e4fcd"
 )
@@ -116,9 +115,6 @@ class CheckpointIdentity:
     train_jsonl_sha256: str
     development_jsonl_sha256: str
     config_sha256: str
-    trainer_sha256: str
-    data_adapter_sha256: str
-    model_helper_sha256: str
     model_cache_manifest_sha256: str
     model_cache_tree_sha256: str
     source_commit: str
@@ -173,9 +169,6 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             "train_jsonl_sha256",
             "development_jsonl_sha256",
             "config_sha256",
-            "trainer_sha256",
-            "data_adapter_sha256",
-            "model_helper_sha256",
             "model_cache_manifest",
             "model_cache_manifest_sha256",
             "model_cache_tree_sha256",
@@ -188,8 +181,12 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             "historical_comparability",
         },
         label,
+        optional={"trainer_sha256", "data_adapter_sha256", "model_helper_sha256"},
     )
-    if value["schema_version"] != "phase-b-model-checkpoint-manifest-3.0":
+    if value["schema_version"] not in {
+        "phase-b-model-checkpoint-manifest-3.0",
+        "phase-b-model-checkpoint-manifest-4.0",
+    }:
         raise DataContractError(f"{label}.schema_version is unsupported")
     if value["protocol_id"] != PROTOCOL_ID:
         raise DataContractError(f"{label}.protocol_id differs from {PROTOCOL_ID}")
@@ -250,13 +247,6 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             f"{label}.development_jsonl_sha256",
         ),
         config_sha256=_sha256_hex(value["config_sha256"], f"{label}.config_sha256"),
-        trainer_sha256=_sha256_hex(value["trainer_sha256"], f"{label}.trainer_sha256"),
-        data_adapter_sha256=_sha256_hex(
-            value["data_adapter_sha256"], f"{label}.data_adapter_sha256"
-        ),
-        model_helper_sha256=_sha256_hex(
-            value["model_helper_sha256"], f"{label}.model_helper_sha256"
-        ),
         model_cache_manifest_sha256=_sha256_hex(
             value["model_cache_manifest_sha256"],
             f"{label}.model_cache_manifest_sha256",
@@ -505,9 +495,9 @@ def _live_inference_records(
 
     Assumptions (documented for external verification): the checkpoint was trained
     with the same CODE label space (``data.code_accord``), ``re_context_span``
-    equal to the frozen ``context_between_spans`` recipe flag, ``bio_enrich`` off,
-    and non-marker relation extraction; and each sentence fits within the recipe
-    ``max_length``. These match ``model train`` / ``train_span.py`` defaults.
+    equal to the frozen ``context_between_spans`` recipe flag, and each sentence
+    fits within the recipe ``max_length``. These are enforced by the one retained
+    trainer path.
     """
 
     import torch  # lazy: only the externally gated live path needs the accelerator stack
@@ -539,7 +529,6 @@ def _live_inference_records(
         num_bio_tags=NUM_BIO_TAGS,
         num_relations=NUM_RELATIONS,
         num_entity_types=len(CA_ENTITY_TYPES),
-        use_span_ner=True,
         max_span_width=max_span_width,
         model_revision=model_revision,
         model_cache_dir=str(model_cache_dir),
@@ -588,9 +577,7 @@ def _live_inference_records(
         n_words = len(words)
 
         with torch.no_grad():
-            hidden = model.encode(
-                modality="text", input_ids=input_ids, attention_mask=attention_mask
-            )
+            hidden = model.encode(input_ids=input_ids, attention_mask=attention_mask)
             span_logits, candidate_spans = model.forward_span_ner(
                 hidden[0], word_ids, n_words, max_span_width
             )
@@ -726,11 +713,6 @@ def _validate_checkpoint_run_identity(
         "train_jsonl_sha256": sha256_file(train_path),
         "development_jsonl_sha256": sha256_file(development_path),
         "config_sha256": sha256_file(config.path),
-        "trainer_sha256": sha256_file(layout.source_root / "train_span.py"),
-        "data_adapter_sha256": sha256_file(layout.source_root / "data/code_accord.py"),
-        "model_helper_sha256": sha256_file(
-            layout.source_root / "models/bert_kg_encoder.py"
-        ),
         "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
         "model_cache_tree_sha256": cache_manifest["tree_sha256"],
         "source_commit": checkout.get("source", {}).get("commit"),
@@ -1117,9 +1099,6 @@ def canonical_trainer_arguments(
     progress_path = layout.resolve(f"logs/model-train-seed-{training_seed}.log")
     summary_path = checkpoint_dir / "training-summary.json"
     command = [
-        "--canonical-mode",
-        "--dataset",
-        "accord",
         "--prepared-dir",
         str(layout.resolve("data-prepared", must_exist=True)),
         "--model-name",
@@ -1152,16 +1131,8 @@ def canonical_trainer_arguments(
         str(training["evaluation_every_steps"]),
         "--seed",
         str(training_seed),
-        "--primary-metric",
-        "triple_f1",
         "--label-smoothing",
         str(training["label_smoothing"]),
-        "--re-focal-gamma",
-        str(training["re_focal_gamma"]),
-        "--re-neg-subsample",
-        str(training["re_negative_subsample"]),
-        "--doc-window-size",
-        str(training["document_window_size"]),
         "--re-comparison-boost",
         str(boost["initial"]),
         "--re-boost-adaptive-steps",
@@ -1174,8 +1145,6 @@ def canonical_trainer_arguments(
         str(boost["middle"]),
         "--re-boost-end",
         str(boost["low"]),
-        "--re-context-span",
-        "--skip-test-eval",
         "--save-best-to",
         str(checkpoint_path),
         "--save-last-to",
@@ -1252,13 +1221,7 @@ def plan_training(
         "split": dict(split),
         "recipe": dict(config.value["training"]),
         "expected_checkpoint_dir": f"checkpoints/seed-{training_seed}",
-        "checkpoint_manifest_contract": _CHECKPOINT_MANIFEST_CONTRACT,
         "final_test_selection_forbidden": True,
-        "live_execution_status": (
-            "gated_external_accelerator"
-            if execution_mode == "dry-run"
-            else "completed_external_accelerator"
-        ),
     }
     if execution_mode == "dry-run":
         atomic_write_json(manifest_path, manifest)
@@ -1360,7 +1323,7 @@ def plan_training(
         raise DataContractError("canonical trainer summary lacks a selected checkpoint metric")
 
     checkpoint_manifest = {
-        "schema_version": "phase-b-model-checkpoint-manifest-3.0",
+        "schema_version": "phase-b-model-checkpoint-manifest-4.0",
         "protocol_id": PROTOCOL_ID,
         "split_id": _SPLIT_ID,
         "training_seed": training_seed,
@@ -1378,11 +1341,6 @@ def plan_training(
         "train_jsonl_sha256": sha256_file(train_path),
         "development_jsonl_sha256": sha256_file(development_path),
         "config_sha256": sha256_file(config.path),
-        "trainer_sha256": sha256_file(layout.source_root / "train_span.py"),
-        "data_adapter_sha256": sha256_file(layout.source_root / "data/code_accord.py"),
-        "model_helper_sha256": sha256_file(
-            layout.source_root / "models/bert_kg_encoder.py"
-        ),
         "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
         "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
         "model_cache_tree_sha256": cache_manifest["tree_sha256"],

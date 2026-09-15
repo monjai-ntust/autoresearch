@@ -1,9 +1,9 @@
 """Development-only confidence-threshold selection for VER-CONFIDENCE.
 
 This stage is the canonical producer of the `threshold-selection.json` that the
-`score` stage consumes (schema `threshold-selection.schema.json`). It was
-previously required as an externally supplied file; it is now reproducible from
-the eight-seed development candidate universe and development gold.
+`score` stage consumes. It was previously required as an externally supplied
+file; it is now reproducible from the eight-seed development candidate universe
+and development gold.
 
 The objective and tie rule are frozen by the protocol
 (`config.threshold_selection`): for every grid threshold it computes the

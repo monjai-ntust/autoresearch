@@ -164,13 +164,7 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
         "label_smoothing": 0.1,
         "re_loss_weight": 1.0,
         "re_no_rel_weight": 1.0,
-        "re_focal_gamma": 0.0,
-        "re_negative_subsample": 0.0,
         "context_between_spans": True,
-        "document_window_size": 1,
-        "synthetic_data": "none",
-        "checkpoint_metric": "development_strict_triple_f1",
-        "checkpoint_tie_rule": "earliest_step",
     }
     for field, expected in expected_training.items():
         if training.get(field) != expected:
@@ -187,8 +181,6 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
         "threshold_high": 0.4,
         "middle": 3.5,
         "low": 2.0,
-        "middle_applies_to_gate_batch_only": True,
-        "post_gate_boost_after_middle": 2.0,
     }
     if training.get("comparison_boost") != expected_boost:
         raise DataContractError("config.training.comparison_boost differs from A20")

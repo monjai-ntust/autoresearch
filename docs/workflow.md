@@ -16,6 +16,11 @@ environment and verdicts, strict metrics, graphs, and Table-2 results. A valid
 hash from another run is not reusable. Immutable upstream inputs are copied
 into the selected run and authenticated there before consumption.
 
+The clean source commit is the complete tracked-code identity. Checkout and
+checkpoint manifests therefore do not duplicate per-Python-file or lockfile
+hashes. The selected config retains its own digest because downstream Table-2
+validation reads that exact historical config blob from the recorded commit.
+
 ## Environment
 
 Requirements are declared in `pyproject.toml` and locked in `uv.lock`.
@@ -122,8 +127,8 @@ and record projections feed the frozen evaluator.
 
 Completed upstream stages are reused only when their expected manifests,
 identities, stage seals, and transitive input/output hashes still validate.
-Training restart state includes
-optimizer, scheduler, random generators, sampler, adaptive gate, and selection
+Training restart state includes optimizer, scheduler, random generators,
+sampler, adaptive gate, and selection
 state. Interrupted inference ledgers and verifier responses are first
 validated, preserved under `inputs/recovery/`, and bound to the selected run's
 checkout and stage inputs before reuse. Invalid partial files are quarantined

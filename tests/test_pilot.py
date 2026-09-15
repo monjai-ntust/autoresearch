@@ -643,13 +643,6 @@ class VerifierPilotTests(unittest.TestCase):
             )
             self.assertTrue(audit["determinism"]["simple"]["normalized_identical"])
             self.assertTrue(audit["determinism"]["corrective"]["normalized_identical"])
-            schema = json.loads(
-                (SOURCE_ROOT / "schemas/pipeline/verifier-pilot-audit.schema.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            self.assertEqual(set(audit), set(schema["required"]))
-            self.assertIn("allOf", schema)
             for relative, digest in audit["output_sha256"].items():
                 self.assertEqual(sha256_file(layout.resolve(relative)), digest)
 

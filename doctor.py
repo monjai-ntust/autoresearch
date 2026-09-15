@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import platform
 import re
 import subprocess
@@ -12,8 +11,8 @@ from typing import Any
 
 from config import PipelineConfig
 from constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from artifact_io import atomic_write_json
-from paths import RunLayout, resolve_tracked_path
+from artifact_io import atomic_write_json, sha256_file
+from paths import RunLayout
 
 
 def _command(source_root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
@@ -55,22 +54,6 @@ def _uv_version(source_root: Path) -> tuple[str | None, str]:
     if result.returncode != 0 or match is None:
         return None, text or result.stderr.strip() or "could not parse uv version"
     return match.group(1), text
-
-
-def _git_blob_sha256(source_root: Path, path: Path) -> str:
-    relative = path.relative_to(source_root).as_posix()
-    result = subprocess.run(
-        ["git", "show", f"HEAD:{relative}"],
-        cwd=source_root,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise OSError(
-            f"could not read committed artifact bytes for {relative}: "
-            + result.stderr.decode("utf-8", errors="replace").strip()
-        )
-    return hashlib.sha256(result.stdout).hexdigest()
 
 
 def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any], bool]:
@@ -155,33 +138,23 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
         )
     )
 
-    artifact_paths = [config.path, config.matrix_path]
-    for relative in config.value["tracked_artifacts"]:
-        artifact_paths.append(resolve_tracked_path(source_root, relative))
-    unique_paths = sorted(set(artifact_paths), key=lambda item: item.relative_to(source_root).as_posix())
-    artifact_hashes = {
-        path.relative_to(source_root).as_posix(): _git_blob_sha256(source_root, path)
-        for path in unique_paths
-    }
-    checks.append(
-        _check("tracked-artifact-hashes", bool(artifact_hashes), f"hashed {len(artifact_hashes)} files")
-    )
-
     layout.create()
     passed = all(item["status"] == "pass" for item in checks)
+    config_relative = config.path.relative_to(source_root).as_posix()
     manifest = {
-        "schema_version": "phase-b-checkout-manifest-1.0",
+        "schema_version": "phase-b-checkout-manifest-2.0",
         "protocol_id": PROTOCOL_ID,
         "workflow_id": WORKFLOW_ID,
         "matcher_id": MATCHER_ID,
         "run_id": layout.run_id,
         "status": "pass" if passed else "blocked",
-        "publication_execution_admitted": False,
-        "publication_execution_gate": "B-07-go-no-go-not-yet-approved",
         "source": {
             "commit": head,
             "worktree_clean": clean,
-            "lockfile_sha256": artifact_hashes["uv.lock"],
+            "config": {
+                "path": config_relative,
+                "sha256": sha256_file(config.path),
+            },
         },
         "environment": {
             "python": actual_python,
@@ -190,7 +163,6 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
             "os_release": platform.release(),
             "machine": platform.machine(),
         },
-        "tracked_artifact_sha256": artifact_hashes,
         "checks": checks,
     }
     manifest_path = layout.resolve("manifests/00-checkout-manifest.json")

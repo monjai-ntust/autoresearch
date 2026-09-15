@@ -224,37 +224,13 @@ class VerifierReplayTests(unittest.TestCase):
             )
             self.assertIn("sentence_tokens", request["payload"]["messages"][1]["content"])
             self.assertFalse(layout.resolve("verifier/simple/verdicts.jsonl").exists())
-            schema_root = SOURCE_ROOT / "schemas" / "pipeline"
-            request_schema = json.loads(
-                (schema_root / "verifier-replay.schema.json").read_text(encoding="utf-8")
-            )["$defs"]["request"]
-            self.assertEqual(set(request), set(request_schema["required"]))
             environment = json.loads(
                 layout.resolve("verifier/simple/environment-manifest.json").read_text(
                     encoding="utf-8"
                 )
             )
-            environment_schema = json.loads(
-                (schema_root / "verifier-environment.schema.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            self.assertEqual(set(environment), set(environment_schema["required"]))
-            manifest_schema = json.loads(
-                (schema_root / "verifier-manifest.schema.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            self.assertEqual(set(manifest), set(manifest_schema["required"]))
-            run_log_schema = json.loads(
-                (schema_root / "verifier-run-log.schema.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            for line in layout.resolve("verifier/simple/run-log.jsonl").read_text(
-                encoding="utf-8"
-            ).splitlines():
-                self.assertEqual(set(json.loads(line)), set(run_log_schema["required"]))
+            self.assertEqual(environment["execution_mode"], "dry-run")
+            self.assertEqual(manifest["status"], "planned")
             for path in Path(temporary).rglob("*"):
                 if path.is_file():
                     self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))

@@ -18,11 +18,12 @@ import table_evaluator as evaluator
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = json.loads((ROOT / "table2_contract.json").read_text(encoding="utf-8"))
+TABLE_ERA_EVALUATOR_BLOB = "964893546b28f04e34e8c546bcbbfd4cfbc27354"
 
 
 def historical_evaluator():
     source = subprocess.run(
-        ["git", "cat-file", "blob", CONTRACT["evaluator"]["table_era_blob"]],
+        ["git", "cat-file", "blob", TABLE_ERA_EVALUATOR_BLOB],
         cwd=ROOT,
         check=True,
         capture_output=True,

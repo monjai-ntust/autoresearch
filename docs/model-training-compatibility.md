@@ -52,7 +52,7 @@ comparison is interpreted that way.
 
 | Invariant | Compatibility host |
 | --- | --- |
-| Encoder/backbone, adapters, parameter names and shapes | `models/bert_kg_encoder.BertKGExtractor`; only an optional HF revision argument was added. |
+| Encoder/backbone, text adapter, parameter names and shapes | `models/bert_kg_encoder.BertKGExtractor`; inactive experimental branches were removed without changing the canonical state-dict keyspace. |
 | Span-NER and relation heads | Existing `train_span.py` construction, including the 3H context-between-spans relation head. |
 | Entity/relation label order | Existing `data.code_accord` four entity types and `NO_REL` plus nine relation types. |
 | Span enumeration and pair construction | Existing `forward_span_ner`, loss, and evaluation functions. |
@@ -70,18 +70,18 @@ comparison is interpreted that way.
 | Prepared `train.jsonl`/`development.jsonl` adapter | Prevents the historical per-model-seed random repartition and relation-task overlap. It deliberately changes membership from the historical experiment, so numeric equality is not assumed. |
 | No test loader/evaluation in canonical mode | Prevents final-test access during training and checkpoint selection. The repository exposes no public noncanonical trainer route. |
 | Immutable model revision | Removes upstream model-repository drift without changing architecture. Any valid new run may select another immutable 40-hex revision; that run-local identity must remain consistent downstream. |
-| Run-local frozen Hugging Face cache | Canonical mode downloads the same pinned revision beneath `output/<run-id>/inputs/huggingface`, freezes a file/tree manifest, and forces later seeds/inference to local-only loading. Historical callers that omit the cache controls retain their defaults. |
-| Serializable shuffle sampler | Preserves canonical random-shuffle semantics while storing current order/cursor for exact next-batch resume with zero data-loader workers. The historical CSV path still uses PyTorch's default sampler. |
+| Run-local frozen Hugging Face cache | The retained trainer downloads the pinned revision beneath `output/<run-id>/inputs/huggingface`, freezes a file/tree manifest, and forces later seeds/inference to local-only loading. |
+| Serializable shuffle sampler | Preserves canonical random-shuffle semantics while storing current order/cursor for exact next-batch resume with zero data-loader workers. |
 | Full atomic restart state | Adds optimizer, scheduler, RNG, sampler, adaptive-gate, and best-selection state beside the unchanged inference checkpoint. It affects recovery, not the loss objective. |
 | Run-local logs/summary/manifests | Replaces `/tmp` and ad hoc checkpoint provenance only in canonical mode; all writes stay under `output/<run-id>/`. |
-| Final development checkpoint promotion | Canonical mode saves a newly improved final-step development checkpoint; the historical path retains its previous behavior. This prevents the manifest from naming metrics not represented by `checkpoint.pt`. |
+| Final development checkpoint promotion | The retained trainer saves a newly improved final-step development checkpoint. This prevents the manifest from naming metrics not represented by `checkpoint.pt`. |
 
 ## Validation and remaining gate
 
 Focused offline tests prove prepared-record order/span/relation adaptation,
-split substitution rejection, sampler continuation, opt-in defaults, model-
-revision forwarding, interrupted orchestration retry, no-test summary checks,
-and checkpoint/data/code identity binding. They do not prove accelerator
+split substitution rejection, sampler continuation, the canonical-only trainer
+surface, model-revision forwarding, interrupted orchestration retry, no-test
+summary checks, and checkpoint/data/config identity binding. They do not prove accelerator
 numerics. The publication run's encoder training/inference and verifier stages
 are completed immutable prerequisites and must not be rerun. The remaining
 external gate is E-07: restore the complete authenticated run tree, execute the

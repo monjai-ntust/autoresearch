@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch
 import torch
 
 from data.code_accord import ResumableRandomSampler, _load_prepared_examples
-from models.bert_kg_encoder import BertBackbone
+from models.bert_kg_encoder import BertBackbone, BertKGExtractor
 from train_span import _load_restart, parse_args
 
 
@@ -135,17 +135,47 @@ class PreparedAdapterTests(unittest.TestCase):
         )
 
 
-class HistoricalDefaultTests(unittest.TestCase):
-    def test_new_training_controls_are_opt_in(self):
-        args = parse_args(["--dataset", "accord"])
-        self.assertFalse(args.canonical_mode)
-        self.assertIsNone(args.prepared_dir)
-        self.assertIsNone(args.model_revision)
-        self.assertIsNone(args.model_cache_dir)
-        self.assertFalse(args.model_local_files_only)
-        self.assertFalse(args.skip_test_eval)
-        self.assertIsNone(args.save_last_to)
-        self.assertIsNone(args.resume_from)
+class TrainerSurfaceTests(unittest.TestCase):
+    def test_trainer_parser_exposes_only_the_canonical_path(self):
+        values = {
+            "prepared-dir": "run/data-prepared",
+            "model-name": "microsoft/deberta-large",
+            "model-revision": "revision-a",
+            "model-cache-dir": "run/inputs/huggingface",
+            "batch-size": "16",
+            "max-length": "128",
+            "lr": "3e-5",
+            "max-steps": "3500",
+            "warmup-steps": "250",
+            "max-span-width": "8",
+            "re-weight": "1",
+            "re-no-rel-weight": "1",
+            "neg-sample-ratio": "3",
+            "focal-gamma": "2",
+            "label-smoothing": ".1",
+            "eval-every": "100",
+            "seed": "42",
+            "re-comparison-boost": "5",
+            "re-boost-adaptive-steps": "1000",
+            "re-boost-adaptive-threshold": ".35",
+            "re-boost-adaptive-threshold2": ".4",
+            "re-boost-mid": "3.5",
+            "re-boost-end": "2",
+            "save-best-to": "checkpoint.pt",
+            "save-last-to": "restart.pt",
+            "progress-log": "training.log",
+            "run-summary-out": "summary.json",
+        }
+        argv = [item for key, value in values.items() for item in (f"--{key}", value)]
+        args = parse_args(argv)
+        for removed in (
+            "dataset",
+            "canonical_mode",
+            "synth_jsonl",
+            "evidence_gat",
+            "use_crf",
+        ):
+            self.assertFalse(hasattr(args, removed))
 
     def test_backbone_revision_is_optional_and_forwarded_only_when_supplied(self):
         fake_model = Mock()
@@ -178,6 +208,42 @@ class HistoricalDefaultTests(unittest.TestCase):
                 cache_dir="cache-a",
                 local_files_only=True,
             )
+
+    def test_canonical_extractor_keeps_only_checkpoint_compatible_heads(self):
+        class FakeEncoder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embeddings = torch.nn.Embedding(32, 4)
+                self.config = SimpleNamespace(hidden_size=4)
+
+            def get_input_embeddings(self):
+                return self.embeddings
+
+            def forward(self, *, inputs_embeds, attention_mask):
+                del attention_mask
+                return SimpleNamespace(last_hidden_state=inputs_embeds)
+
+        with patch(
+            "models.bert_kg_encoder.AutoModel.from_pretrained",
+            return_value=FakeEncoder(),
+        ):
+            model = BertKGExtractor(
+                "model-a",
+                num_bio_tags=9,
+                num_relations=10,
+                num_entity_types=4,
+                max_span_width=8,
+            )
+        keys = set(model.state_dict())
+        self.assertIn("ner_head.weight", keys)
+        self.assertIn("span_ner_head.weight", keys)
+        self.assertIn("re_head.0.weight", keys)
+        self.assertIn("adapters.text.word_embeddings.weight", keys)
+        self.assertFalse(any("boundary" in key or "evidence" in key for key in keys))
+        hidden = torch.arange(20, dtype=torch.float32).reshape(5, 4)
+        logits, spans = model.forward_span_ner(hidden, [None, 0, 1, 2, None], 3, 2)
+        self.assertEqual(spans, [(0, 0), (0, 1), (1, 1), (1, 2), (2, 2)])
+        self.assertEqual(tuple(logits.shape), (5, 5))
 
 
 if __name__ == "__main__":
