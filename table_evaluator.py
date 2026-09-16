@@ -80,6 +80,7 @@ def generate_questions(records, max_q):
         if key not in seen:
             seen.add(key)
             unique.append(q)
+    # PENDING-DELETION (Phase E): obsolete after the approved full 105-question panel.
     if max_q > 0 and len(unique) > max_q:
         import random
         random.seed(42)
