@@ -138,7 +138,7 @@ Development-pilot calls never use recovery caches.
 
 Table-2 stages record a run identity before their first write. A validated
 completed stage is reusable. An unverified interrupted result is moved into
-`output/<run-id>/table2/recovery/` before a new attempt. Cross-run paths,
+`output/<run-id>/table2-q105/recovery/` before a new attempt. Cross-run paths,
 symlinks/junctions, changed inputs, mismatched model identities, malformed or
 empty model responses, and output collisions fail closed.
 
@@ -157,10 +157,10 @@ Important run-relative paths include:
 - `verifier/{simple,corrective}/verdicts.jsonl`
 - `metrics/metrics.json`
 - `manifests/score-manifest.json`
-- `table2/projections/`
-- `table2/rag-results/`
-- `table2/table2-results.json`
-- `table2/artifact-hashes.json`
+- `table2-q105/projections/`
+- `table2-q105/rag-results/`
+- `table2-q105/table2-results.json`
+- `table2-q105/artifact-hashes.json`
 
 Generated output is temporary working storage. The parent research repository's
 verified archival process must move a completed run out of `src/output/` before

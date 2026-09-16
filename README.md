@@ -112,7 +112,9 @@ uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --ollama-url http://localhost:11434
 ```
 
-Table-2 output is confined to `output/<run-id>/table2/`. Missing canonical
+The approved full-panel Table-2 output is confined to
+`output/<run-id>/table2-q105/`. This separate same-run namespace preserves any
+prior 10-question Table-2 child as historical evidence. Missing canonical
 graphs are deterministically reconstructed only from authenticated prepared
 data, gold, seed-42 candidates, the development-selected threshold, and
 corrective verdicts in that same run. If a canonical graph already exists, its
@@ -122,15 +124,17 @@ canonical JSON must exactly equal the reconstruction before it is reused.
 
 Historical source blob `964893546b28f04e34e8c546bcbbfd4cfbc27354`
 is the prompt and method authority. The internal evaluator preserves its 13
-case-folded relation templates, seed-42 ten-question selection, five mode order,
+case-folded relation templates, the approved full 105-question panel, five mode order,
 retrieval behavior, exact prompt construction, `think=false`, temperature
 `0.0`, `num_predict=50`, lenient answer matcher, aggregation, and output
 semantics. The only added behavior is a fail-closed guard for an empty supported
 question set.
 
-The text condition is historical unique-word overlap, not BM25. The small
-sample, answer-derived retrieval query, unequal evidence access, and lenient
-matching are retained limitations rather than corrected methodology.
+The text condition is historical unique-word overlap, not BM25. The
+answer-derived retrieval query, unequal evidence access, and lenient matching
+are retained limitations rather than corrected methodology. The former
+10-question sample-size limitation is replaced only by the approved full
+105-question panel.
 
 ## Failure and output handling
 

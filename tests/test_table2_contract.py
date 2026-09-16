@@ -88,7 +88,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
         ]
         self.assertEqual(evaluator.generate_questions(records, max_q=0), [])
 
-    def test_seeded_question_selection_matches_the_reference_projection(self):
+    def test_full_question_panel_keeps_every_fixture_question(self):
         fixture = json.loads(
             (ROOT / "tests/fixtures/accord_table2_part_of_projection.json").read_text(
                 encoding="utf-8"
@@ -97,10 +97,29 @@ class Table2EvaluatorContractTests(unittest.TestCase):
         questions = evaluator.generate_questions(
             fixture["records"], CONTRACT["evaluator"]["max_questions"]
         )
-        self.assertEqual(
-            [row["question"] for row in questions],
-            fixture["expected_seed42_questions"],
+        self.assertEqual(CONTRACT["evaluator"]["max_questions"], 105)
+        self.assertEqual(questions, evaluator.generate_questions(fixture["records"], max_q=0))
+        self.assertEqual(len(questions), len(fixture["records"]))
+
+    def test_full_question_panel_includes_all_105_eligible_questions(self):
+        records = [
+            {
+                "doc_id": index,
+                "sentence": f"Sentence {index}.",
+                "gold_triples": [{
+                    "head_text": f"Head {index}",
+                    "tail_text": f"Tail {index}",
+                    "relation": "part-of",
+                }],
+            }
+            for index in range(105)
+        ]
+        expected = evaluator.generate_questions(records, max_q=0)
+        actual = evaluator.generate_questions(
+            records, max_q=CONTRACT["evaluator"]["max_questions"]
         )
+        self.assertEqual(len(actual), 105)
+        self.assertEqual(actual, expected)
 
     def test_internal_transform_matches_authoritative_historical_execution(self):
         historical = historical_evaluator()
@@ -202,7 +221,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
                     kg_identity="fixture",
                     ollama_url="http://localhost:11434",
                     ollama_model="qwen3:32b",
-                    max_questions=10,
+                    max_questions=CONTRACT["evaluator"]["max_questions"],
                 )
         call.assert_not_called()
 

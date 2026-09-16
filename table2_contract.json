@@ -1,11 +1,12 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "source_baseline": {
     "commit": "c01003a875bbb4c36393647c6d5fa1cc84d71d2c",
     "branch": "publication-refactored-rag"
   },
   "evaluator": {
-    "max_questions": 10
+    "max_questions": 105,
+    "output_namespace": "table2-q105"
   },
   "pipeline": {
     "protocol_id": "B04-PATH-A-1.3",

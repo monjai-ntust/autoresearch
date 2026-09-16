@@ -125,8 +125,15 @@ def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 def validate_source_contract(
     contract: dict[str, Any], require_clean: bool
 ) -> dict[str, str]:
-    if contract.get("schema_version") != 5:
-        raise PhaseEError("Phase E contract schema is not revision 0.8")
+    if contract.get("schema_version") != 6:
+        raise PhaseEError("Phase E contract schema is not revision 0.9")
+    evaluator_contract = contract.get("evaluator")
+    if (
+        not isinstance(evaluator_contract, dict)
+        or evaluator_contract.get("max_questions") != 105
+        or evaluator_contract.get("output_namespace") != "table2-q105"
+    ):
+        raise PhaseEError("Phase E contract must retain the approved 105-question evaluator")
     baseline = contract["source_baseline"]["commit"]
     head = run_git("rev-parse", "HEAD").stdout.strip()
     branch = run_git("branch", "--show-current").stdout.strip()
@@ -143,6 +150,11 @@ def validate_source_contract(
             if run_git(*args, check=False).returncode:
                 raise PhaseEError("Tracked source changes exist; commit or discard them first")
     return {"head": head, "branch": branch, "baseline": baseline}
+
+
+def table2_child_namespace(contract: dict[str, Any]) -> str:
+    """Return the fixed same-run namespace for the approved full question panel."""
+    return contract["evaluator"]["output_namespace"]
 
 
 def validate_run_id(run_id: str, *, require_existing: bool = True) -> Path:
@@ -1460,9 +1472,12 @@ def project_evaluator_records(
             "gold_triples": triples,
             "predicted_triples": [],
         })
-    questions = evaluator.generate_questions(projected, contract["evaluator"]["max_questions"])
-    if len(questions) != contract["evaluator"]["max_questions"]:
-        raise PhaseEError("Projection does not generate exactly ten frozen questions")
+    expected_count = contract["evaluator"]["max_questions"]
+    questions = evaluator.generate_questions(projected, expected_count)
+    if len(questions) != expected_count:
+        raise PhaseEError(
+            f"Projection does not generate exactly {expected_count} approved questions"
+        )
     summary = {
         "records": len(projected),
         "questions": len(questions),
@@ -1536,7 +1551,11 @@ def preflight_same_run(
         projections[name] = canonical_json_bytes(graph)
         graph_summaries[name] = {
             "source": source,
-            "source_path": relative if source == "existing" else f"table2/canonical-graphs/{name}/manifest.json",
+            "source_path": (
+                relative
+                if source == "existing"
+                else f"{table2_child_namespace(contract)}/canonical-graphs/{name}/manifest.json"
+            ),
             "source_sha256": source_hash,
             "graph_id": snapshot["graph_id"],
             "condition": snapshot["condition"],
@@ -1662,7 +1681,7 @@ def validate_child_write_surface(child_dir: Path) -> None:
     if not child_dir.exists():
         return
     if not child_dir.is_dir() or child_dir.is_symlink() or child_dir.resolve() != child_dir:
-        raise PhaseEError("table2 must be one physical same-run directory")
+        raise PhaseEError("Table-2 output must be one physical same-run directory")
     for entry in child_dir.rglob("*"):
         if entry.is_symlink() or entry.resolve(strict=False) != entry:
             raise PhaseEError(f"Phase E child contains a link or escaped path: {entry}")
@@ -2244,7 +2263,8 @@ def validate_phase_e_child(
 def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
     source = validate_source_contract(contract, require_clean=not args.dry_run)
     run_dir, preflight, projections, graphs = preflight_same_run(args.run_id, contract)
-    child_dir = run_dir / "table2"
+    child_namespace = table2_child_namespace(contract)
+    child_dir = run_dir / child_namespace
     validate_child_write_surface(child_dir)
     if args.dry_run:
         print(json.dumps({"source": source, **preflight}, indent=2, sort_keys=True))
@@ -2261,7 +2281,9 @@ def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
     }
     new_child = not child_dir.exists() or not status_path.exists()
     if child_dir.exists() and not status_path.exists() and any(child_dir.iterdir()):
-        raise PhaseEError("table2 exists without a resumable status identity")
+        raise PhaseEError(
+            f"{child_namespace} exists without a resumable status identity"
+        )
     if new_child:
         status = {
             "schema_version": "phase-e-same-run-status-3.0",
@@ -2473,5 +2495,5 @@ def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
     status.clear()
     status.update(completed_status)
     write_status(status_path, status, child_dir)
-    print(json.dumps({"run_dir": str(run_dir), "child": "table2", "status": "complete"}, indent=2))
+    print(json.dumps({"run_dir": str(run_dir), "child": child_namespace, "status": "complete"}, indent=2))
     return 0

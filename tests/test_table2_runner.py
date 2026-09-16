@@ -17,6 +17,7 @@ import table2_runner as runner
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = json.loads((ROOT / "table2_contract.json").read_text(encoding="utf-8"))
+TABLE2_CHILD = CONTRACT["evaluator"]["output_namespace"]
 RUN_ID = "research-run-001"
 
 
@@ -121,12 +122,13 @@ def rag_result(summary: dict, kg_identity: str) -> dict:
 
 def live_preflight(run_dir: Path) -> tuple[dict, dict[str, bytes], dict]:
     summary = execution_summary()
+    question_count = CONTRACT["evaluator"]["max_questions"]
     summary["records"] = {
         "records": 1,
-        "questions": 10,
+        "questions": question_count,
         "question_contract": [
             {"q": f"question-{index}", "gold": f"answer-{index}"}
-            for index in range(10)
+            for index in range(question_count)
         ],
         "question_sha256": "9" * 64,
     }
@@ -303,7 +305,7 @@ class Table2RunnerTests(unittest.TestCase):
         )
         self.assertEqual([row["doc_id"] for row in rows], identifiers)
         self.assertEqual(content, runner.canonical_jsonl_bytes(rows))
-        self.assertEqual(summary["questions"], 10)
+        self.assertEqual(summary["questions"], CONTRACT["evaluator"]["max_questions"])
 
     def test_dry_run_does_not_contact_model_or_create_child(self):
         args = argparse.Namespace(run_id=RUN_ID, ollama_url="http://localhost:11434", dry_run=True)
@@ -320,13 +322,13 @@ class Table2RunnerTests(unittest.TestCase):
                  redirect_stdout(io.StringIO()):
                 self.assertEqual(runner.run_command(args, CONTRACT), 0)
             model.assert_not_called()
-            self.assertFalse((run_dir / "table2").exists())
+            self.assertFalse((run_dir / TABLE2_CHILD).exists())
 
     def test_rag_output_rejects_failed_model_calls_and_identity_substitution(self):
         modes = runner.evaluator.MODES
         count = CONTRACT["evaluator"]["max_questions"]
         questions = [{"q": f"question-{index}", "gold": "gold"} for index in range(count)]
-        expected_kg = "output/example/table2/projections/confidence.json"
+        expected_kg = f"output/example/{TABLE2_CHILD}/projections/confidence.json"
         output = {
             "metadata": {
                 "kg": expected_kg,
@@ -485,7 +487,7 @@ class Table2RunnerTests(unittest.TestCase):
             write(paths["preparation_manifest"], {"run_id": "foreign-run"})
             with self.assertRaisesRegex(runner.PhaseEError, "foreign run_id"):
                 runner.preflight_same_run(run_id, CONTRACT)
-            self.assertFalse((run_dir / "table2").exists())
+            self.assertFalse((run_dir / TABLE2_CHILD).exists())
 
     def test_three_conditions_complete_and_resume_without_model_calls(self):
         args = argparse.Namespace(
@@ -521,7 +523,7 @@ class Table2RunnerTests(unittest.TestCase):
                 self.assertEqual(len(evaluator_calls), 3)
                 self.assertEqual(fetch.call_count, 4)
                 for condition in ("confidence", "corrective", "gold"):
-                    result = run_dir / "table2/rag-results" / f"{condition}.json"
+                    result = run_dir / TABLE2_CHILD / "rag-results" / f"{condition}.json"
                     self.assertEqual(
                         result.read_bytes(),
                         runner.scientific_json_bytes(json.loads(result.read_text())),
@@ -563,7 +565,7 @@ class Table2RunnerTests(unittest.TestCase):
                  redirect_stdout(io.StringIO()):
                 with self.assertRaisesRegex(OSError, "injected"):
                     runner.run_command(args, CONTRACT)
-            self.assertTrue((run_dir / "table2/artifact-hashes.json").is_file())
+            self.assertTrue((run_dir / TABLE2_CHILD / "artifact-hashes.json").is_file())
             with mock.patch.object(runner, "validate_source_contract", return_value=source), \
                  mock.patch.object(runner, "preflight_same_run", return_value=(run_dir, summary, projections, graphs)), \
                  mock.patch.object(runner, "fetch_matching_model", return_value=capture) as resumed_fetch, \
@@ -615,9 +617,9 @@ class Table2RunnerTests(unittest.TestCase):
                 ):
                     runner.run_command(args, CONTRACT)
             self.assertEqual(evaluate.call_count, 3)
-            status = runner.load_json(run_dir / "table2/run-status.json")
+            status = runner.load_json(run_dir / TABLE2_CHILD / "run-status.json")
             self.assertNotEqual(status.get("status"), "complete")
-            self.assertTrue((run_dir / "table2/artifact-hashes.json").is_file())
+            self.assertTrue((run_dir / TABLE2_CHILD / "artifact-hashes.json").is_file())
 
     def test_missing_post_stage_evidence_retries_that_stage_and_downstream(self):
         args = argparse.Namespace(run_id=RUN_ID, ollama_url="http://localhost:11434", dry_run=False)
@@ -636,7 +638,7 @@ class Table2RunnerTests(unittest.TestCase):
             ]
             with common[0], common[1], common[2], common[3], redirect_stdout(io.StringIO()):
                 runner.run_command(args, CONTRACT)
-            status_path = run_dir / "table2/run-status.json"
+            status_path = run_dir / TABLE2_CHILD / "run-status.json"
             status = json.loads(status_path.read_text(encoding="utf-8"))
             status["stages"]["rag_corrective"].pop("post_model_identity_check")
             status_path.write_bytes(runner.canonical_json_bytes(status))
