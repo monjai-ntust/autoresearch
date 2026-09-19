@@ -36,8 +36,8 @@ def call_llm(ollama_url, model, prompt):
         return f"ERROR: {e}"
 
 
-def generate_questions(records, max_q):
-    """Generate QA pairs from gold triples."""
+def generate_questions(records):
+    """Generate the complete unique QA panel from gold triples."""
     questions = []
     rel_templates = {
         "used-for": ("What is {head} used for?", "{tail}"),
@@ -80,11 +80,6 @@ def generate_questions(records, max_q):
         if key not in seen:
             seen.add(key)
             unique.append(q)
-    # PENDING-DELETION (Phase E): obsolete after the approved full 105-question panel.
-    if max_q > 0 and len(unique) > max_q:
-        import random
-        random.seed(42)
-        unique = random.sample(unique, max_q)
     return unique
 
 
@@ -166,10 +161,15 @@ def evaluate(
     llm_call: Callable[[str, str, str], str] = call_llm,
 ) -> dict[str, Any]:
     """Run the frozen five-mode transform over authenticated in-memory inputs."""
-    questions = generate_questions(records, max_questions)
+    questions = generate_questions(records)
     if not questions:
         raise ValueError(
             "No supported questions were generated; refusing to write an empty RAG result."
+        )
+    if len(questions) != max_questions:
+        raise ValueError(
+            f"Expected the complete {max_questions}-question panel, "
+            f"but generated {len(questions)} questions."
         )
 
     results = {mode: [] for mode in MODES}

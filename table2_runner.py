@@ -1473,7 +1473,7 @@ def project_evaluator_records(
             "predicted_triples": [],
         })
     expected_count = contract["evaluator"]["max_questions"]
-    questions = evaluator.generate_questions(projected, expected_count)
+    questions = evaluator.generate_questions(projected)
     if len(questions) != expected_count:
         raise PhaseEError(
             f"Projection does not generate exactly {expected_count} approved questions"

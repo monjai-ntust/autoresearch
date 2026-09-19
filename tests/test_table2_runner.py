@@ -294,7 +294,7 @@ class Table2RunnerTests(unittest.TestCase):
                 "example_id": item,
                 "gold_triples": [{
                     "head": {"text": f"Head {index}"},
-                    "relation": "part-of",
+                    "relation": "part-of" if index < 105 else "necessity",
                     "tail": {"text": f"Tail {index}"},
                 }],
             }

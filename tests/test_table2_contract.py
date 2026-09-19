@@ -61,7 +61,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
                 }],
             }
             with self.subTest(relation=relation):
-                generated = evaluator.generate_questions([record], max_q=0)
+                generated = evaluator.generate_questions([record])
                 self.assertEqual(
                     (
                         generated[0]["relation"],
@@ -86,7 +86,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
                 ["necessity", "selection", "equal", "greater-equal", "less-equal", "greater", "less"]
             )
         ]
-        self.assertEqual(evaluator.generate_questions(records, max_q=0), [])
+        self.assertEqual(evaluator.generate_questions(records), [])
 
     def test_full_question_panel_keeps_every_fixture_question(self):
         fixture = json.loads(
@@ -94,11 +94,8 @@ class Table2EvaluatorContractTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        questions = evaluator.generate_questions(
-            fixture["records"], CONTRACT["evaluator"]["max_questions"]
-        )
+        questions = evaluator.generate_questions(fixture["records"])
         self.assertEqual(CONTRACT["evaluator"]["max_questions"], 105)
-        self.assertEqual(questions, evaluator.generate_questions(fixture["records"], max_q=0))
         self.assertEqual(len(questions), len(fixture["records"]))
 
     def test_full_question_panel_includes_all_105_eligible_questions(self):
@@ -114,12 +111,35 @@ class Table2EvaluatorContractTests(unittest.TestCase):
             }
             for index in range(105)
         ]
-        expected = evaluator.generate_questions(records, max_q=0)
-        actual = evaluator.generate_questions(
-            records, max_q=CONTRACT["evaluator"]["max_questions"]
-        )
+        actual = evaluator.generate_questions(records)
         self.assertEqual(len(actual), 105)
-        self.assertEqual(actual, expected)
+
+    def test_legacy_question_limit_is_removed(self):
+        records = [
+            {
+                "doc_id": index,
+                "sentence": f"Sentence {index}.",
+                "gold_triples": [{
+                    "head_text": f"Head {index}",
+                    "tail_text": f"Tail {index}",
+                    "relation": "part-of",
+                }],
+            }
+            for index in range(106)
+        ]
+        questions = evaluator.generate_questions(records)
+        self.assertEqual(len(questions), 106)
+        with mock.patch.object(evaluator, "call_llm") as call:
+            with self.assertRaisesRegex(ValueError, "complete 105-question panel"):
+                evaluator.evaluate(
+                    records,
+                    {"nodes": [], "edges": []},
+                    kg_identity="fixture",
+                    ollama_url="http://localhost:11434",
+                    ollama_model="qwen3:32b",
+                    max_questions=CONTRACT["evaluator"]["max_questions"],
+                )
+        call.assert_not_called()
 
     def test_internal_transform_matches_authoritative_historical_execution(self):
         historical = historical_evaluator()
