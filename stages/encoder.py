@@ -11,9 +11,9 @@ import json
 import os
 import platform
 import random
+import re
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +24,29 @@ from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from utils.encoder import data as code_accord
 from utils.encoder.network import BertKGExtractor
-from utils.common.config import PipelineConfig
-from utils.common.paths import RunLayout
-from utils.encoder.model import plan_training
+from utils.common.artifact_io import (
+    DataContractError,
+    _load_manifest,
+    _quarantine_run_artifact,
+    _require_fields,
+    _same_run_seal_path,
+    _validate_recovery_provenance,
+    _validate_same_run_seal,
+    _write_recovery_provenance,
+    _write_same_run_seal,
+    _next_recovery_path,
+    iter_jsonl,
+    sha256_file,
+)
+from utils.common.config import PipelineConfig, load_pipeline_config
+from utils.common.paths import RunLayout, discover_source_root
+from utils.common.records import Candidate
+from utils.encoder.model import (
+    canonical_trainer_arguments,
+    generate_candidates,
+    plan_training,
+    validate_prediction_cache,
+)
 from utils.evaluation.publication import assemble_seed_candidates
 from utils.rag.runner import require_consistent_encoder_identity
 
@@ -749,11 +769,6 @@ def main(argv=None):
 def train_and_generate_development(
     layout: RunLayout,
     config: PipelineConfig,
-    *,
-    load_manifest: Callable[[Path, str], dict],
-    validate_training_stage: Callable[..., dict],
-    resume_generation_stage: Callable[..., object],
-    validate_candidate_assembly: Callable[[RunLayout, PipelineConfig, str], object],
 ) -> tuple[dict[str, Any], dict[str, object], Path]:
     """Train all seeds and assemble authenticated development candidates."""
 
@@ -765,15 +780,15 @@ def train_and_generate_development(
             plan_training(
                 layout, config, execution_mode="dry-run", training_seed=seed
             )
-        validate_training_stage(layout, config, seed, execution_mode="dry-run")
+        _validate_training_stage(layout, config, seed, execution_mode="dry-run")
 
         live_manifest = layout.resolve(f"manifests/model-train-live-seed-{seed}.json")
         if not live_manifest.is_file():
             plan_training(layout, config, execution_mode="live", training_seed=seed)
-        training = validate_training_stage(
+        training = _validate_training_stage(
             layout, config, seed, execution_mode="live"
         )
-        checkpoint_identity = load_manifest(
+        checkpoint_identity = _load_manifest(
             layout.resolve(
                 f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
             ),
@@ -787,7 +802,7 @@ def train_and_generate_development(
         )
         if not training_hardware and isinstance(training.get("environment"), dict):
             training_hardware = training["environment"]
-        resume_generation_stage(layout, config, seed=seed, split="development")
+        _resume_generation_stage(layout, config, seed=seed, split="development")
 
     encoder_identity = require_consistent_encoder_identity(encoder_identities)
     development_candidates = layout.resolve(
@@ -795,23 +810,452 @@ def train_and_generate_development(
     )
     if not development_candidates.is_file():
         assemble_seed_candidates(layout, config, split="development")
-    validate_candidate_assembly(layout, config, "development")
+    _validate_candidate_assembly(layout, config, "development")
     return encoder_identity, training_hardware, development_candidates
 
 
 def generate_test_candidates(
     layout: RunLayout,
     config: PipelineConfig,
-    *,
-    resume_generation_stage: Callable[..., object],
-    validate_candidate_assembly: Callable[[RunLayout, PipelineConfig, str], object],
 ) -> Path:
     """Generate and assemble authenticated final-test candidates."""
 
     for seed in config.value["training_seeds"]:
-        resume_generation_stage(layout, config, seed=seed, split="test")
+        _resume_generation_stage(layout, config, seed=seed, split="test")
     test_candidates = layout.resolve("predictions/test/candidates.jsonl")
     if not test_candidates.is_file():
         assemble_seed_candidates(layout, config, split="test")
-    validate_candidate_assembly(layout, config, "test")
+    _validate_candidate_assembly(layout, config, "test")
     return test_candidates
+
+
+def _validate_private_training_inputs(layout: RunLayout, config) -> None:
+    """Authenticate the run-local files consumed by the internal trainer."""
+
+    acquisition_path = layout.resolve(
+        "manifests/02-input-acquisition-manifest.json", must_exist=True
+    )
+    preparation_path = layout.resolve(
+        "manifests/03-data-preparation-manifest.json", must_exist=True
+    )
+    acquisition = _load_manifest(acquisition_path, "acquisition manifest")
+    preparation = _load_manifest(preparation_path, "preparation manifest")
+    archive = acquisition.get("archive")
+    if not isinstance(archive, dict) or not isinstance(archive.get("path"), str):
+        raise DataContractError("training acquisition manifest lacks archive identity")
+    archive_path = layout.resolve(archive["path"], must_exist=True)
+    if (
+        acquisition.get("dataset_id") != config.value["dataset"]["dataset_id"]
+        or archive.get("sha256") != sha256_file(archive_path)
+        or preparation.get("protocol_id") != config.value["protocol_id"]
+        or preparation.get("dataset_id") != config.value["dataset"]["dataset_id"]
+        or preparation.get("byte_identical_independent_materializations") is not True
+        or preparation.get("acquisition_manifest_sha256")
+        != sha256_file(acquisition_path)
+        or preparation.get("archive_sha256") != archive.get("sha256")
+    ):
+        raise DataContractError(
+            "private trainer inputs are not bound to one acquisition/preparation"
+        )
+    artifacts = preparation.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise DataContractError("preparation manifest lacks its artifact ledger")
+    by_path = {
+        item.get("path"): item
+        for item in artifacts
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    for relative in ("train.jsonl", "development.jsonl", "split-manifest.json"):
+        record = by_path.get(relative)
+        path = layout.resolve(f"data-prepared/{relative}", must_exist=True)
+        if (
+            not isinstance(record, dict)
+            or record.get("bytes") != path.stat().st_size
+            or record.get("sha256") != sha256_file(path)
+        ):
+            raise DataContractError(
+                f"private trainer input differs from preparation: {relative}"
+            )
+    split = _load_manifest(
+        layout.resolve("data-prepared/split-manifest.json", must_exist=True),
+        "split manifest",
+    )
+    expected_split = config.value["split"]
+    if (
+        split.get("split_id") != expected_split["split_id"]
+        or split.get("seed") != expected_split["seed"]
+        or split.get("train_count") != expected_split["train_sentences"]
+        or split.get("development_count")
+        != expected_split["development_sentences"]
+        or split.get("test_count") != expected_split["test_sentences"]
+    ):
+        raise DataContractError("private trainer split differs from the selected config")
+
+
+def _validate_training_stage(
+    layout: RunLayout, config, seed: int, *, execution_mode: str
+) -> dict:
+    manifest_path = layout.resolve(
+        f"manifests/model-train-{execution_mode}-seed-{seed}.json", must_exist=True
+    )
+    manifest = _load_manifest(manifest_path, "training manifest")
+    _require_fields(
+        manifest,
+        {
+            "stage": "model-train",
+            "execution_mode": execution_mode,
+            "status": "planned" if execution_mode == "dry-run" else "completed",
+            "protocol_id": config.value["protocol_id"],
+            "training_seed": seed,
+            "expected_checkpoint_dir": f"checkpoints/seed-{seed}",
+        },
+        f"seed-{seed} training manifest",
+    )
+    if manifest.get("recipe") != config.value["training"]:
+        raise DataContractError(f"seed-{seed} training recipe differs from this run")
+    if execution_mode == "dry-run":
+        return manifest
+
+    checkpoint_relative = f"checkpoints/seed-{seed}/checkpoint.pt"
+    checkpoint_manifest_relative = f"checkpoints/seed-{seed}/checkpoint-manifest.json"
+    expected_outputs = {
+        "checkpoint": checkpoint_relative,
+        "checkpoint_manifest": checkpoint_manifest_relative,
+        "restart_state": f"checkpoints/seed-{seed}/restart-state.pt",
+        "training_summary": f"checkpoints/seed-{seed}/training-summary.json",
+        "progress_log": f"logs/model-train-seed-{seed}.log",
+        "dataset_compatibility_report": "audit/model-training-dataset-compatibility.json",
+    }
+    outputs = manifest.get("outputs")
+    if not isinstance(outputs, dict) or any(
+        outputs.get(field) != relative for field, relative in expected_outputs.items()
+    ):
+        raise DataContractError(f"seed-{seed} training outputs use unexpected paths")
+    for relative in outputs.values():
+        if isinstance(relative, str):
+            layout.resolve(relative, must_exist=True)
+
+    checkpoint_path = layout.resolve(checkpoint_relative, must_exist=True)
+    identity_path = layout.resolve(checkpoint_manifest_relative, must_exist=True)
+    identity = _load_manifest(identity_path, "checkpoint manifest")
+    if identity.get("schema_version") not in {
+        "phase-b-model-checkpoint-manifest-2.0",
+        "phase-b-model-checkpoint-manifest-3.0",
+        "phase-b-model-checkpoint-manifest-4.0",
+    }:
+        raise DataContractError(f"seed-{seed} checkpoint schema is unsupported")
+    _require_fields(
+        identity,
+        {
+            "protocol_id": config.value["protocol_id"],
+            "training_seed": seed,
+            "base_model": config.value["training"]["base_model"],
+            "base_model_revision": config.value["training"]["base_model_revision"],
+            "max_span_width": config.value["training"]["max_span_width"],
+            "context_between_spans": config.value["training"]["context_between_spans"],
+        },
+        f"seed-{seed} checkpoint manifest",
+    )
+    revision = identity.get("base_model_revision")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise DataContractError(f"seed-{seed} encoder revision is not immutable")
+    digest = identity.get("checkpoint_sha256")
+    if not isinstance(digest, str) or sha256_file(checkpoint_path) != digest:
+        raise DataContractError(f"seed-{seed} checkpoint bytes differ from their manifest")
+
+    known_inputs = {
+        "checkout_manifest_sha256": "manifests/00-checkout-manifest.json",
+        "acquisition_manifest_sha256": "manifests/02-input-acquisition-manifest.json",
+        "preparation_manifest_sha256": "manifests/03-data-preparation-manifest.json",
+        "split_manifest_sha256": "data-prepared/split-manifest.json",
+        "train_jsonl_sha256": "data-prepared/train.jsonl",
+        "development_jsonl_sha256": "data-prepared/development.jsonl",
+    }
+    inputs = manifest.get("inputs")
+    if not isinstance(inputs, dict):
+        raise DataContractError(f"seed-{seed} training manifest lacks input hashes")
+    for field, relative in known_inputs.items():
+        path = layout.resolve(relative, must_exist=True)
+        if inputs.get(field) != sha256_file(path):
+            raise DataContractError(f"seed-{seed} training input changed: {relative}")
+    for field, relative in {
+        "split_manifest_sha256": "data-prepared/split-manifest.json",
+        "acquisition_manifest_sha256": "manifests/02-input-acquisition-manifest.json",
+        "train_jsonl_sha256": "data-prepared/train.jsonl",
+        "development_jsonl_sha256": "data-prepared/development.jsonl",
+    }.items():
+        if field in identity and identity[field] != sha256_file(
+            layout.resolve(relative, must_exist=True)
+        ):
+            raise DataContractError(f"seed-{seed} checkpoint identity changed: {relative}")
+    restart = layout.resolve(expected_outputs["restart_state"], must_exist=True)
+    if manifest.get("resume", {}).get("restart_state_sha256") != sha256_file(restart):
+        raise DataContractError(f"seed-{seed} restart state differs from training manifest")
+    compatibility = layout.resolve(
+        expected_outputs["dataset_compatibility_report"], must_exist=True
+    )
+    if (
+        identity.get("dataset_compatibility_sha256") is not None
+        and identity.get("dataset_compatibility_sha256") != sha256_file(compatibility)
+    ):
+        raise DataContractError(f"seed-{seed} compatibility report changed")
+    summary = _load_manifest(
+        layout.resolve(expected_outputs["training_summary"], must_exist=True),
+        "training summary",
+    )
+    if (
+        summary.get("status") != "completed"
+        or summary.get("canonical_mode") is not True
+        or summary.get("seed") != seed
+        or summary.get("test_evaluated") is not False
+    ):
+        raise DataContractError(f"seed-{seed} training summary is not publication-safe")
+    return manifest
+
+
+def _validate_generation_stage(
+    layout: RunLayout,
+    config,
+    seed: int,
+    split: str,
+    *,
+    require_seal: bool = True,
+) -> dict:
+    manifest_path = layout.resolve(
+        f"manifests/model-generate-candidates-live-seed-{seed}-{split}.json",
+        must_exist=True,
+    )
+    manifest = _load_manifest(manifest_path, "candidate-generation manifest")
+    _require_fields(
+        manifest,
+        {
+            "stage": "model-generate-candidates",
+            "status": "completed",
+            "execution_mode": "live",
+            "protocol_id": config.value["protocol_id"],
+            "training_seed": seed,
+        },
+        f"seed-{seed} {split} generation manifest",
+    )
+    directory = "dev" if split == "development" else "test"
+    candidates_relative = f"predictions/{directory}/seed-{seed}-candidates.jsonl"
+    checkpoint_relative = f"checkpoints/seed-{seed}/checkpoint-manifest.json"
+    prepared_relative = f"data-prepared/{split}.jsonl"
+    checkpoint_path = layout.resolve(checkpoint_relative, must_exist=True)
+    prepared_path = layout.resolve(prepared_relative, must_exist=True)
+    inputs = manifest.get("inputs", {})
+    checkpoint_input = inputs.get("checkpoint_manifest", {})
+    prepared_input = inputs.get("prepared_sentences", {})
+    if (
+        manifest.get("candidates_output") != candidates_relative
+        or checkpoint_input.get("path") != checkpoint_relative
+        or checkpoint_input.get("sha256") != sha256_file(checkpoint_path)
+        or prepared_input.get("path") != prepared_relative
+        or prepared_input.get("sha256") != sha256_file(prepared_path)
+    ):
+        raise DataContractError(
+            f"seed-{seed} {split} candidates are not bound to same-run inputs"
+        )
+    checkpoint = _load_manifest(checkpoint_path, "checkpoint manifest")
+    if manifest.get("checkpoint", {}).get("sha256") != checkpoint.get(
+        "checkpoint_sha256"
+    ):
+        raise DataContractError(f"seed-{seed} {split} checkpoint identity differs")
+    if require_seal:
+        _validate_same_run_seal(layout, manifest_path, manifest)
+    return manifest
+
+
+def _validate_candidate_assembly(layout: RunLayout, config, split: str) -> None:
+    directory = "dev" if split == "development" else "test"
+    combined_relative = (
+        "predictions/dev/development-candidates.jsonl"
+        if split == "development"
+        else "predictions/test/candidates.jsonl"
+    )
+    combined = layout.resolve(combined_relative, must_exist=True)
+    rows: list[dict] = []
+    expected_bytes = b""
+    files = []
+    for seed in config.value["training_seeds"]:
+        relative = f"predictions/{directory}/seed-{seed}-candidates.jsonl"
+        path = layout.resolve(relative, must_exist=True)
+        seed_rows = [value for _, value in iter_jsonl(path)]
+        if any(row.get("training_seed") != seed for row in seed_rows):
+            raise DataContractError(f"{relative} contains another training seed")
+        rows.extend(seed_rows)
+        expected_bytes += path.read_bytes()
+        files.append(
+            {
+                "training_seed": seed,
+                "path": relative,
+                "sha256": sha256_file(path),
+                "candidate_count": len(seed_rows),
+                "candidates": [
+                    {
+                        "candidate_id": row.get("candidate_id"),
+                        "example_id": row.get("example_id"),
+                    }
+                    for row in seed_rows
+                ],
+            }
+        )
+    if combined.read_bytes() != expected_bytes:
+        raise DataContractError(
+            f"{combined_relative} is not the exact ordered same-run seed assembly"
+        )
+    if split == "development":
+        index = _load_manifest(
+            layout.resolve("predictions/dev/candidate-index.json", must_exist=True),
+            "development candidate index",
+        )
+        expected = {
+            "schema_version": "phase-b-candidate-index-1.0",
+            "protocol_id": config.value["protocol_id"],
+            "workflow_id": config.value["workflow_id"],
+            "split_id": "CODE-SPLIT-1:development",
+            "split_manifest_sha256": sha256_file(
+                layout.resolve("data-prepared/split-manifest.json", must_exist=True)
+            ),
+            "files": files,
+            "candidate_count": len(rows),
+        }
+        if index != expected:
+            raise DataContractError("development candidate index differs from seed ledgers")
+
+
+def _resume_generation_stage(
+    layout: RunLayout, config, *, seed: int, split: str
+) -> dict:
+    manifest_path = layout.resolve(
+        f"manifests/model-generate-candidates-live-seed-{seed}-{split}.json"
+    )
+    seal_path = _same_run_seal_path(manifest_path)
+    if manifest_path.is_file():
+        manifest = _validate_generation_stage(
+            layout, config, seed, split, require_seal=False
+        )
+        if not seal_path.is_file():
+            _write_same_run_seal(layout, manifest_path, manifest)
+        return _validate_generation_stage(layout, config, seed, split)
+
+    directory = "dev" if split == "development" else "test"
+    prepared = layout.resolve(f"data-prepared/{split}.jsonl", must_exist=True)
+    checkpoint_manifest = layout.resolve(
+        f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
+    )
+    checkpoint_blob = layout.resolve(
+        f"checkpoints/seed-{seed}/checkpoint.pt", must_exist=True
+    )
+    candidates = layout.resolve(f"predictions/{directory}/seed-{seed}-candidates.jsonl")
+    live_ledger = layout.resolve(
+        f"predictions/{directory}/seed-{seed}-prediction-ledger.jsonl"
+    )
+    bindings = {"prepared": prepared, "checkpoint_manifest": checkpoint_manifest}
+    identity: dict[str, object] = {"training_seed": seed, "split": split}
+    cache: Path | None = None
+    if live_ledger.is_file():
+        try:
+            validate_prediction_cache(
+                layout,
+                config,
+                sentences_path=prepared,
+                checkpoint_manifest_path=checkpoint_manifest,
+                cache_ledger_path=live_ledger,
+            )
+        except DataContractError:
+            _quarantine_run_artifact(
+                layout, live_ledger, f"generation-seed-{seed}-{split}"
+            )
+        else:
+            cache = _next_recovery_path(
+                layout,
+                f"generation-seed-{seed}-{split}",
+                "prediction-ledger.jsonl",
+            )
+            os.replace(live_ledger, cache)
+            _write_recovery_provenance(
+                layout,
+                cache,
+                kind="prediction-ledger",
+                identity=identity,
+                bindings=bindings,
+            )
+    if cache is None:
+        directory_path = layout.resolve(
+            f"inputs/recovery/generation-seed-{seed}-{split}"
+        )
+        if directory_path.is_dir():
+            for recovery_candidate in sorted(
+                directory_path.glob("*-prediction-ledger.jsonl"), reverse=True
+            ):
+                try:
+                    _validate_recovery_provenance(
+                        layout,
+                        recovery_candidate,
+                        kind="prediction-ledger",
+                        identity=identity,
+                        bindings=bindings,
+                    )
+                    validate_prediction_cache(
+                        layout,
+                        config,
+                        sentences_path=prepared,
+                        checkpoint_manifest_path=checkpoint_manifest,
+                        cache_ledger_path=recovery_candidate,
+                    )
+                except DataContractError:
+                    continue
+                cache = recovery_candidate
+                break
+    for partial in (candidates, seal_path):
+        _quarantine_run_artifact(
+            layout, partial, f"generation-seed-{seed}-{split}"
+        )
+    manifest = generate_candidates(
+        layout,
+        config,
+        execution_mode="live",
+        sentences_path=prepared,
+        checkpoint_manifest_path=checkpoint_manifest,
+        candidates_out_path=candidates,
+        prediction_ledger_path=None,
+        cache_ledger_path=cache,
+        checkpoint_blob_path=checkpoint_blob,
+        base_model=None,
+        device=None,
+    )
+    _write_same_run_seal(layout, manifest_path, manifest)
+    return _validate_generation_stage(layout, config, seed, split)
+
+
+def run_private_trainer(
+    arguments: list[str], *, default_config: str
+) -> int:
+    """Resolve the trainer only from a run ID, approved seed, and tracked config."""
+
+    parser = argparse.ArgumentParser(prog="pipeline.py _train-encoder")
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--training-seed", required=True, type=int)
+    parser.add_argument("--config", default=default_config)
+    args = parser.parse_args(arguments)
+    source_root = discover_source_root()
+    config = load_pipeline_config(source_root, args.config)
+    layout = RunLayout(source_root=source_root, run_id=args.run_id)
+    layout.require_existing()
+    if args.training_seed not in config.value["training_seeds"]:
+        raise DataContractError(
+            f"training seed {args.training_seed} is not approved by the run config"
+        )
+
+    from stages.preparation import _validate_existing_checkout
+
+    _validate_existing_checkout(layout, config)
+    _validate_training_stage(
+        layout, config, args.training_seed, execution_mode="dry-run"
+    )
+    _validate_private_training_inputs(layout, config)
+    # Import resolution occurs only after the narrow namespace contract passes.
+    # The trainer never sees user-supplied artifact paths.
+    main(canonical_trainer_arguments(layout, config, args.training_seed))
+    return 0

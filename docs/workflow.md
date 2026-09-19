@@ -1,8 +1,10 @@
 # Table-production workflow
 
-`pipeline.py` is the repository's only executable workflow entry point. Run it
-from the root of a clean standalone source checkout. All runtime writes are
-confined to the ignored `output/<run-id>/` tree.
+`pipeline.py` is the repository's only executable workflow entry point. It is a
+thin CLI dispatcher over the internal functions in `stages/`; each stage owns
+its validation, resume/recovery, and execution coordination. Run it from the
+root of a clean standalone source checkout. All runtime writes are confined to
+the ignored `output/<run-id>/` tree.
 
 ## Run identity and same-run lineage
 

@@ -22,7 +22,7 @@ from utils.encoder.model import (
     plan_training,
     validate_prediction_artifacts,
 )
-from pipeline import _validate_training_stage
+from stages.encoder import _validate_training_stage
 from utils.common.artifact_io import (
     DataContractError,
     atomic_write_bytes,

@@ -7,7 +7,8 @@ import unittest
 import uuid
 from pathlib import Path
 
-import pipeline
+from stages.encoder import _validate_candidate_assembly
+from stages.verifier import _validate_pilot_inputs, _validate_threshold
 from utils.common.config import load_pipeline_config
 from utils.common.constants import PROTOCOL_ID, TRAINING_SEEDS
 from utils.common.paths import RunLayout, discover_source_root
@@ -104,9 +105,7 @@ class PublicationAssemblyTests(unittest.TestCase):
             assembled = assemble_seed_candidates(
                 layout, self.config, split="development"
             )
-            pipeline._validate_candidate_assembly(
-                layout, self.config, "development"
-            )
+            _validate_candidate_assembly(layout, self.config, "development")
             self.assertEqual(assembled["candidate_count"], 8)
             index_path = layout.resolve("predictions/dev/candidate-index.json")
             index = load_json(index_path)
@@ -130,7 +129,7 @@ class PublicationAssemblyTests(unittest.TestCase):
             self.assertEqual(
                 threshold["development_candidate_index_sha256"], sha256_file(index_path)
             )
-            pipeline._validate_threshold(layout, self.config)
+            _validate_threshold(layout, self.config)
 
             pilot = prepare_verifier_pilot(layout, self.config)
             self.assertEqual(pilot["candidate_count"], 8)
@@ -139,16 +138,14 @@ class PublicationAssemblyTests(unittest.TestCase):
             self.assertEqual(
                 selection["development_candidate_index_sha256"], sha256_file(index_path)
             )
-            pipeline._validate_pilot_inputs(layout, self.config)
+            _validate_pilot_inputs(layout, self.config)
 
             atomic_write_jsonl(
                 layout.resolve("predictions/dev/seed-42-candidates.jsonl"),
                 [_candidate(43)],
             )
             with self.assertRaises(DataContractError):
-                pipeline._validate_candidate_assembly(
-                    layout, self.config, "development"
-                )
+                _validate_candidate_assembly(layout, self.config, "development")
 
     def test_assembly_rejects_a_seed_file_with_the_wrong_seed(self):
         with _temporary_output_directory() as temporary:

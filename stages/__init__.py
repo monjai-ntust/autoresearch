@@ -1,1 +1,1 @@
-"""Executable boundaries for the publication workflow."""
+"""Internal stage boundaries called by the canonical root pipeline."""

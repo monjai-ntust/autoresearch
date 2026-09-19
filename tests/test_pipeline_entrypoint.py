@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -12,6 +13,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pipeline
+from stages import encoder as encoder_stage
+from stages import verifier as verifier_stage
 from utils.common.artifact_io import DataContractError, sha256_file
 from utils.common.paths import RunLayout, discover_source_root
 
@@ -56,14 +59,14 @@ class PipelineEntrypointTests(unittest.TestCase):
         end = PIPELINE_SOURCE.index("\ndef _parser(", start)
         body = PIPELINE_SOURCE[start:end]
         ordered = (
-            "preparation_stage.run",
-            "encoder_stage.train_and_generate_development",
-            "verifier_stage.prepare_development_gate",
-            "verifier_stage.run_pilot",
-            "encoder_stage.generate_test_candidates",
-            "verifier_stage.run_test",
-            "evaluation_stage.run",
-            "rag_stage.run",
+            "run_preparation(",
+            "train_and_generate_development(",
+            "prepare_development_gate(",
+            "run_verifier_pilot(",
+            "generate_test_candidates(",
+            "run_verifier_test(",
+            "run_evaluation(",
+            "run_rag(",
         )
         positions = [body.index(token) for token in ordered]
         self.assertEqual(positions, sorted(positions))
@@ -84,6 +87,18 @@ class PipelineEntrypointTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertNotIn('if __name__ == "__main__"', source)
+
+    def test_root_entrypoint_contains_only_cli_and_stage_dispatch(self):
+        definitions = [
+            node.name
+            for node in ast.parse(PIPELINE_SOURCE).body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        self.assertEqual(
+            definitions,
+            ["_run_full_pipeline", "_parser", "_run_private_trainer", "main"],
+        )
+        self.assertLessEqual(len(PIPELINE_SOURCE.splitlines()), 200)
 
     def test_private_trainer_rejects_user_supplied_artifact_paths(self):
         completed = subprocess.run(
@@ -119,16 +134,16 @@ class PipelineEntrypointTests(unittest.TestCase):
             manifest = {"outputs": {}}
             config = SimpleNamespace(value={})
             with mock.patch.object(
-                pipeline,
+                encoder_stage,
                 "_validate_generation_stage",
                 return_value=manifest,
             ) as validate, mock.patch.object(
-                pipeline, "_write_same_run_seal"
+                encoder_stage, "_write_same_run_seal"
             ) as seal, mock.patch.object(
-                pipeline, "generate_candidates"
+                encoder_stage, "generate_candidates"
             ) as generate:
                 self.assertEqual(
-                    pipeline._resume_generation_stage(
+                    encoder_stage._resume_generation_stage(
                         layout, config, seed=42, split="test"
                     ),
                     manifest,
@@ -162,13 +177,13 @@ class PipelineEntrypointTests(unittest.TestCase):
             manifest = {"outputs": {}}
             config = SimpleNamespace(value={})
             with mock.patch.object(
-                pipeline, "run_verifier", return_value=manifest
+                verifier_stage, "run_verifier", return_value=manifest
             ) as verifier, mock.patch.object(
-                pipeline, "_write_same_run_seal"
+                verifier_stage, "_write_same_run_seal"
             ), mock.patch.object(
-                pipeline, "_validate_verifier_stage", return_value=manifest
+                verifier_stage, "_validate_verifier_stage", return_value=manifest
             ):
-                pipeline._resume_verifier_stage(
+                verifier_stage._resume_verifier_stage(
                     layout,
                     config,
                     mode="simple",
@@ -272,12 +287,12 @@ class PipelineEntrypointTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            pipeline._validate_private_training_inputs(layout, config)
+            encoder_stage._validate_private_training_inputs(layout, config)
             data["train.jsonl"].write_text('{"tampered":true}\n', encoding="utf-8")
             with self.assertRaisesRegex(
                 DataContractError, "differs from preparation"
             ):
-                pipeline._validate_private_training_inputs(layout, config)
+                encoder_stage._validate_private_training_inputs(layout, config)
 
     def test_no_tracked_source_filename_uses_a_phase_name(self):
         ignored_roots = {".git", ".venv", ".uv-cache", "output", "__pycache__"}

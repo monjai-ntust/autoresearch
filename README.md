@@ -12,7 +12,8 @@ artifact-path entry points are excluded.
 
 ## Source layout
 
-- Root `pipeline.py` is the sole public entry point; `stages/` contains its internal preparation, encoder, verifier, evaluation, and RAG controllers.
+- Root `pipeline.py` is the thin sole public entry point; it parses the CLI and calls the internal preparation, encoder, verifier, evaluation, and RAG functions in `stages/`.
+- Each `stages/<stage>.py` owns that stage's validation, resume/recovery, and execution coordination; only genuinely shared artifact primitives remain under `utils/common/`.
 - `utils/` groups implementation by preparation, encoder, verifier, evaluation, and RAG stage; `utils/common/` holds cross-stage contracts.
 - `resources/` contains the tracked configurations, prompts, schemas, contracts, and compatibility data consumed by those stages.
 - `tests/` mirrors the pipeline contracts without exposing additional runtime entry points.
