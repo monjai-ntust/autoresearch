@@ -12,12 +12,6 @@ from utils.common.constants import ENTITY_TYPES, RELATION_TYPES
 
 
 NUM_BIO_TAGS = 1 + 2 * len(ENTITY_TYPES)
-BIO_TAGS = ("O",) + tuple(
-    f"{prefix}-{entity_type}"
-    for entity_type in ENTITY_TYPES
-    for prefix in ("B", "I")
-)
-BIO_TAG2ID = {tag: index for index, tag in enumerate(BIO_TAGS)}
 NO_REL_ID = 0
 REL2ID = {
     "NO_REL": NO_REL_ID,
@@ -26,17 +20,6 @@ REL2ID = {
 ID2REL = {index: relation for relation, index in REL2ID.items()}
 NUM_RELATIONS = len(REL2ID)
 COMPARISON_REL_IDS = [REL2ID[name] for name in ("equal", "greater", "greater-equal", "less", "less-equal")]
-
-
-def _bio_tags_for_sentence(num_words: int, entities: list[tuple[int, int, str]]) -> list[int]:
-    """Build the historical first-subword BIO auxiliary labels."""
-
-    labels = [BIO_TAG2ID["O"]] * num_words
-    for start, end, entity_type in entities:
-        labels[start] = BIO_TAG2ID[f"B-{entity_type}"]
-        for index in range(start + 1, end + 1):
-            labels[index] = BIO_TAG2ID[f"I-{entity_type}"]
-    return labels
 
 
 class ResumableRandomSampler(Sampler):
@@ -181,26 +164,13 @@ class CodeAccordDataset(Dataset):
             max_length=self.max_length,
             return_tensors=None,
         )
-        word_ids = encoding.word_ids()
-        word_bio = _bio_tags_for_sentence(len(example["words"]), example["ner"])
-        token_labels = []
-        previous_word_id = None
-        for word_id in word_ids:
-            if word_id is None or word_id == previous_word_id:
-                token_labels.append(-100)
-            else:
-                token_labels.append(word_bio[word_id])
-            previous_word_id = word_id
         return {
             "input_ids": encoding["input_ids"],
             "attention_mask": encoding["attention_mask"],
-            "word_ids": word_ids,
-            "ner_labels": token_labels,
+            "word_ids": encoding.word_ids(),
             "gold_entities": example["ner"],
             "gold_relations": example["relations"],
             "num_words": len(example["words"]),
-            "words": example["words"],
-            "example_id": example["example_id"],
         }
 
 
@@ -208,26 +178,19 @@ def collate_fn(batch, pad_token_id: int = 0):
     max_length = max(len(item["input_ids"]) for item in batch)
     input_ids = torch.full((len(batch), max_length), pad_token_id, dtype=torch.long)
     attention_mask = torch.zeros((len(batch), max_length), dtype=torch.long)
-    ner_labels = torch.full((len(batch), max_length), -100, dtype=torch.long)
     for index, item in enumerate(batch):
         length = len(item["input_ids"])
         input_ids[index, :length] = torch.tensor(item["input_ids"], dtype=torch.long)
         attention_mask[index, :length] = torch.tensor(
             item["attention_mask"], dtype=torch.long
         )
-        ner_labels[index, :length] = torch.tensor(
-            item["ner_labels"], dtype=torch.long
-        )
     return {
         "input_ids": input_ids,
         "attention_mask": attention_mask,
-        "ner_labels": ner_labels,
         "word_ids": [item["word_ids"] for item in batch],
         "gold_entities": [item["gold_entities"] for item in batch],
         "gold_relations": [item["gold_relations"] for item in batch],
         "num_words": [item["num_words"] for item in batch],
-        "words": [item["words"] for item in batch],
-        "example_ids": [item["example_id"] for item in batch],
     }
 
 

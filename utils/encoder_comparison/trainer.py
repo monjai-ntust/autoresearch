@@ -26,7 +26,7 @@ from torch.optim import AdamW
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from utils.common.constants import PROTOCOL_ID
-from utils.encoder import data as code_accord
+from utils.encoder_comparison import data as code_accord
 from utils.encoder_comparison.network import HistoricalKGExtractor
 
 
@@ -59,6 +59,10 @@ def parse_args(argv: list[str] | None = None):
     parser.add_argument("--bio-loss-weight", type=float)
     parser.add_argument("--label-smoothing", type=float)
     parser.add_argument("--eval-every", type=int)
+    parser.add_argument(
+        "--comparison-boost-schedule",
+        choices=("disabled", "pipeline-a20"),
+    )
     parser.add_argument("--re-comparison-boost", type=float)
     parser.add_argument("--re-boost-adaptive-steps", type=int)
     parser.add_argument("--re-boost-adaptive-threshold", type=float)
@@ -86,6 +90,7 @@ def parse_args(argv: list[str] | None = None):
             "bio_loss_weight",
             "label_smoothing",
             "eval_every",
+            "comparison_boost_schedule",
             "re_comparison_boost",
             "re_boost_adaptive_steps",
             "re_boost_adaptive_threshold",
@@ -524,7 +529,7 @@ def _model(args, device):
     ).to(device)
 
 
-def historical_comparison_boost(
+def pipeline_comparison_boost(
     *,
     step: int,
     max_steps: int,
@@ -538,13 +543,14 @@ def historical_comparison_boost(
     adaptive_switched: bool,
     adaptive_triple_f1: float | None = None,
 ) -> tuple[float, bool, bool]:
-    """Return the effective historical A20 boost and its persisted gate state.
+    """Mirror the effective A20 behavior in the current canonical pipeline.
 
     The historical implementation first computes linear ``initial -> end``
     decay. At the adaptive step, a middle-threshold result sets ``middle`` for
     that batch and also marks the gate switched. Consequently the next batch
     uses ``end``. This one-batch middle value is intentional provenance, not a
-    repaired staircase.
+    repaired staircase. The comparison path keeps this pure mirror so the
+    original pipeline flow remains byte-for-byte outside Phase G additions.
     """
 
     progress = step / max(max_steps - 1, 1)
@@ -614,7 +620,11 @@ def train(args):
         optimizer.zero_grad()
         batch = next(iterator)
         adaptive_triple_f1 = None
-        if not adaptive_triggered and step == args.re_boost_adaptive_steps:
+        if (
+            args.comparison_boost_schedule == "pipeline-a20"
+            and not adaptive_triggered
+            and step == args.re_boost_adaptive_steps
+        ):
             metrics = evaluate_span(
                 model,
                 development_loader,
@@ -624,19 +634,22 @@ def train(args):
             )
             model.train()
             adaptive_triple_f1 = metrics["triple_f1"]
-        boost, adaptive_triggered, adaptive_switched = historical_comparison_boost(
-            step=step,
-            max_steps=args.max_steps,
-            initial=args.re_comparison_boost,
-            end=args.re_boost_end,
-            adaptive_step=args.re_boost_adaptive_steps,
-            threshold_low=args.re_boost_adaptive_threshold,
-            threshold_high=args.re_boost_adaptive_threshold2,
-            middle=args.re_boost_mid,
-            adaptive_triggered=adaptive_triggered,
-            adaptive_switched=adaptive_switched,
-            adaptive_triple_f1=adaptive_triple_f1,
-        )
+        if args.comparison_boost_schedule == "pipeline-a20":
+            boost, adaptive_triggered, adaptive_switched = pipeline_comparison_boost(
+                step=step,
+                max_steps=args.max_steps,
+                initial=args.re_comparison_boost,
+                end=args.re_boost_end,
+                adaptive_step=args.re_boost_adaptive_steps,
+                threshold_low=args.re_boost_adaptive_threshold,
+                threshold_high=args.re_boost_adaptive_threshold2,
+                middle=args.re_boost_mid,
+                adaptive_triggered=adaptive_triggered,
+                adaptive_switched=adaptive_switched,
+                adaptive_triple_f1=adaptive_triple_f1,
+            )
+        else:
+            boost = args.re_comparison_boost
 
         loss, ner_loss, relation_loss, bio_loss = compute_span_loss(
             model,

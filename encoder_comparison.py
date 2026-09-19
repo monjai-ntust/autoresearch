@@ -24,9 +24,6 @@ from utils.common.paths import PathContractError, RunLayout, discover_source_roo
 from utils.encoder_comparison.config import DEFAULT_CONFIG, load_comparison_config
 
 
-DEFAULT_RECIPE = "historical-a20-a21-a12"
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python encoder_comparison.py",
@@ -36,13 +33,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     subparsers = parser.add_subparsers(dest="action", required=True)
     validate = subparsers.add_parser("validate-profile")
+    validate_arm = subparsers.add_parser("validate-arm")
     prepare_parser = subparsers.add_parser("prepare")
     plan = subparsers.add_parser("plan-training")
     train = subparsers.add_parser("train")
     predict = subparsers.add_parser("generate")
-    for command in (validate, prepare_parser, plan, train, predict):
-        command.add_argument("--profile", required=True)
-        command.add_argument("--recipe", default=DEFAULT_RECIPE)
+    validate.add_argument("--profile", required=True)
+    for command in (validate_arm, prepare_parser, plan, train, predict):
+        command.add_argument("--arm", required=True)
     for command in (prepare_parser, plan, train, predict):
         command.add_argument("--run-id", required=True)
     for command in (plan, train, predict):
@@ -68,8 +66,17 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.source_root) if args.source_root else None
         )
         config = load_comparison_config(source_root, args.config)
-        selection = config.select(args.profile, args.recipe)
         if args.action == "validate-profile":
+            try:
+                profile = config.profiles[args.profile]
+            except KeyError as exc:
+                raise DataContractError(
+                    f"unknown encoder comparison profile: {args.profile!r}"
+                ) from exc
+            print(json.dumps(profile.manifest(), indent=2))
+            return 0
+        selection = config.select_arm(args.arm)
+        if args.action == "validate-arm":
             print(json.dumps(describe(selection), indent=2))
             return 0
         layout = RunLayout(source_root=source_root, run_id=args.run_id)

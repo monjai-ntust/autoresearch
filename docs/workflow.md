@@ -109,8 +109,10 @@ Phase G comparison training is separately hosted by
 `stages/encoder_comparison.py`, with historical-derived lower-level behavior in
 `utils/encoder_comparison/`. It reuses this workflow's preparation and
 run/artifact utilities but does not modify or dispatch the canonical encoder.
-Its experiment matrix remains subject to the Phase G pre-execution approval
-gate documented in `docs/encoder-comparison.md`.
+Its approved four-arm Table 1 matrix and statistical protocol are frozen in
+`resources/configs/encoder-comparison.json`. Live execution remains subject to
+the model-cache, storage, accelerator, and G-05 smoke gates documented in
+`docs/encoder-comparison.md`.
 
 ## Table-2-only route
 

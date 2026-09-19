@@ -1,5 +1,5 @@
 {
-  "schema_version": "phase-g-encoder-comparison-1.0",
+  "schema_version": "phase-g-encoder-comparison-1.2",
   "protocol_id": "B04-PATH-A-1.3",
   "matcher_id": "CODE-STRICT-1",
   "dataset_id": "CODE-ACCORD-v1.0.0",
@@ -35,6 +35,7 @@
         "bytes": 440473133,
         "sha256": "097417381d6c7230bd9e3557456d726de6e83245ec8b24f529f60198a67b203a"
       },
+      "base_parameter_count_source": "sum_numel_from_pinned_pytorch_model_bin_state_dict_after_digest_verification",
       "license": "Apache-2.0",
       "source": "https://huggingface.co/google-bert/bert-base-uncased"
     },
@@ -49,6 +50,7 @@
         "bytes": 558614189,
         "sha256": "81ab61c5dc9111f81e528b7b3ae93997f4ae72ba531e60587835be894ab0ffe5"
       },
+      "base_parameter_count_source": "sum_numel_from_pinned_pytorch_model_bin_state_dict_after_digest_verification",
       "license": "MIT",
       "source": "https://huggingface.co/microsoft/deberta-base"
     },
@@ -63,11 +65,39 @@
         "bytes": 1627222675,
         "sha256": "79da1770e499ab894937c426e1e43194e2ede6b492945efe0ee777b19722f334"
       },
+      "base_parameter_count_source": "sum_numel_from_pinned_pytorch_model_bin_state_dict_after_digest_verification",
       "license": "MIT",
       "source": "https://huggingface.co/microsoft/deberta-large"
     }
   ],
   "recipes": [
+    {
+      "recipe_id": "historical-common-base",
+      "source_classification": "historical_result_producing",
+      "max_steps": 3500,
+      "evaluation_every_steps": 100,
+      "batch_size": 16,
+      "max_length": 128,
+      "max_span_width": 8,
+      "learning_rate": 0.00003,
+      "warmup_steps": 250,
+      "ner_negative_ratio": 3.0,
+      "ner_focal_gamma": 2.0,
+      "bio_loss_weight": 0.1,
+      "label_smoothing": 0.0,
+      "re_loss_weight": 1.0,
+      "re_no_rel_weight": 1.0,
+      "context_between_spans": false,
+      "comparison_boost": {
+        "schedule": "disabled",
+        "initial": 1.0,
+        "end": 1.0,
+        "adaptive_step": 1000,
+        "threshold_low": 0.35,
+        "threshold_high": 0.4,
+        "middle": 1.0
+      }
+    },
     {
       "recipe_id": "historical-a20-a21-a12",
       "source_classification": "historical_result_producing",
@@ -86,6 +116,7 @@
       "re_no_rel_weight": 1.0,
       "context_between_spans": true,
       "comparison_boost": {
+        "schedule": "pipeline-a20",
         "initial": 5.0,
         "end": 2.0,
         "adaptive_step": 1000,
@@ -95,5 +126,93 @@
       }
     }
   ],
+  "table1_arms": [
+    {
+      "arm_id": "bert-base-common",
+      "row_label": "BERT-base",
+      "claim_role": "backbone_capacity",
+      "profile_id": "bert-base-uncased",
+      "recipe_id": "historical-common-base",
+      "historical_reported_development": {
+        "mean_f1": 0.3294,
+        "sample_sd": 0.0276,
+        "best_f1": null
+      }
+    },
+    {
+      "arm_id": "deberta-base-common",
+      "row_label": "DeBERTa-base",
+      "claim_role": "backbone_capacity",
+      "profile_id": "deberta-base-v1",
+      "recipe_id": "historical-common-base",
+      "historical_reported_development": {
+        "mean_f1": 0.3639,
+        "sample_sd": 0.0245,
+        "best_f1": null
+      }
+    },
+    {
+      "arm_id": "deberta-large-common",
+      "row_label": "DeBERTa-large",
+      "claim_role": "backbone_capacity_and_recipe_reference",
+      "profile_id": "deberta-large-v1",
+      "recipe_id": "historical-common-base",
+      "historical_reported_development": {
+        "mean_f1": 0.3797,
+        "sample_sd": 0.0346,
+        "best_f1": 0.4288
+      }
+    },
+    {
+      "arm_id": "deberta-large-a20-a21-a12",
+      "row_label": "DeBERTa-large + comparison-weight schedule + span-NER label smoothing + inter-span context",
+      "claim_role": "recipe_method",
+      "profile_id": "deberta-large-v1",
+      "recipe_id": "historical-a20-a21-a12",
+      "historical_reported_development": {
+        "mean_f1": 0.4097,
+        "sample_sd": 0.0356,
+        "best_f1": 0.4746
+      }
+    }
+  ],
+  "statistical_protocol": {
+    "primary_endpoint": "per_seed_CODE_STRICT_1_test_f1",
+    "primary_effect": "mean_of_eight_paired_seed_f1_differences",
+    "paired_test": "two_sided_exact_wilcoxon_signed_rank",
+    "multiplicity": "holm",
+    "alpha": 0.05,
+    "paired_seed_bootstrap_replicates": 10000,
+    "hierarchical_seed_document_bootstrap_replicates": 10000,
+    "bootstrap_seed": 20260919,
+    "confidence_level": 0.95,
+    "minimum_meaningful_absolute_f1": 0.01,
+    "reported_per_arm": [
+      "per_seed_f1",
+      "mean_f1",
+      "sample_sd_f1",
+      "best_seed_f1",
+      "pooled_tp",
+      "pooled_fp",
+      "pooled_fn",
+      "pooled_precision",
+      "pooled_recall",
+      "pooled_f1"
+    ],
+    "paired_contrasts": [
+      ["deberta-base-common", "bert-base-common"],
+      ["deberta-large-common", "bert-base-common"],
+      ["deberta-large-common", "deberta-base-common"],
+      ["deberta-large-a20-a21-a12", "deberta-large-common"]
+    ],
+    "missing_run_policy": "retain every outcome; do not replace a failed seed; an arm missing any seed is incomplete and excluded from confirmatory contrasts",
+    "historical_statistics_role": "provenance_only"
+  },
+  "execution_limits": {
+    "maximum_total_gpu_hours": 48,
+    "minimum_free_storage_bytes_before_full_run": 200000000000,
+    "stop_on_first_nonrecoverable_arm_failure": true,
+    "final_test_access": "only after all four arms pass smoke validation and all development runs are complete or dispositioned"
+  },
   "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49]
 }

@@ -114,12 +114,18 @@ Offline profile validation is available without acquiring a model:
 ```bash
 uv run --frozen --no-sync python -I -B encoder_comparison.py \
   validate-profile --profile deberta-large-v1
+
+uv run --frozen --no-sync python -I -B encoder_comparison.py \
+  validate-arm --arm deberta-large-a20-a21-a12
 ```
 
-No comparison training is predeclared merely by the presence of this entry
-point. The Phase G experiment matrix and statistical protocol must be approved
-before preparation, model acquisition, smoke execution, or full training. See
-`docs/encoder-comparison.md` for the source/reuse boundary and command contract.
+The approved matrix contains only the four populated historical Table 1 rows:
+BERT-base, DeBERTa-base, and DeBERTa-large under the common base recipe, plus
+DeBERTa-large under A20+A21+A12. Historical values are provenance only; eligible
+new results use the matched canonical protocol. Live use remains gated on
+run-local model acquisition, storage and accelerator checks, and G-05 smoke
+admission. See `docs/encoder-comparison.md` for the source/reuse boundary,
+statistics contract, and command contract.
 
 ## Run only downstream Table 2
 

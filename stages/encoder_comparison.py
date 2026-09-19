@@ -172,6 +172,8 @@ def trainer_arguments(
                 str(recipe["label_smoothing"]),
                 "--eval-every",
                 str(recipe["evaluation_every_steps"]),
+                "--comparison-boost-schedule",
+                str(boost["schedule"]),
                 "--re-comparison-boost",
                 str(boost["initial"]),
                 "--re-boost-adaptive-steps",
@@ -236,10 +238,8 @@ def _private_command(
         f"_{action}-encoder",
         "--run-id",
         layout.run_id,
-        "--profile",
-        selection.profile.profile_id,
-        "--recipe",
-        selection.recipe.recipe_id,
+        "--arm",
+        selection.arm.arm_id,
         "--training-seed",
         str(seed),
         "--config",
@@ -267,6 +267,7 @@ def plan_training(
         "stage": "encoder-comparison-train",
         "status": "planned",
         "training_seed": seed,
+        "table1_arm": selection.arm.manifest(),
         "selection_manifest_sha256": sha256_file(
             layout.resolve("manifests/encoder-comparison-selection.json", must_exist=True)
         ),
@@ -365,7 +366,7 @@ def _checkpoint_manifest(
             layout.source_root / "utils/encoder_comparison/trainer.py"
         ),
         "data_adapter_sha256": sha256_file(
-            layout.source_root / "utils/encoder/data.py"
+            layout.source_root / "utils/encoder_comparison/data.py"
         ),
         "model_helper_sha256": sha256_file(
             layout.source_root / "utils/encoder_comparison/network.py"
@@ -488,8 +489,7 @@ def generate(
 def run_private(arguments: list[str], *, action: str, default_config: str) -> int:
     parser = argparse.ArgumentParser(prog=f"encoder_comparison.py _{action}-encoder")
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--profile", required=True)
-    parser.add_argument("--recipe", required=True)
+    parser.add_argument("--arm", required=True)
     parser.add_argument("--training-seed", required=True, type=int)
     parser.add_argument("--config", default=default_config)
     if action == "predict":
@@ -497,7 +497,7 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
     args = parser.parse_args(arguments)
     source_root = discover_source_root()
     config = load_comparison_config(source_root, args.config)
-    selection = config.select(args.profile, args.recipe)
+    selection = config.select_arm(args.arm)
     layout = RunLayout(source_root=source_root, run_id=args.run_id)
     _validate_prepared_inputs(layout, selection)
     if action == "train":
