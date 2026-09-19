@@ -7,13 +7,18 @@ import unittest
 import uuid
 from pathlib import Path
 
-from config import load_pipeline_config
-from constants import PROTOCOL_ID, TRAINING_SEEDS
-from artifact_io import DataContractError, atomic_write_json, atomic_write_jsonl, sha256_file
-from paths import RunLayout, discover_source_root
-from records import EntitySpan, StrictTriple, candidate_id_for
-from scoring import _load_threshold
-from threshold import select_threshold
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.constants import PROTOCOL_ID, TRAINING_SEEDS
+from utils.pipeline.common.artifact_io import (
+    DataContractError,
+    atomic_write_json,
+    atomic_write_jsonl,
+    sha256_file,
+)
+from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.pipeline.common.records import EntitySpan, StrictTriple, candidate_id_for
+from utils.pipeline.evaluation.scoring import _load_threshold
+from utils.pipeline.verifier.threshold import select_threshold
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -91,7 +96,7 @@ def _write_inputs(layout: RunLayout, candidate_rows: list[dict]):
 class ThresholdSelectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
     def test_selects_highest_threshold_at_max_mean_f1(self):
         # Every seed emits exactly the gold triple at confidence 0.8: F1 is 1.0

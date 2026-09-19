@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 
 import torch
 
-from data.code_accord import ResumableRandomSampler, _load_prepared_examples
-from models.bert_kg_encoder import BertBackbone, BertKGExtractor
-from train_span import _load_restart, parse_args
+from utils.pipeline.encoder.data import ResumableRandomSampler, _load_prepared_examples
+from utils.pipeline.encoder.network import BertBackbone, BertKGExtractor
+from stages.encoder import _load_restart, parse_args
 
 
 def _prepared_record(example_id: str, split: str) -> dict:
@@ -128,7 +128,7 @@ class PreparedAdapterTests(unittest.TestCase):
             model_revision="revision-a",
             max_steps=3500,
         )
-        with patch("train_span.torch.load", return_value=state) as loader_mock:
+        with patch("stages.encoder.torch.load", return_value=state) as loader_mock:
             _load_restart(args, Mock(), Mock(), Mock(), loader, torch.device("cuda"))
         loader_mock.assert_called_once_with(
             "restart-state.pt", map_location="cpu", weights_only=False
@@ -181,19 +181,19 @@ class TrainerSurfaceTests(unittest.TestCase):
         fake_model = Mock()
         fake_model.config.hidden_size = 16
         with patch(
-            "models.bert_kg_encoder.AutoModel.from_pretrained",
+            "utils.pipeline.encoder.network.AutoModel.from_pretrained",
             return_value=fake_model,
         ) as loader:
             BertBackbone("model-a")
             loader.assert_called_once_with("model-a")
         with patch(
-            "models.bert_kg_encoder.AutoModel.from_pretrained",
+            "utils.pipeline.encoder.network.AutoModel.from_pretrained",
             return_value=fake_model,
         ) as loader:
             BertBackbone("model-a", model_revision="revision-a")
             loader.assert_called_once_with("model-a", revision="revision-a")
         with patch(
-            "models.bert_kg_encoder.AutoModel.from_pretrained",
+            "utils.pipeline.encoder.network.AutoModel.from_pretrained",
             return_value=fake_model,
         ) as loader:
             BertBackbone(
@@ -224,7 +224,7 @@ class TrainerSurfaceTests(unittest.TestCase):
                 return SimpleNamespace(last_hidden_state=inputs_embeds)
 
         with patch(
-            "models.bert_kg_encoder.AutoModel.from_pretrained",
+            "utils.pipeline.encoder.network.AutoModel.from_pretrained",
             return_value=FakeEncoder(),
         ):
             model = BertKGExtractor(

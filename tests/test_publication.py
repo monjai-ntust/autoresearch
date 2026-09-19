@@ -7,14 +7,23 @@ import unittest
 import uuid
 from pathlib import Path
 
-import pipeline
-from config import load_pipeline_config
-from constants import PROTOCOL_ID, TRAINING_SEEDS
-from paths import RunLayout, discover_source_root
-from artifact_io import DataContractError, atomic_write_json, atomic_write_jsonl, load_json, sha256_file
-from publication import assemble_seed_candidates, prepare_verifier_pilot
-from records import EntitySpan, StrictTriple, candidate_id_for
-from threshold import select_threshold
+from stages import pipeline
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.constants import PROTOCOL_ID, TRAINING_SEEDS
+from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.pipeline.common.artifact_io import (
+    DataContractError,
+    atomic_write_json,
+    atomic_write_jsonl,
+    load_json,
+    sha256_file,
+)
+from utils.pipeline.evaluation.publication import (
+    assemble_seed_candidates,
+    prepare_verifier_pilot,
+)
+from utils.pipeline.common.records import EntitySpan, StrictTriple, candidate_id_for
+from utils.pipeline.verifier.threshold import select_threshold
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -84,7 +93,7 @@ def _write_development_inputs(layout: RunLayout) -> None:
 class PublicationAssemblyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
     def test_assembly_threshold_and_pilot_bind_one_index(self):
         with _temporary_output_directory() as temporary:

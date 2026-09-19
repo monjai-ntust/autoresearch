@@ -13,11 +13,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import table_evaluator as evaluator
+from utils.pipeline.rag import evaluator
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACT = json.loads((ROOT / "table2_contract.json").read_text(encoding="utf-8"))
+CONTRACT = json.loads(
+    (ROOT / "resources/contracts/table2.json").read_text(encoding="utf-8")
+)
 TABLE_ERA_EVALUATOR_BLOB = "964893546b28f04e34e8c546bcbbfd4cfbc27354"
 
 
@@ -246,7 +248,10 @@ class Table2EvaluatorContractTests(unittest.TestCase):
         call.assert_not_called()
 
     def test_internal_modules_expose_no_file_selector_or_entrypoint(self):
-        for relative in ("table_evaluator.py", "graph_construction.py"):
+        for relative in (
+            "utils/pipeline/rag/evaluator.py",
+            "utils/pipeline/rag/graph.py",
+        ):
             source = (ROOT / relative).read_text(encoding="utf-8")
             self.assertNotIn("ArgumentParser", source)
             self.assertNotIn("__main__", source)

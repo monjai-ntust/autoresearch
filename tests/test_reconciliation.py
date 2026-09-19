@@ -8,10 +8,10 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from config import load_pipeline_config
-from artifact_io import DataContractError, atomic_write_json, load_json
-from paths import RunLayout, discover_source_root
-from reconciliation import reconcile_section5_evidence
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.artifact_io import DataContractError, atomic_write_json, load_json
+from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.pipeline.evaluation.reconciliation import reconcile_section5_evidence
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -34,7 +34,7 @@ def _temporary_run():
 
 class Section5ReconciliationTests(unittest.TestCase):
     def test_archived_ledgers_reconcile_without_runtime_or_canonical_promotion(self):
-        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         with _temporary_run() as layout:
             audit = reconcile_section5_evidence(layout, config)
             self.assertEqual(audit["status"], "reconciled_secondary_evidence")
@@ -79,7 +79,7 @@ class Section5ReconciliationTests(unittest.TestCase):
                 reconcile_section5_evidence(layout, config)
 
     def test_archived_register_digest_drift_fails_closed(self):
-        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         config.section5_evidence["ledgers"][0]["source_checkout_sha256"] = "not-a-digest"
         with _temporary_run() as layout:
             with self.assertRaisesRegex(DataContractError, "source SHA-256"):

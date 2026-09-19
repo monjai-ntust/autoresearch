@@ -52,11 +52,11 @@ comparison is interpreted that way.
 
 | Invariant | Compatibility host |
 | --- | --- |
-| Encoder/backbone, text adapter, parameter names and shapes | `models/bert_kg_encoder.BertKGExtractor`; inactive experimental branches were removed without changing the canonical state-dict keyspace. |
-| Span-NER and relation heads | Existing `train_span.py` construction, including the 3H context-between-spans relation head. |
-| Entity/relation label order | Existing `data.code_accord` four entity types and `NO_REL` plus nine relation types. |
+| Encoder/backbone, text adapter, parameter names and shapes | `utils.pipeline.encoder.network.BertKGExtractor`; inactive experimental branches were removed without changing the canonical state-dict keyspace. |
+| Span-NER and relation heads | Existing `stages/encoder.py` construction, including the 3H context-between-spans relation head. |
+| Entity/relation label order | Existing `utils.pipeline.encoder.data` four entity types and `NO_REL` plus nine relation types. |
 | Span enumeration and pair construction | Existing `forward_span_ner`, loss, and evaluation functions. |
-| Losses and weights | Existing focal/label-smoothing/RE loss code with A20+A21+A12 values supplied from `configs/pipeline.json`. |
+| Losses and weights | Existing focal/label-smoothing/RE loss code with A20+A21+A12 values supplied from `resources/configs/pipeline.json`. |
 | Optimizer and schedule | Existing AdamW, weight decay `0.01`, linear warm-up/decay, 3,500 steps, 250 warm-up steps. |
 | Batch size and negative sampling | Existing batch size 16 and NER/RE sampling logic; canonical input uses the same dataset/collate classes. |
 | Seed initialization | Existing Python and Torch seed path, plus CUDA `manual_seed_all`; actual runtime settings are recorded. |

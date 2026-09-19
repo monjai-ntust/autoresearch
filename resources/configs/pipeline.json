@@ -1,0 +1,181 @@
+{
+  "protocol_id": "B04-PATH-A-1.3",
+  "workflow_id": "PATH-A-WORKFLOW-1.3",
+  "matcher_id": "CODE-STRICT-1",
+  "experiment_matrix": "resources/configs/experiment_matrix.json",
+  "section5_evidence_register": "resources/configs/section5_evidence.json",
+  "dataset": {
+    "dataset_id": "CODE-ACCORD-v1.0.0",
+    "zenodo_record": "10210022",
+    "archive_name": "CODE-ACCORD-v1.0.0.zip",
+    "archive_url": "https://zenodo.org/api/records/10210022/files/Accord-Project/CODE-ACCORD-v1.0.0.zip/content",
+    "archive_bytes": 101265616,
+    "archive_md5": "57e2efa465f41e2f582db62810fb50f5",
+    "license": "CC-BY-4.0",
+    "annotation_files": {
+      "annotated_data/entities/all.csv": {
+        "bytes": 479772,
+        "sha256": "0c041af90ca22b35af46fc22065935ffa94fc6893f7bf31366d12d65c89d796a"
+      },
+      "annotated_data/entities/train.csv": {
+        "bytes": 389041,
+        "sha256": "c13ad02ab72f0f3a3ddca588c02bcd5d7db1622ae81351d967431623963e4fcd"
+      },
+      "annotated_data/entities/test.csv": {
+        "bytes": 90767,
+        "sha256": "e84246648e27fb24fbf3409130d8a9cb79793f0c14ec4390129605436ceeeac3"
+      },
+      "annotated_data/relations/all.csv": {
+        "bytes": 2049753,
+        "sha256": "a321659f3fc8028a48d408f73d885e7a5f4bc765a0e3d42e7878aaf7f8803bef"
+      },
+      "annotated_data/relations/train.csv": {
+        "bytes": 1651655,
+        "sha256": "31621624b129a412f2cf7bb0dff72938a8c97ace043629aaafd42864a5d1ee1c"
+      },
+      "annotated_data/relations/test.csv": {
+        "bytes": 398156,
+        "sha256": "13cee7f40202ac08b0d5a8720a87d6d80108992d887050f99569c493563b29fa"
+      }
+    },
+    "expected_counts": {
+      "sentences": 862,
+      "entity_train_sentences": 689,
+      "entity_test_sentences": 173,
+      "entity_spans": 4297,
+      "relation_rows": 4329,
+      "positive_relation_rows": 3329,
+      "none_relation_rows": 1000,
+      "relation_covered_sentences": 857,
+      "entity_only_sentences": 5
+    },
+    "relation_split_audit": {
+      "train_rows": 3463,
+      "test_rows": 866,
+      "train_unique_sentence_ids": 824,
+      "test_unique_sentence_ids": 507,
+      "train_test_sentence_id_overlap": 473,
+      "entity_test_ids_in_relation_train": 162,
+      "entity_test_ids_in_relation_test": 96,
+      "entity_train_ids_in_relation_test": 411
+    },
+    "repaired_uuid": "8feaf7f2-dfd8-43ae-ab8d-791ee1ffd86c"
+  },
+  "split": {
+    "split_id": "CODE-SPLIT-1",
+    "seed": 42,
+    "train_sentences": 586,
+    "development_sentences": 103,
+    "test_sentences": 173
+  },
+  "evaluation_split_id": "CODE-SPLIT-1:test",
+  "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49],
+  "training": {
+    "base_model": "microsoft/deberta-large",
+    "base_model_revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
+    "max_steps": 3500,
+    "evaluation_every_steps": 100,
+    "batch_size": 16,
+    "max_length": 128,
+    "max_span_width": 8,
+    "learning_rate": 3e-5,
+    "warmup_steps": 250,
+    "ner_negative_ratio": 3.0,
+    "ner_focal_gamma": 2.0,
+    "label_smoothing": 0.1,
+    "re_loss_weight": 1.0,
+    "re_no_rel_weight": 1.0,
+    "context_between_spans": true,
+    "comparison_boost": {
+      "initial": 5.0,
+      "adaptive_step": 1000,
+      "threshold_low": 0.35,
+      "threshold_high": 0.4,
+      "middle": 3.5,
+      "low": 2.0
+    }
+  },
+  "threshold_selection": {
+    "selection_split": "development",
+    "grid": [
+      0.0,
+      0.05,
+      0.1,
+      0.15,
+      0.2,
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6,
+      0.65,
+      0.7,
+      0.75,
+      0.8,
+      0.85,
+      0.9,
+      0.95
+    ],
+    "objective": "mean_per_seed_development_strict_triple_f1",
+    "tie_rule": "higher_threshold"
+  },
+  "statistics": {
+    "bootstrap_replicates": 10000,
+    "bootstrap_seed": 20260717,
+    "undefined_replicate_limit": 0.05
+  },
+  "verifier": {
+    "model": "qwen3:32b",
+    "reference_registry_manifest_sha256": "030ee887880fc378860c2dd35101da424377520441ae4bfe7be6deff8ade7840",
+    "reference_model_blob_sha256": "3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
+    "prompt_status": "materialized_b06",
+    "prompt_revision": "CODE-VERIFIER-1",
+    "system_prompt": "resources/prompts/verifier/code-verifier-1-system.txt",
+    "system_prompt_sha256": "d5be0378a4f0c68bb7e8038ca4008490fafb27934c0996b8d022200567126a04",
+    "simple_prompt": "resources/prompts/verifier/code-verifier-1-simple.txt",
+    "simple_prompt_sha256": "6f53d575c990571a882e6e6b0fabf4a8c2ca7049b8af2fb0cc15abd1f54aa537",
+    "corrective_prompt": "resources/prompts/verifier/code-verifier-1-corrective.txt",
+    "corrective_prompt_sha256": "180e39c5a6cebd51620ee378a45c4da1cc2a5727d06de24a6717445f58fd36a3",
+    "simple_response_schema": "resources/schemas/pipeline/verifier-simple-response.schema.json",
+    "simple_response_schema_sha256": "86a93ff4227d65800e76704454f0e1b1a8c7729df506c18cc66a1018cbc253d9",
+    "corrective_response_schema": "resources/schemas/pipeline/verifier-corrective-response.schema.json",
+    "corrective_response_schema_sha256": "ff2a0e41359c230c98b8f754e57c28a4518d8bfbdd17114d8b743ab932065236",
+    "simple_bundle_sha256": "1f663794ac3c2b43398da9afc24db0d1e8ac19d6648f110f540d5b9726bcc6c5",
+    "corrective_bundle_sha256": "369cd3681d3339879872ff2a91d7b1ac89ce4ffbf184473c59b7799f57d36203",
+    "stream": false,
+    "think": false,
+    "temperature": 0,
+    "seed": 42,
+    "top_k": 1,
+    "top_p": 1,
+    "min_p": 0,
+    "repeat_penalty": 1,
+    "num_ctx": 8192,
+    "num_predict": 256,
+    "timeout_seconds": 300,
+    "attempts": 3,
+    "backoff_seconds": [2, 4]
+  },
+  "environment": {
+    "python": "3.10.20",
+    "uv": "0.11.26"
+  },
+  "runtime_paths": {
+    "sentences": "data-prepared/test.jsonl",
+    "warmup_sentences": "data-prepared/development.jsonl",
+    "warmup_candidates": "predictions/dev/verifier-warmup-candidate.jsonl",
+    "split_manifest": "data-prepared/split-manifest.json",
+    "development_gold": "data-prepared/development-gold.jsonl",
+    "development_candidate_index": "predictions/dev/candidate-index.json",
+    "development_pilot_candidates": "predictions/dev/pilot-candidates.jsonl",
+    "verifier_pilot_selection": "predictions/dev/pilot-selection.json",
+    "gold": "data-prepared/test-gold.jsonl",
+    "candidates": "predictions/test/candidates.jsonl",
+    "simple_verdicts": "verifier/simple/verdicts.jsonl",
+    "corrective_verdicts": "verifier/corrective/verdicts.jsonl",
+    "threshold_selection": "predictions/dev/threshold-selection.json"
+  }
+}

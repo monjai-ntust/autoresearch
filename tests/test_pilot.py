@@ -8,19 +8,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from config import load_pipeline_config
-from constants import PROTOCOL_ID
-from artifact_io import (
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.constants import PROTOCOL_ID
+from utils.pipeline.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
     atomic_write_text,
     sha256_file,
 )
-from paths import RunLayout, discover_source_root
-from pilot import PilotInputs, _load_capture_index, run_verifier_pilot
-from records import StrictTriple, candidate_id_for
-from verifier import (
+from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.pipeline.verifier.pilot import PilotInputs, _load_capture_index, run_verifier_pilot
+from utils.pipeline.common.records import StrictTriple, candidate_id_for
+from utils.pipeline.verifier.verifier import (
     _load_candidates,
     _load_sentences,
     _verdict_from_response,
@@ -103,7 +103,7 @@ def _response(request: dict, content: str, *, repeat: int) -> dict:
 class VerifierPilotTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
     def _fixture(self, root: str, *, mismatch: bool = False) -> tuple[RunLayout, PilotInputs]:
         layout = RunLayout(Path(root), "pilot")

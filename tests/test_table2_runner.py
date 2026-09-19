@@ -11,12 +11,14 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import pipeline
-import table2_runner as runner
+from stages import pipeline
+from utils.pipeline.rag import runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONTRACT = json.loads((ROOT / "table2_contract.json").read_text(encoding="utf-8"))
+CONTRACT = json.loads(
+    (ROOT / "resources/contracts/table2.json").read_text(encoding="utf-8")
+)
 TABLE2_CHILD = CONTRACT["evaluator"]["output_namespace"]
 RUN_ID = "research-run-001"
 
@@ -230,7 +232,7 @@ class Table2RunnerTests(unittest.TestCase):
 
     def test_current_checkout_config_requires_new_run_seals(self):
         commit = runner.run_git("rev-parse", "HEAD").stdout.strip()
-        path = "configs/pipeline.json"
+        path = "resources/configs/pipeline.json"
         digest = runner.sha256_bytes(runner._git_file_bytes(commit, path))
         checkout = {
             "source": {
@@ -426,7 +428,7 @@ class Table2RunnerTests(unittest.TestCase):
             run_dir = Path(temporary).resolve()
             run_id = run_dir.name
             commit = runner.run_git("rev-parse", "HEAD").stdout.strip()
-            config_path = "configs/pipeline.json"
+            config_path = "resources/configs/pipeline.json"
             config_sha = runner.sha256_bytes(
                 runner._git_file_bytes(commit, config_path)
             )
@@ -725,7 +727,7 @@ class Table2RunnerTests(unittest.TestCase):
                 )
 
     def test_runner_has_no_upstream_execution_or_arbitrary_copy_route(self):
-        source = (ROOT / "table2_runner.py").read_text(encoding="utf-8")
+        source = (ROOT / "utils/pipeline/rag/runner.py").read_text(encoding="utf-8")
         self.assertNotIn("build_kg.py", source)
         self.assertNotIn("copy_input", source)
         self.assertNotIn("--inference", source)

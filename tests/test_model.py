@@ -10,26 +10,29 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from config import load_pipeline_config
-from constants import PROTOCOL_ID
-from hf_cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE, write_cache_manifest
-from model import (
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.constants import PROTOCOL_ID
+from utils.pipeline.encoder.cache import (
+    MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE,
+    write_cache_manifest,
+)
+from utils.pipeline.encoder.model import (
     canonical_trainer_arguments,
     generate_candidates,
     plan_training,
     validate_prediction_artifacts,
 )
-from pipeline import _validate_training_stage
-from artifact_io import (
+from stages.pipeline import _validate_training_stage
+from utils.pipeline.common.artifact_io import (
     DataContractError,
     atomic_write_bytes,
     atomic_write_json,
     atomic_write_jsonl,
     sha256_file,
 )
-from paths import RunLayout, discover_source_root
-from records import EntitySpan, StrictTriple, candidate_id_for
-from verifier import _load_candidates, _load_sentences
+from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.pipeline.common.records import EntitySpan, StrictTriple, candidate_id_for
+from utils.pipeline.verifier.verifier import _load_candidates, _load_sentences
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -85,10 +88,12 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
         "train_jsonl_sha256": sha256_file(train),
         "development_jsonl_sha256": sha256_file(development),
         "config_sha256": sha256_file(config.path),
-        "trainer_sha256": sha256_file(layout.source_root / "train_span.py"),
-        "data_adapter_sha256": sha256_file(layout.source_root / "data/code_accord.py"),
+        "trainer_sha256": sha256_file(layout.source_root / "stages/encoder.py"),
+        "data_adapter_sha256": sha256_file(
+            layout.source_root / "utils/pipeline/encoder/data.py"
+        ),
         "model_helper_sha256": sha256_file(
-            layout.source_root / "models/bert_kg_encoder.py"
+            layout.source_root / "utils/pipeline/encoder/network.py"
         ),
         "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
         "model_cache_manifest_sha256": sha256_file(
@@ -116,10 +121,12 @@ def _prepare_run_identities(layout: RunLayout, *, compatibility=True):
         layout.resolve("manifests/00-checkout-manifest.json"),
         {"status": "pass", "source": {"commit": "3" * 40}},
     )
-    atomic_write_bytes(layout.source_root / "train_span.py", b"trainer\n")
-    atomic_write_bytes(layout.source_root / "data/code_accord.py", b"adapter\n")
+    atomic_write_bytes(layout.source_root / "stages/encoder.py", b"trainer\n")
     atomic_write_bytes(
-        layout.source_root / "models/bert_kg_encoder.py", b"model\n"
+        layout.source_root / "utils/pipeline/encoder/data.py", b"adapter\n"
+    )
+    atomic_write_bytes(
+        layout.source_root / "utils/pipeline/encoder/network.py", b"model\n"
     )
     atomic_write_bytes(
         layout.resolve("checkpoints/seed-42/restart-state.pt"), b"restart\n"
@@ -206,7 +213,7 @@ def _expected_candidate_id(head: tuple, relation: str, tail: tuple) -> str:
 class ModelAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
     def _prepare(self, layout: RunLayout, split: str = "test"):
         _prepare_run_identities(layout)
@@ -313,7 +320,9 @@ class ModelAdapterTests(unittest.TestCase):
             atomic_write_json(checkpoint, checkpoint_document)
             cache = layout.resolve("inputs/recovery/prediction-ledger.jsonl")
             atomic_write_jsonl(cache, [_ledger_record()])
-            with mock.patch("model._live_inference_records") as inference:
+            with mock.patch(
+                "utils.pipeline.encoder.model._live_inference_records"
+            ) as inference:
                 manifest = generate_candidates(
                     layout,
                     self.config,
@@ -496,7 +505,7 @@ class ModelAdapterTests(unittest.TestCase):
 class ModelTrainTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
     def test_dry_run_emits_recipe_bound_training_plan(self):
         with _temporary_output_directory() as temporary:
@@ -552,15 +561,19 @@ class ModelTrainTests(unittest.TestCase):
                 "inputs/extracted/CODE-ACCORD-v1.0.0-annotations/"
                 "annotated_data/entities/train.csv"
             )
-            historical = SOURCE_ROOT / "data/code_accord/entities/train.csv"
-            historical_copy = layout.source_root / "data/code_accord/entities/train.csv"
+            historical = SOURCE_ROOT / "resources/data/code_accord/entities/train.csv"
+            historical_copy = (
+                layout.source_root / "resources/data/code_accord/entities/train.csv"
+            )
             atomic_write_bytes(
                 historical_copy, historical.read_bytes().replace(b"\r\n", b"\n")
             )
-            atomic_write_bytes(layout.source_root / "train_span.py", b"trainer\n")
-            atomic_write_bytes(layout.source_root / "data/code_accord.py", b"adapter\n")
+            atomic_write_bytes(layout.source_root / "stages/encoder.py", b"trainer\n")
             atomic_write_bytes(
-                layout.source_root / "models/bert_kg_encoder.py", b"model\n"
+                layout.source_root / "utils/pipeline/encoder/data.py", b"adapter\n"
+            )
+            atomic_write_bytes(
+                layout.source_root / "utils/pipeline/encoder/network.py", b"model\n"
             )
             atomic_write_bytes(
                 extracted, historical.read_bytes().replace(b"\r\n", b"\n")

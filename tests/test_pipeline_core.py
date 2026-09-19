@@ -9,26 +9,30 @@ import unittest
 import uuid
 from pathlib import Path
 
-from config import load_pipeline_config
-from constants import CONDITION_IDS, PROTOCOL_ID
-from doctor import _document_version
-from artifact_io import DataContractError, atomic_write_json, atomic_write_jsonl
-from metrics import binary_metrics, triple_metrics
-from paths import (
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.constants import CONDITION_IDS, PROTOCOL_ID
+from utils.pipeline.common.environment import _document_version
+from utils.pipeline.common.artifact_io import (
+    DataContractError,
+    atomic_write_json,
+    atomic_write_jsonl,
+)
+from utils.pipeline.evaluation.metrics import binary_metrics, triple_metrics
+from utils.pipeline.common.paths import (
     PathContractError,
     RunLayout,
     discover_source_root,
     resolve_tracked_path,
 )
-from records import (
+from utils.pipeline.common.records import (
     Candidate,
     EntitySpan,
     StrictTriple,
     Verdict,
     candidate_id_for,
 )
-from scoring import ScoreInputs, _load_verdicts, score_run
-from split import (
+from utils.pipeline.evaluation.scoring import ScoreInputs, _load_verdicts, score_run
+from utils.pipeline.preparation.split import (
     SplitItem,
     build_official_code_split,
     iterative_multilabel_split,
@@ -36,13 +40,13 @@ from split import (
     require_disjoint_partitions,
     split_manifest,
 )
-from publication_statistics import (
+from utils.pipeline.evaluation.statistics import (
     exact_wilcoxon_signed_rank,
     holm_adjust,
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from verifier import verifier_identity
+from utils.pipeline.verifier.verifier import verifier_identity
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -145,7 +149,7 @@ class PathContractTests(unittest.TestCase):
 
     def test_tracked_resources_reject_parent_relative_syntax(self):
         with self.assertRaises(PathContractError):
-            resolve_tracked_path(SOURCE_ROOT, "configs/../pyproject.toml")
+            resolve_tracked_path(SOURCE_ROOT, "resources/configs/../pyproject.toml")
 
 
 class ConfigContractTests(unittest.TestCase):
@@ -163,7 +167,7 @@ class ConfigContractTests(unittest.TestCase):
         self.assertIn("not enforced", uv_check["detail"])
 
     def test_approved_config_and_matrix_resolve_from_source_only(self):
-        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         self.assertEqual(config.value["training_seeds"], list(range(42, 50)))
         self.assertEqual(
             [row["condition_id"] for row in config.matrix["conditions"]],
@@ -172,7 +176,7 @@ class ConfigContractTests(unittest.TestCase):
         self.assertNotIn("TBD_", json.dumps(config.value, sort_keys=True))
 
     def test_only_model_payload_schemas_are_retained(self):
-        schema_root = SOURCE_ROOT / "schemas" / "pipeline"
+        schema_root = SOURCE_ROOT / "resources" / "schemas" / "pipeline"
         self.assertEqual(
             {path.name for path in schema_root.glob("*.json")},
             {
@@ -185,7 +189,7 @@ class ConfigContractTests(unittest.TestCase):
                 self.assertIsInstance(json.loads(path.read_text(encoding="utf-8")), dict)
 
     def test_config_has_no_source_inventory_or_schema_pointer(self):
-        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         self.assertNotIn("tracked_artifacts", config.value)
         self.assertNotIn("$schema", config.value)
 
@@ -409,7 +413,7 @@ class StatisticalContractTests(unittest.TestCase):
 
 class OfflineScoringTests(unittest.TestCase):
     def test_four_conditions_match_manual_counts_and_collapse_correction_duplicate(self):
-        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "fixture-run")
             layout.create()

@@ -11,14 +11,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import pipeline
-from artifact_io import DataContractError, sha256_file
-from paths import RunLayout
-from paths import discover_source_root
+from stages import pipeline
+from utils.pipeline.common.artifact_io import DataContractError, sha256_file
+from utils.pipeline.common.paths import RunLayout, discover_source_root
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
-ENTRYPOINT = SOURCE_ROOT / "pipeline.py"
+ENTRYPOINT = SOURCE_ROOT / "stages/pipeline.py"
 PIPELINE_SOURCE = ENTRYPOINT.read_text(encoding="utf-8")
 
 
@@ -27,13 +26,13 @@ class PipelineEntrypointTests(unittest.TestCase):
         self.assertTrue(ENTRYPOINT.is_file())
         self.assertFalse((SOURCE_ROOT / "phase_b.py").exists())
         self.assertFalse((SOURCE_ROOT / "phase_b.sh").exists())
-        self.assertIn('prog="python pipeline.py"', PIPELINE_SOURCE)
+        self.assertIn('prog="python stages/pipeline.py"', PIPELINE_SOURCE)
         self.assertIn('"full"', PIPELINE_SOURCE)
         self.assertIn('"table2"', PIPELINE_SOURCE)
 
     def test_help_is_available_without_data_model_or_network_access(self):
         completed = subprocess.run(
-            [sys.executable, "-B", "pipeline.py", "--help"],
+            [sys.executable, "-B", "stages/pipeline.py", "--help"],
             cwd=SOURCE_ROOT,
             check=True,
             capture_output=True,
@@ -74,9 +73,11 @@ class PipelineEntrypointTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
 
     def test_trainer_is_reached_only_through_the_pipeline(self):
-        model_source = (SOURCE_ROOT / "model.py").read_text(encoding="utf-8")
-        trainer_source = (SOURCE_ROOT / "train_span.py").read_text(encoding="utf-8")
-        self.assertIn('"pipeline.py",', model_source)
+        model_source = (SOURCE_ROOT / "utils/pipeline/encoder/model.py").read_text(
+            encoding="utf-8"
+        )
+        trainer_source = (SOURCE_ROOT / "stages/encoder.py").read_text(encoding="utf-8")
+        self.assertIn('"stages/pipeline.py",', model_source)
         self.assertIn('"_train-encoder",', model_source)
         self.assertNotIn('if __name__ == "__main__"', trainer_source)
         self.assertIn('if __name__ == "__main__"', PIPELINE_SOURCE)
@@ -86,7 +87,7 @@ class PipelineEntrypointTests(unittest.TestCase):
             [
                 sys.executable,
                 "-B",
-                "pipeline.py",
+                "stages/pipeline.py",
                 "_train-encoder",
                 "--run-id",
                 "safe-run",

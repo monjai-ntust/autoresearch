@@ -1,6 +1,6 @@
 # Table-production workflow
 
-`pipeline.py` is the repository's only executable workflow entry point. Run it
+`stages/pipeline.py` is the repository's only executable workflow entry point. Run it
 from the root of a clean standalone source checkout. All runtime writes are
 confined to the ignored `output/<run-id>/` tree.
 
@@ -34,7 +34,7 @@ The current environment uses Python 3.10 or newer, Torch 2.9.1 from the CUDA
 actual versions and hardware. Hardware identity is comparison metadata, not a
 startup gate.
 
-The reference profile in `table2_contract.json` records the historical
+The reference profile in `resources/contracts/table2.json` records the historical
 hardware, encoder, and Qwen identities for reporting only. The default
 configuration selects that encoder revision, while accepting any immutable
 40-hex revision as the actual input for a new run. Its explicitly named Qwen
@@ -47,7 +47,7 @@ Table 2. Internal disagreement fails closed.
 ## Static validation
 
 ```bash
-uv run --frozen --no-sync python -I -B pipeline.py validate-table2
+uv run --frozen --no-sync python -I -B stages/pipeline.py validate-table2
 uv run --frozen --no-sync python -B -m unittest discover -s tests -v
 ```
 
@@ -56,7 +56,7 @@ completed run and deterministically constructs its prospective graph and record
 projections without writing them:
 
 ```bash
-uv run --frozen --no-sync python -I -B pipeline.py table2 \
+uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
   --run-id research-run-001 \
   --dry-run
 ```
@@ -66,7 +66,7 @@ uv run --frozen --no-sync python -I -B pipeline.py table2 \
 Start the configured Qwen model in Ollama. Then execute:
 
 ```bash
-uv run --frozen --no-sync python -I -B pipeline.py full \
+uv run --frozen --no-sync python -I -B stages/pipeline.py full \
   --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```
@@ -96,8 +96,8 @@ verifier analyses plus a new same-run Table 2. It does not regenerate the
 paper's historical Table 1 or SciERC Table 3; those remain legacy comparison
 evidence. Table 4 is outside this artifact.
 
-Encoder training remains hosted by `train_span.py`, but the main process starts
-it through the private `pipeline.py _train-encoder` route. `train_span.py` is an
+Encoder training remains hosted by `stages/encoder.py`, but the main process starts
+it through the private `stages/pipeline.py _train-encoder` route. `stages/encoder.py` is an
 internal scientific implementation module and is not an executable entry point.
 
 ## Table-2-only route
@@ -105,7 +105,7 @@ internal scientific implementation module and is not an executable entry point.
 For a run that already completed stages 1–11, execute only downstream Table 2:
 
 ```bash
-uv run --frozen --no-sync python -I -B pipeline.py table2 \
+uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
   --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```

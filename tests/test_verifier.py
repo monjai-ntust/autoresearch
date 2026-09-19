@@ -9,17 +9,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from config import load_pipeline_config
-from constants import PROTOCOL_ID
-from artifact_io import (
+from utils.pipeline.common.config import load_pipeline_config
+from utils.pipeline.common.constants import PROTOCOL_ID
+from utils.pipeline.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
     sha256_file,
 )
-from paths import RunLayout, discover_source_root
-from records import StrictTriple, candidate_id_for
-from verifier import (
+from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.pipeline.common.records import StrictTriple, candidate_id_for
+from utils.pipeline.verifier.verifier import (
     HttpResult,
     _verify_live_model,
     run_verifier,
@@ -133,7 +133,7 @@ def _response_record(request: dict, content: str, *, attempts: int = 1) -> dict:
 class VerifierReplayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
     def test_invalid_live_cache_fails_before_writes_or_model_calls(self):
         with _temporary_output_directory() as temporary:
@@ -157,7 +157,9 @@ class VerifierReplayTests(unittest.TestCase):
             model_blob = layout.resolve("inputs/ollama/model-blob")
             model_blob.parent.mkdir(parents=True)
             model_blob.write_bytes(b"fixture")
-            with patch("verifier._verify_live_model") as verify_model, \
+            with patch(
+                "utils.pipeline.verifier.verifier._verify_live_model"
+            ) as verify_model, \
                  self.assertRaises(DataContractError):
                 run_verifier(
                     layout,
@@ -540,10 +542,10 @@ class VerifierReplayTests(unittest.TestCase):
                 return model_evidence
 
             with patch(
-                "verifier._environment_manifest",
+                "utils.pipeline.verifier.verifier._environment_manifest",
                 return_value=environment,
             ), patch(
-                "verifier._verify_live_model",
+                "utils.pipeline.verifier.verifier._verify_live_model",
                 side_effect=verify_model,
             ):
                 manifest = run_verifier(
@@ -578,7 +580,7 @@ class VerifierReplayTests(unittest.TestCase):
 
 class LiveModelIdentityTests(unittest.TestCase):
     def test_preflight_requires_tag_blob_details_and_modelfile_identity(self):
-        config = load_pipeline_config(SOURCE_ROOT, "configs/pipeline.json")
+        config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         verifier = config.value["verifier"]
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "model-proof")
@@ -609,7 +611,7 @@ class LiveModelIdentityTests(unittest.TestCase):
                 return HttpResult(200, body, hashlib.sha256(b"body").hexdigest())
 
             real_sha256_file = __import__(
-                "verifier", fromlist=["sha256_file"]
+                "utils.pipeline.verifier.verifier", fromlist=["sha256_file"]
             ).sha256_file
 
             def sha256_file(path):
@@ -622,8 +624,11 @@ class LiveModelIdentityTests(unittest.TestCase):
                 "returncode": 0,
                 "stdout": "FROM sha256:" + verifier["model_blob_sha256"],
             }
-            with patch("verifier.sha256_file", side_effect=sha256_file), patch(
-                "verifier._command_output", return_value=command
+            with patch(
+                "utils.pipeline.verifier.verifier.sha256_file",
+                side_effect=sha256_file,
+            ), patch(
+                "utils.pipeline.verifier.verifier._command_output", return_value=command
             ):
                 evidence = _verify_live_model(
                     layout,
