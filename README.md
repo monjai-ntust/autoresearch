@@ -2,7 +2,9 @@
 
 This branch contains the canonical CODE-ACCORD publication workflow and the
 same-run reproduction path for the paper's Table 2. `pipeline.py` is the
-single supported entry point.
+single supported canonical table-production entry point. A separate
+`encoder_comparison.py` entry point hosts the Phase G historical-derived
+Table-1 comparison path without changing the canonical pipeline.
 
 The pipeline retains the established CODE-ACCORD encoder, threshold, local
 Qwen verifier, strict scoring, and original Table-2 Graph RAG methods. It does
@@ -12,7 +14,8 @@ artifact-path entry points are excluded.
 
 ## Source layout
 
-- Root `pipeline.py` is the thin sole public entry point; it parses the CLI and calls the internal preparation, encoder, verifier, evaluation, and RAG functions in `stages/`.
+- Root `pipeline.py` is the thin canonical table-production entry point; it parses the CLI and calls the internal preparation, encoder, verifier, evaluation, and RAG functions in `stages/`.
+- Root `encoder_comparison.py` is a separate thin Phase G entry point. Its historical-derived model/trainer live under `utils/encoder_comparison/`, while its controller reuses canonical preparation, data, cache, path, and artifact utilities.
 - Each `stages/<stage>.py` owns that stage's validation, resume/recovery, and execution coordination; only genuinely shared artifact primitives remain under `utils/common/`.
 - `utils/` groups implementation by preparation, encoder, verifier, evaluation, and RAG stage; `utils/common/` holds cross-stage contracts.
 - `resources/` contains the tracked configurations, prompts, schemas, contracts, and compatibility data consumed by those stages.
@@ -97,6 +100,27 @@ The Python entry point performs and resumes the complete ordered workflow. It
 does not replace a different existing artifact, bypass the development pilot,
 or reuse a stage whose manifest/hash binding has changed.
 
+## Phase G encoder comparisons
+
+`encoder_comparison.py` validates a finite registry of immutable BERT-base,
+DeBERTa-base, and DeBERTa-large profiles. The comparison implementation is a
+bounded transplant of the historical result-producing trainer/network, not a
+generalization of the canonical encoder. It consumes the same canonical
+prepared split and compatible current utilities through a distinct one-profile-
+per-run namespace.
+
+Offline profile validation is available without acquiring a model:
+
+```bash
+uv run --frozen --no-sync python -I -B encoder_comparison.py \
+  validate-profile --profile deberta-large-v1
+```
+
+No comparison training is predeclared merely by the presence of this entry
+point. The Phase G experiment matrix and statistical protocol must be approved
+before preparation, model acquisition, smoke execution, or full training. See
+`docs/encoder-comparison.md` for the source/reuse boundary and command contract.
+
 ## Run only downstream Table 2
 
 Use this route when a complete authenticated run already contains the encoder,
@@ -153,4 +177,5 @@ run-local recovery namespace and are never silently accepted. Legacy displayed
 values are comparison metadata only; they are not inputs or tuning targets.
 
 See `docs/workflow.md` for the artifact and resume contract and
-`docs/model-training-compatibility.md` for the encoder compatibility boundary.
+`docs/model-training-compatibility.md` for the canonical encoder compatibility
+boundary. See `docs/encoder-comparison.md` for the isolated Phase G path.

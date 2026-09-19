@@ -4,6 +4,10 @@ This document freezes the evidence and minimal-difference boundary for B-05C.
 It describes implementation compatibility, not a completed experiment or a
 claim that canonical results equal the historical statistics.
 
+This is the canonical `pipeline.py` encoder contract. Phase G does not mutate
+it: new comparison encoders use the separate historical-derived path documented
+in `encoder-comparison.md`.
+
 ## Historical baseline and available evidence
 
 - Fixed line-review baseline: source commit

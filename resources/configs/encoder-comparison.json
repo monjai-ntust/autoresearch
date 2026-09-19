@@ -1,0 +1,99 @@
+{
+  "schema_version": "phase-g-encoder-comparison-1.0",
+  "protocol_id": "B04-PATH-A-1.3",
+  "matcher_id": "CODE-STRICT-1",
+  "dataset_id": "CODE-ACCORD-v1.0.0",
+  "split_id": "CODE-SPLIT-1",
+  "canonical_pipeline_config": {
+    "path": "resources/configs/pipeline.json",
+    "sha256": "2130818a88a11f0d0778e029e2134aa7101d874b0736c56496263f1103c9fe87"
+  },
+  "historical_source": {
+    "commit": "9feafa4029e65ab48ecfb2f452f4b0fabbff0826",
+    "trainer": {
+      "path": "train_span.py",
+      "git_blob_sha1": "104ca6e4afcb5122228fff5c73227c6b3b3edb40"
+    },
+    "network": {
+      "path": "models/bert_kg_encoder.py",
+      "git_blob_sha1": "d05678f00097cb11176dacef6fade0b1b3f557de"
+    },
+    "data_adapter": {
+      "path": "data/code_accord.py",
+      "git_blob_sha1": "0b11fc6bf2f16512864b4dbf77e7a610d8fa8fdb"
+    }
+  },
+  "encoder_profiles": [
+    {
+      "profile_id": "bert-base-uncased",
+      "model": "bert-base-uncased",
+      "revision": "86b5e0934494bd15c9632b12f734a8a67f723594",
+      "hidden_size": 768,
+      "tokenizer_files": ["tokenizer_config.json", "tokenizer.json", "vocab.txt"],
+      "weight": {
+        "path": "pytorch_model.bin",
+        "bytes": 440473133,
+        "sha256": "097417381d6c7230bd9e3557456d726de6e83245ec8b24f529f60198a67b203a"
+      },
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/google-bert/bert-base-uncased"
+    },
+    {
+      "profile_id": "deberta-base-v1",
+      "model": "microsoft/deberta-base",
+      "revision": "0d1b43ccf21b5acd9f4e5f7b077fa698f05cf195",
+      "hidden_size": 768,
+      "tokenizer_files": ["tokenizer_config.json", "vocab.json", "merges.txt"],
+      "weight": {
+        "path": "pytorch_model.bin",
+        "bytes": 558614189,
+        "sha256": "81ab61c5dc9111f81e528b7b3ae93997f4ae72ba531e60587835be894ab0ffe5"
+      },
+      "license": "MIT",
+      "source": "https://huggingface.co/microsoft/deberta-base"
+    },
+    {
+      "profile_id": "deberta-large-v1",
+      "model": "microsoft/deberta-large",
+      "revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
+      "hidden_size": 1024,
+      "tokenizer_files": ["tokenizer_config.json", "vocab.json", "merges.txt"],
+      "weight": {
+        "path": "pytorch_model.bin",
+        "bytes": 1627222675,
+        "sha256": "79da1770e499ab894937c426e1e43194e2ede6b492945efe0ee777b19722f334"
+      },
+      "license": "MIT",
+      "source": "https://huggingface.co/microsoft/deberta-large"
+    }
+  ],
+  "recipes": [
+    {
+      "recipe_id": "historical-a20-a21-a12",
+      "source_classification": "historical_result_producing",
+      "max_steps": 3500,
+      "evaluation_every_steps": 100,
+      "batch_size": 16,
+      "max_length": 128,
+      "max_span_width": 8,
+      "learning_rate": 0.00003,
+      "warmup_steps": 250,
+      "ner_negative_ratio": 3.0,
+      "ner_focal_gamma": 2.0,
+      "bio_loss_weight": 0.0,
+      "label_smoothing": 0.1,
+      "re_loss_weight": 1.0,
+      "re_no_rel_weight": 1.0,
+      "context_between_spans": true,
+      "comparison_boost": {
+        "initial": 5.0,
+        "end": 2.0,
+        "adaptive_step": 1000,
+        "threshold_low": 0.35,
+        "threshold_high": 0.4,
+        "middle": 3.5
+      }
+    }
+  ],
+  "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49]
+}

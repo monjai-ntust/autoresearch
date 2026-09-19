@@ -1,10 +1,13 @@
 # Table-production workflow
 
-`pipeline.py` is the repository's only executable workflow entry point. It is a
-thin CLI dispatcher over the internal functions in `stages/`; each stage owns
-its validation, resume/recovery, and execution coordination. Run it from the
-root of a clean standalone source checkout. All runtime writes are confined to
-the ignored `output/<run-id>/` tree.
+`pipeline.py` is the repository's only canonical table-production entry point.
+It is a thin CLI dispatcher over the internal functions in `stages/`; each
+stage owns its validation, resume/recovery, and execution coordination. The
+separate `encoder_comparison.py` entry point is confined to Phase G Table-1
+encoder comparisons and cannot dispatch verifier, evaluation, graph, or RAG
+work. Run either entry point from the root of a clean standalone source
+checkout. All runtime writes are confined to the ignored
+`output/<run-id>/` tree.
 
 ## Run identity and same-run lineage
 
@@ -101,6 +104,13 @@ evidence. Table 4 is outside this artifact.
 Encoder training remains hosted by `stages/encoder.py`, but the main process starts
 it through the private `pipeline.py _train-encoder` route. `stages/encoder.py` is an
 internal scientific implementation module and is not an executable entry point.
+
+Phase G comparison training is separately hosted by
+`stages/encoder_comparison.py`, with historical-derived lower-level behavior in
+`utils/encoder_comparison/`. It reuses this workflow's preparation and
+run/artifact utilities but does not modify or dispatch the canonical encoder.
+Its experiment matrix remains subject to the Phase G pre-execution approval
+gate documented in `docs/encoder-comparison.md`.
 
 ## Table-2-only route
 
