@@ -9,13 +9,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from utils.pipeline.common.constants import (
+from utils.common.constants import (
     ENTITY_TYPES,
     PROTOCOL_ID,
     RELATION_TYPES,
     TRAINING_SEEDS,
 )
-from utils.pipeline.common.artifact_io import DataContractError
+from utils.common.artifact_io import DataContractError
 
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")

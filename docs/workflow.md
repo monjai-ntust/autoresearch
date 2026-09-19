@@ -1,6 +1,6 @@
 # Table-production workflow
 
-`stages/pipeline.py` is the repository's only executable workflow entry point. Run it
+`pipeline.py` is the repository's only executable workflow entry point. Run it
 from the root of a clean standalone source checkout. All runtime writes are
 confined to the ignored `output/<run-id>/` tree.
 
@@ -47,7 +47,7 @@ Table 2. Internal disagreement fails closed.
 ## Static validation
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py validate-table2
+uv run --frozen --no-sync python -I -B pipeline.py validate-table2
 uv run --frozen --no-sync python -B -m unittest discover -s tests -v
 ```
 
@@ -56,7 +56,7 @@ completed run and deterministically constructs its prospective graph and record
 projections without writing them:
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
+uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --run-id research-run-001 \
   --dry-run
 ```
@@ -66,7 +66,7 @@ uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
 Start the configured Qwen model in Ollama. Then execute:
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py full \
+uv run --frozen --no-sync python -I -B pipeline.py full \
   --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```
@@ -97,7 +97,7 @@ paper's historical Table 1 or SciERC Table 3; those remain legacy comparison
 evidence. Table 4 is outside this artifact.
 
 Encoder training remains hosted by `stages/encoder.py`, but the main process starts
-it through the private `stages/pipeline.py _train-encoder` route. `stages/encoder.py` is an
+it through the private `pipeline.py _train-encoder` route. `stages/encoder.py` is an
 internal scientific implementation module and is not an executable entry point.
 
 ## Table-2-only route
@@ -105,7 +105,7 @@ internal scientific implementation module and is not an executable entry point.
 For a run that already completed stages 1–11, execute only downstream Table 2:
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
+uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```

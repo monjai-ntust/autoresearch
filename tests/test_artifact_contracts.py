@@ -2,8 +2,8 @@
 
 import unittest
 
-from utils.pipeline.rag.graph import build_table_graphs, canonical_json, project_graph
-from utils.pipeline.common.records import StrictTriple, candidate_id_for
+from utils.rag.graph import build_table_graphs, canonical_json, project_graph
+from utils.common.records import StrictTriple, candidate_id_for
 
 
 def _graph_inputs():

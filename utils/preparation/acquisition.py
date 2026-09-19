@@ -10,15 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.artifact_io import (
+from utils.common.config import PipelineConfig
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     load_json,
     md5_file,
     sha256_file,
 )
-from utils.pipeline.common.paths import RunLayout
+from utils.common.paths import RunLayout
 
 
 @dataclass(frozen=True)

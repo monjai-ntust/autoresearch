@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from utils.pipeline.common.artifact_io import atomic_write_json, sha256_file
-from utils.pipeline.common.paths import RunLayout
+from utils.common.config import PipelineConfig
+from utils.common.constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
+from utils.common.artifact_io import atomic_write_json, sha256_file
+from utils.common.paths import RunLayout
 
 
 def _command(source_root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:

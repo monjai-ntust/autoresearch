@@ -8,10 +8,10 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from utils.pipeline.common.config import load_pipeline_config
-from utils.pipeline.common.artifact_io import DataContractError, atomic_write_json, load_json
-from utils.pipeline.common.paths import RunLayout, discover_source_root
-from utils.pipeline.evaluation.reconciliation import reconcile_section5_evidence
+from utils.common.config import load_pipeline_config
+from utils.common.artifact_io import DataContractError, atomic_write_json, load_json
+from utils.common.paths import RunLayout, discover_source_root
+from utils.evaluation.reconciliation import reconcile_section5_evidence
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))

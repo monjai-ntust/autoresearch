@@ -17,7 +17,7 @@ The stage has three implemented executions:
   into canonical :class:`records.Candidate` records, reproducing the historical
   greedy non-overlapping NER selection and ``min(head, tail) * re`` confidence
   product on typed CODE spans.
-* ``live`` runs the retained encoder (``utils.pipeline.encoder.network`` under the
+* ``live`` runs the retained encoder (``utils.encoder.network`` under the
   configured canonical recipe) over the prepared sentences to produce that prediction ledger,
   then applies the same deterministic ledger->candidate transform as ``replay``.
   Its forward outputs cannot be validated offline, so live execution requires
@@ -34,22 +34,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.constants import (
+from utils.common.config import PipelineConfig
+from utils.common.constants import (
     ENTITY_TYPES,
     MATCHER_ID,
     PROTOCOL_ID,
     RELATION_TYPES,
     TRAINING_SEEDS,
 )
-from utils.pipeline.encoder.cache import (
+from utils.encoder.cache import (
     CACHE_RELATIVE,
     MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE,
     verify_cache_manifest,
     write_cache_manifest,
 )
-from utils.pipeline.common.paths import RunLayout
-from utils.pipeline.common.artifact_io import (
+from utils.common.paths import RunLayout
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -57,8 +57,8 @@ from utils.pipeline.common.artifact_io import (
     iter_jsonl,
     sha256_file,
 )
-from utils.pipeline.common.records import Candidate, EntitySpan, StrictTriple, candidate_id_for
-from utils.pipeline.verifier.verifier import PreparedSentence, _load_sentences, _source_text
+from utils.common.records import Candidate, EntitySpan, StrictTriple, candidate_id_for
+from utils.verifier.verifier import PreparedSentence, _load_sentences, _source_text
 
 EXECUTION_MODES = {"dry-run", "replay", "live"}
 TRAIN_EXECUTION_MODES = {"dry-run", "live"}
@@ -491,7 +491,7 @@ def _live_inference_records(
     """Run the retained encoder over prepared sentences and emit ledger records.
 
     This is the externally gated `live` execution. It reuses the retained
-    ``utils.pipeline.encoder.network.BertKGExtractor`` and the exact
+    ``utils.encoder.network.BertKGExtractor`` and the exact
     forward logic established by the retained source history (greedy
     non-overlapping span selection, then relation extraction over the selected
     pairs with a softmax-product confidence), but binds the CODE label space and
@@ -500,7 +500,7 @@ def _live_inference_records(
     stack.
 
     Assumptions (documented for external verification): the checkpoint was trained
-    with the same CODE label space (``utils.pipeline.encoder.data``), ``re_context_span``
+    with the same CODE label space (``utils.encoder.data``), ``re_context_span``
     equal to the frozen ``context_between_spans`` recipe flag, and each sentence
     fits within the recipe ``max_length``. These are enforced by the one retained
     trainer path.
@@ -509,14 +509,14 @@ def _live_inference_records(
     import torch  # lazy: only the externally gated live path needs the accelerator stack
     from transformers import AutoTokenizer
 
-    from utils.pipeline.encoder.data import (
+    from utils.encoder.data import (
         ENTITY_TYPES as CA_ENTITY_TYPES,
         ID2REL,
         NO_REL_ID,
         NUM_BIO_TAGS,
         NUM_RELATIONS,
     )
-    from utils.pipeline.encoder.network import BertKGExtractor
+    from utils.encoder.network import BertKGExtractor
 
     training = config.value["training"]
     max_length = training["max_length"]
@@ -1028,7 +1028,7 @@ def _dataset_compatibility_report(
         layout, "annotated_data/entities/train.csv"
     )
     historical_entities = (
-        layout.source_root / "resources/data/code_accord/entities/train.csv"
+        layout.source_root / "resources/data/code-accord-entities-train.csv"
     )
     if not historical_entities.is_file():
         raise DataContractError("recoverable pre-Phase A entity training CSV is missing")
@@ -1054,7 +1054,7 @@ def _dataset_compatibility_report(
         },
         "pre_phase_a_baseline": {
             "source_commit": "9feafa4029e65ab48ecfb2f452f4b0fabbff0826",
-            "tracked_path": "resources/data/code_accord/entities/train.csv",
+            "tracked_path": "resources/data/code-accord-entities-train.csv",
             "git_blob_sha1": _HISTORICAL_ENTITY_TRAIN_GIT_BLOB,
             "normalized_lf_sha256": historical_normalized_sha,
             "recoverable_files": ["annotated_data/entities/train.csv"],
@@ -1179,7 +1179,7 @@ def _training_command(
     return [
         sys.executable,
         "-B",
-        "stages/pipeline.py",
+        "pipeline.py",
         "_train-encoder",
         "--run-id",
         layout.run_id,

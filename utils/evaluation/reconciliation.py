@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.constants import PROTOCOL_ID, WORKFLOW_ID
-from utils.pipeline.common.artifact_io import (
+from utils.common.config import PipelineConfig
+from utils.common.constants import PROTOCOL_ID, WORKFLOW_ID
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     load_json,
     sha256_file,
 )
-from utils.pipeline.common.paths import RunLayout
+from utils.common.paths import RunLayout
 
 
 def _digest(value: Any, length: int, label: str) -> str:

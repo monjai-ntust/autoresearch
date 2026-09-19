@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 
-from utils.pipeline.common.constants import ENTITY_TYPES, RELATION_TYPES
+from utils.common.constants import ENTITY_TYPES, RELATION_TYPES
 
 
 NUM_BIO_TAGS = 1 + 2 * len(ENTITY_TYPES)

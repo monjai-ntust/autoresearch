@@ -9,30 +9,30 @@ import unittest
 import uuid
 from pathlib import Path
 
-from utils.pipeline.common.config import load_pipeline_config
-from utils.pipeline.common.constants import CONDITION_IDS, PROTOCOL_ID
-from utils.pipeline.common.environment import _document_version
-from utils.pipeline.common.artifact_io import (
+from utils.common.config import load_pipeline_config
+from utils.common.constants import CONDITION_IDS, PROTOCOL_ID
+from utils.common.environment import _document_version
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
 )
-from utils.pipeline.evaluation.metrics import binary_metrics, triple_metrics
-from utils.pipeline.common.paths import (
+from utils.evaluation.metrics import binary_metrics, triple_metrics
+from utils.common.paths import (
     PathContractError,
     RunLayout,
     discover_source_root,
     resolve_tracked_path,
 )
-from utils.pipeline.common.records import (
+from utils.common.records import (
     Candidate,
     EntitySpan,
     StrictTriple,
     Verdict,
     candidate_id_for,
 )
-from utils.pipeline.evaluation.scoring import ScoreInputs, _load_verdicts, score_run
-from utils.pipeline.preparation.split import (
+from utils.evaluation.scoring import ScoreInputs, _load_verdicts, score_run
+from utils.preparation.split import (
     SplitItem,
     build_official_code_split,
     iterative_multilabel_split,
@@ -40,13 +40,13 @@ from utils.pipeline.preparation.split import (
     require_disjoint_partitions,
     split_manifest,
 )
-from utils.pipeline.evaluation.statistics import (
+from utils.evaluation.statistics import (
     exact_wilcoxon_signed_rank,
     holm_adjust,
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from utils.pipeline.verifier.verifier import verifier_identity
+from utils.verifier.verifier import verifier_identity
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -176,7 +176,7 @@ class ConfigContractTests(unittest.TestCase):
         self.assertNotIn("TBD_", json.dumps(config.value, sort_keys=True))
 
     def test_only_model_payload_schemas_are_retained(self):
-        schema_root = SOURCE_ROOT / "resources" / "schemas" / "pipeline"
+        schema_root = SOURCE_ROOT / "resources" / "schemas"
         self.assertEqual(
             {path.name for path in schema_root.glob("*.json")},
             {

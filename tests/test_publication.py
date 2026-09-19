@@ -7,23 +7,23 @@ import unittest
 import uuid
 from pathlib import Path
 
-from stages import pipeline
-from utils.pipeline.common.config import load_pipeline_config
-from utils.pipeline.common.constants import PROTOCOL_ID, TRAINING_SEEDS
-from utils.pipeline.common.paths import RunLayout, discover_source_root
-from utils.pipeline.common.artifact_io import (
+import pipeline
+from utils.common.config import load_pipeline_config
+from utils.common.constants import PROTOCOL_ID, TRAINING_SEEDS
+from utils.common.paths import RunLayout, discover_source_root
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
     load_json,
     sha256_file,
 )
-from utils.pipeline.evaluation.publication import (
+from utils.evaluation.publication import (
     assemble_seed_candidates,
     prepare_verifier_pilot,
 )
-from utils.pipeline.common.records import EntitySpan, StrictTriple, candidate_id_for
-from utils.pipeline.verifier.threshold import select_threshold
+from utils.common.records import EntitySpan, StrictTriple, candidate_id_for
+from utils.verifier.threshold import select_threshold
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))

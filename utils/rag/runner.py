@@ -19,11 +19,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from utils.pipeline.rag import evaluator
-from utils.pipeline.rag.graph import build_table_graphs, canonical_json, project_graph
+from utils.rag import evaluator
+from utils.rag.graph import build_table_graphs, canonical_json, project_graph
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = (ROOT / "output").resolve()
 CONTRACT_PATH = ROOT / "resources/contracts/table2.json"
 RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")

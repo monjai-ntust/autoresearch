@@ -1,7 +1,7 @@
 # CODE-ACCORD publication artifact
 
 This branch contains the canonical CODE-ACCORD publication workflow and the
-same-run reproduction path for the paper's Table 2. `stages/pipeline.py` is the
+same-run reproduction path for the paper's Table 2. `pipeline.py` is the
 single supported entry point.
 
 The pipeline retains the established CODE-ACCORD encoder, threshold, local
@@ -12,8 +12,8 @@ artifact-path entry points are excluded.
 
 ## Source layout
 
-- `stages/` contains the public pipeline entry point and its private encoder-training boundary.
-- `utils/pipeline/` groups implementation by preparation, encoder, verifier, evaluation, and RAG stage; `utils/pipeline/common/` holds cross-stage contracts.
+- Root `pipeline.py` is the sole public entry point; `stages/` contains its internal preparation, encoder, verifier, evaluation, and RAG controllers.
+- `utils/` groups implementation by preparation, encoder, verifier, evaluation, and RAG stage; `utils/common/` holds cross-stage contracts.
 - `resources/` contains the tracked configurations, prompts, schemas, contracts, and compatibility data consumed by those stages.
 - `tests/` mirrors the pipeline contracts without exposing additional runtime entry points.
 
@@ -65,7 +65,7 @@ Use Python 3.10 or newer from a clean clone of branch
 
 ```bash
 uv sync --frozen
-uv run --frozen --no-sync python -I -B stages/pipeline.py validate-table2
+uv run --frozen --no-sync python -I -B pipeline.py validate-table2
 uv run --frozen --no-sync python -B -m unittest discover -s tests -v
 ```
 
@@ -83,7 +83,7 @@ Choose a new run ID containing 1-64 letters, digits, `.`, `_`, or `-`, beginning
 with a letter or digit. Start Ollama with the configured Qwen model, then run:
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py full \
+uv run --frozen --no-sync python -I -B pipeline.py full \
   --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```
@@ -105,7 +105,7 @@ or invokes the verifier.
 First validate the same-run plan without writes or model calls:
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
+uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --run-id research-run-001 \
   --dry-run
 ```
@@ -114,7 +114,7 @@ Then execute the frozen answer evaluator against the same Qwen identity that
 the selected run's corrective verifier recorded:
 
 ```bash
-uv run --frozen --no-sync python -I -B stages/pipeline.py table2 \
+uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --run-id research-run-001 \
   --ollama-url http://localhost:11434
 ```

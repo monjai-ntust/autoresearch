@@ -9,9 +9,9 @@ from pathlib import Path
 import re
 from typing import Any
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.constants import CONDITION_IDS, MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from utils.pipeline.common.artifact_io import (
+from utils.common.config import PipelineConfig
+from utils.common.constants import CONDITION_IDS, MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -20,16 +20,16 @@ from utils.pipeline.common.artifact_io import (
     load_json,
     sha256_file,
 )
-from utils.pipeline.evaluation.metrics import binary_metrics, triple_metrics
-from utils.pipeline.common.paths import RunLayout
-from utils.pipeline.common.records import Candidate, GoldRecord, StrictTriple, Verdict
-from utils.pipeline.evaluation.statistics import (
+from utils.evaluation.metrics import binary_metrics, triple_metrics
+from utils.common.paths import RunLayout
+from utils.common.records import Candidate, GoldRecord, StrictTriple, Verdict
+from utils.evaluation.statistics import (
     exact_wilcoxon_signed_rank,
     holm_adjust,
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from utils.pipeline.verifier.verifier import verifier_identity
+from utils.verifier.verifier import verifier_identity
 
 
 @dataclass(frozen=True)

@@ -11,11 +11,11 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from utils.pipeline.preparation.acquisition import ArchiveContract, download_verified_archive
-from utils.pipeline.common.constants import CODE_ACCORD_COUNTS, CODE_ACCORD_REPAIRED_UUID
-from utils.pipeline.common.artifact_io import DataContractError, sha256_file
-from utils.pipeline.common.paths import discover_source_root
-from utils.pipeline.preparation.preparation import (
+from utils.preparation.acquisition import ArchiveContract, download_verified_archive
+from utils.common.constants import CODE_ACCORD_COUNTS, CODE_ACCORD_REPAIRED_UUID
+from utils.common.artifact_io import DataContractError, sha256_file
+from utils.common.paths import discover_source_root
+from utils.preparation.preparation import (
     DatasetContract,
     EntityRecord,
     _alignment_choice,

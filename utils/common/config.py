@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from utils.pipeline.common.constants import (
+from utils.common.constants import (
     CODE_ACCORD_ANNOTATION_FILES,
     CODE_ACCORD_ARCHIVE,
     CODE_ACCORD_COUNTS,
@@ -22,8 +22,8 @@ from utils.pipeline.common.constants import (
     TRAINING_SEEDS,
     WORKFLOW_ID,
 )
-from utils.pipeline.common.artifact_io import DataContractError, load_json, sha256_file
-from utils.pipeline.common.paths import resolve_tracked_path
+from utils.common.artifact_io import DataContractError, load_json, sha256_file
+from utils.common.paths import resolve_tracked_path
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -190,19 +190,19 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
         "model": "qwen3:32b",
         "prompt_status": "materialized_b06",
         "prompt_revision": "CODE-VERIFIER-1",
-        "system_prompt": "resources/prompts/verifier/code-verifier-1-system.txt",
+        "system_prompt": "resources/prompts/code-verifier-1-system.txt",
         "system_prompt_sha256": "d5be0378a4f0c68bb7e8038ca4008490fafb27934c0996b8d022200567126a04",
-        "simple_prompt": "resources/prompts/verifier/code-verifier-1-simple.txt",
+        "simple_prompt": "resources/prompts/code-verifier-1-simple.txt",
         "simple_prompt_sha256": "6f53d575c990571a882e6e6b0fabf4a8c2ca7049b8af2fb0cc15abd1f54aa537",
-        "corrective_prompt": "resources/prompts/verifier/code-verifier-1-corrective.txt",
+        "corrective_prompt": "resources/prompts/code-verifier-1-corrective.txt",
         "corrective_prompt_sha256": (
             "180e39c5a6cebd51620ee378a45c4da1cc2a5727d06de24a6717445f58fd36a3"
         ),
-        "simple_response_schema": "resources/schemas/pipeline/verifier-simple-response.schema.json",
+        "simple_response_schema": "resources/schemas/verifier-simple-response.schema.json",
         "simple_response_schema_sha256": (
             "86a93ff4227d65800e76704454f0e1b1a8c7729df506c18cc66a1018cbc253d9"
         ),
-        "corrective_response_schema": "resources/schemas/pipeline/verifier-corrective-response.schema.json",
+        "corrective_response_schema": "resources/schemas/verifier-corrective-response.schema.json",
         "corrective_response_schema_sha256": (
             "ff2a0e41359c230c98b8f754e57c28a4518d8bfbdd17114d8b743ab932065236"
         ),

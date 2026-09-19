@@ -15,38 +15,26 @@ from pathlib import Path
 # Python isolated mode intentionally omits the script directory from sys.path
 # on some platforms. The entry point restores only its own resolved checkout
 # root so local modules remain importable without accepting ambient paths.
-_ENTRY_ROOT = Path(__file__).resolve().parents[1]
+_ENTRY_ROOT = Path(__file__).resolve().parent
 if str(_ENTRY_ROOT) not in sys.path:
     sys.path.insert(0, str(_ENTRY_ROOT))
 
-from utils.pipeline.preparation.acquisition import fetch_run
-from utils.pipeline.common.config import load_pipeline_config
-from utils.pipeline.common.environment import run_doctor
-from utils.pipeline.encoder.model import (
+from utils.common.config import load_pipeline_config
+from utils.encoder.model import (
     canonical_trainer_arguments,
     generate_candidates,
-    plan_training,
     validate_prediction_cache,
 )
-from utils.pipeline.verifier.threshold import select_threshold
-from utils.pipeline.common.artifact_io import (
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     iter_jsonl,
     sha256_file,
 )
-from utils.pipeline.common.paths import PathContractError, RunLayout, discover_source_root
-from utils.pipeline.verifier.pilot import PilotInputs, run_verifier_pilot
-from utils.pipeline.preparation.preparation import prepare_run
-from utils.pipeline.evaluation.publication import (
-    assemble_seed_candidates,
-    prepare_verifier_pilot,
-)
-from utils.pipeline.evaluation.reconciliation import reconcile_section5_evidence
-from utils.pipeline.common.records import Candidate
-from utils.pipeline.evaluation.scoring import ScoreInputs, score_run
-from utils.pipeline.verifier.verifier import run_verifier, validate_response_cache
-from utils.pipeline.rag import runner as table2_runner
+from utils.common.paths import PathContractError, RunLayout, discover_source_root
+from utils.common.records import Candidate
+from utils.verifier.verifier import run_verifier, validate_response_cache
+from utils.rag import runner as table2_runner
 
 
 DEFAULT_CONFIG = "resources/configs/pipeline.json"
@@ -1267,212 +1255,84 @@ def _run_full_pipeline(
     model_blob_source: str | None,
 ) -> int:
     """Run the sole supported canonical CODE-ACCORD and Table-2 workflow."""
-    doctor_path = layout.resolve("manifests/00-checkout-manifest.json")
-    if doctor_path.is_file():
-        _validate_existing_checkout(layout, config)
-    else:
-        manifest, passed = run_doctor(layout, config)
-        if not passed:
-            raise DataContractError(f"Checkout doctor failed: {manifest}")
-    reconciliation_path = layout.resolve("audit/section5-evidence-reconciliation.json")
-    if reconciliation_path.is_file():
-        _validate_reconciliation(layout, config)
-    else:
-        reconcile_section5_evidence(layout, config)
-        _validate_reconciliation(layout, config)
-    # Both producers authenticate existing artifacts, so calling them on every
-    # resume closes the gap between a status flag and the bytes it describes.
-    fetch_run(layout, config)
-    prepare_run(layout, config)
 
-    encoder_identities = []
-    training_hardware: dict[str, object] = {}
-    for seed in config.value["training_seeds"]:
-        dry_manifest = layout.resolve(f"manifests/model-train-dry-run-seed-{seed}.json")
-        if not dry_manifest.is_file():
-            plan_training(
-                layout, config, execution_mode="dry-run", training_seed=seed
-            )
-        _validate_training_stage(layout, config, seed, execution_mode="dry-run")
-        live_manifest = layout.resolve(f"manifests/model-train-live-seed-{seed}.json")
-        if not live_manifest.is_file():
-            plan_training(layout, config, execution_mode="live", training_seed=seed)
-        training = _validate_training_stage(
-            layout, config, seed, execution_mode="live"
-        )
-        checkpoint_identity = _load_manifest(
-            layout.resolve(
-                f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
-            ),
-            "checkpoint manifest",
-        )
-        encoder_identities.append(
-            {
-                "base_model": checkpoint_identity["base_model"],
-                "base_model_revision": checkpoint_identity["base_model_revision"],
-            }
-        )
-        if not training_hardware and isinstance(training.get("environment"), dict):
-            training_hardware = training["environment"]
-        _resume_generation_stage(
-            layout, config, seed=seed, split="development"
-        )
+    from stages import preparation as preparation_stage
 
-    encoder_identity = table2_runner.require_consistent_encoder_identity(
-        encoder_identities
-    )
-
-    development_candidates = layout.resolve("predictions/dev/development-candidates.jsonl")
-    if not development_candidates.is_file():
-        assemble_seed_candidates(layout, config, split="development")
-    _validate_candidate_assembly(layout, config, "development")
-    threshold_path = layout.resolve("predictions/dev/threshold-selection.json")
-    if not threshold_path.is_file():
-        select_threshold(
-            layout,
-            config,
-            candidates_path=development_candidates,
-            gold_path=layout.resolve("data-prepared/development-gold.jsonl", must_exist=True),
-            split_manifest_path=layout.resolve("data-prepared/split-manifest.json", must_exist=True),
-            candidate_index_path=layout.resolve("predictions/dev/candidate-index.json", must_exist=True),
-            out_path=threshold_path,
-        )
-    _validate_threshold(layout, config)
-    pilot_selection = layout.resolve("predictions/dev/pilot-selection.json")
-    if not pilot_selection.is_file():
-        prepare_verifier_pilot(layout, config)
-    _validate_pilot_inputs(layout, config)
-
-    # The verifier model is deliberately discovered only at the first stage
-    # that uses it. Its observed digests replace runtime slots for this run;
-    # historical values remain non-blocking comparisons.
-    source, model_identity = _discover_live_model(
-        config,
-        layout.source_root,
-        ollama_url=ollama_url,
-        model_blob_source=model_blob_source,
-    )
-    model_relative, model_blob = _materialize_model_blob(
-        layout, source, str(model_identity["blob_sha256"])
-    )
-    _write_full_run_manifest(
+    preparation_stage.run(
         layout,
         config,
-        model_relative,
-        model_identity,
-        encoder_identity,
-        training_hardware,
+        validate_checkout=_validate_existing_checkout,
+        validate_reconciliation=_validate_reconciliation,
     )
+    from stages import encoder as encoder_stage
 
-    pilot_candidates = layout.resolve("predictions/dev/pilot-candidates.jsonl", must_exist=True)
-    warmup_candidates = layout.resolve(
-        "predictions/dev/verifier-warmup-candidate.jsonl", must_exist=True
-    )
-    development = layout.resolve("data-prepared/development.jsonl", must_exist=True)
-    capture_rows = []
-    for mode in ("simple", "corrective"):
-        for repeat in (1, 2):
-            capture_id = f"{mode}-repeat-{repeat}"
-            prefix = f"pilot/{capture_id}"
-            _resume_verifier_stage(
-                layout,
-                config,
-                mode=mode,
-                sentences=development,
-                candidates=pilot_candidates,
-                development=development,
-                warmup_candidates=warmup_candidates,
-                model_blob=model_blob,
-                ollama_url=ollama_url,
-                artifact_prefix=prefix,
-                pilot_selection=pilot_selection,
-                allow_response_cache=False,
-            )
-            capture_rows.append(
-                {"capture_id": capture_id, "mode": mode, "repeat": repeat, "artifact_prefix": prefix}
-            )
-    capture_index = layout.resolve("predictions/dev/pilot-captures.json")
-    capture_document = {
-        "schema_version": "phase-b-verifier-pilot-captures-2.0",
-        "protocol_id": config.value["protocol_id"],
-        "workflow_id": config.value["workflow_id"],
-        "run_id": layout.run_id,
-        "captures": capture_rows,
-    }
-    if capture_index.exists():
-        if _load_manifest(capture_index, "pilot capture index") != capture_document:
-            raise DataContractError("Existing pilot capture index differs from this run")
-    else:
-        atomic_write_json(capture_index, capture_document)
-    _validate_pilot_capture_seals(layout, capture_index)
-    audit_path = layout.resolve("audit/verifier-pilot/pilot-audit.json")
-    if not audit_path.is_file():
-        audit = run_verifier_pilot(
+    encoder_identity, training_hardware, development_candidates = (
+        encoder_stage.train_and_generate_development(
             layout,
             config,
-            PilotInputs(
-                sentences=development,
-                gold=layout.resolve("data-prepared/development-gold.jsonl", must_exist=True),
-                candidates=pilot_candidates,
-                warmup_candidates=warmup_candidates,
-                split_manifest=layout.resolve("data-prepared/split-manifest.json", must_exist=True),
-                candidate_index=layout.resolve("predictions/dev/candidate-index.json", must_exist=True),
-                pilot_selection=pilot_selection,
-                threshold_selection=threshold_path,
-                capture_index=capture_index,
-            ),
-            evidence_class="development-pilot",
+            load_manifest=_load_manifest,
+            validate_training_stage=_validate_training_stage,
+            resume_generation_stage=_resume_generation_stage,
+            validate_candidate_assembly=_validate_candidate_assembly,
         )
-        if audit.get("pilot_status") != "pass" or audit.get("material_protocol_review_required") is not False:
-            raise DataContractError("Development verifier pilot did not admit final-test execution")
-    _validate_pilot_audit(layout, config)
-
-    for seed in config.value["training_seeds"]:
-        _resume_generation_stage(layout, config, seed=seed, split="test")
-    test_candidates = layout.resolve("predictions/test/candidates.jsonl")
-    if not test_candidates.is_file():
-        assemble_seed_candidates(layout, config, split="test")
-    _validate_candidate_assembly(layout, config, "test")
-
-    for mode in ("simple", "corrective"):
-        _resume_verifier_stage(
-            layout,
-            config,
-            mode=mode,
-            sentences=layout.resolve("data-prepared/test.jsonl", must_exist=True),
-            candidates=test_candidates,
-            development=development,
-            warmup_candidates=warmup_candidates,
-            model_blob=model_blob,
-            ollama_url=ollama_url,
-        )
-    score_manifest = layout.resolve("manifests/score-manifest.json")
-    if not score_manifest.is_file():
-        score_run(
-            layout,
-            config,
-            ScoreInputs(
-                gold=layout.resolve("data-prepared/test-gold.jsonl", must_exist=True),
-                candidates=test_candidates,
-                simple_verdicts=layout.resolve("verifier/simple/verdicts.jsonl", must_exist=True),
-                corrective_verdicts=layout.resolve("verifier/corrective/verdicts.jsonl", must_exist=True),
-                threshold_selection=threshold_path,
-                nonpublication_smoke=False,
-                output_prefix="",
-            ),
-        )
-    _validate_score(layout, config)
-    contract = table2_runner.load_json(table2_runner.CONTRACT_PATH)
-    table2_runner.validate_parent_lineage(layout.run_root, layout.run_id, contract)
-    table_args = argparse.Namespace(
-        run_id=layout.run_id, ollama_url=ollama_url, dry_run=False
     )
-    return table2_runner.run_command(table_args, contract)
+    from stages import verifier as verifier_stage
+
+    threshold_path, pilot_selection = verifier_stage.prepare_development_gate(
+        layout,
+        config,
+        development_candidates,
+        validate_threshold=_validate_threshold,
+        validate_pilot_inputs=_validate_pilot_inputs,
+    )
+    verifier_context = verifier_stage.run_pilot(
+        layout,
+        config,
+        threshold_path=threshold_path,
+        pilot_selection=pilot_selection,
+        ollama_url=ollama_url,
+        model_blob_source=model_blob_source,
+        encoder_identity=encoder_identity,
+        training_hardware=training_hardware,
+        discover_live_model=_discover_live_model,
+        materialize_model_blob=_materialize_model_blob,
+        write_full_run_manifest=_write_full_run_manifest,
+        resume_verifier_stage=_resume_verifier_stage,
+        load_manifest=_load_manifest,
+        validate_pilot_capture_seals=_validate_pilot_capture_seals,
+        validate_pilot_audit=_validate_pilot_audit,
+    )
+    test_candidates = encoder_stage.generate_test_candidates(
+        layout,
+        config,
+        resume_generation_stage=_resume_generation_stage,
+        validate_candidate_assembly=_validate_candidate_assembly,
+    )
+    verifier_stage.run_test(
+        layout,
+        config,
+        verifier_context,
+        test_candidates,
+        ollama_url=ollama_url,
+        resume_verifier_stage=_resume_verifier_stage,
+    )
+    from stages import evaluation as evaluation_stage
+
+    evaluation_stage.run(
+        layout,
+        config,
+        test_candidates=test_candidates,
+        threshold_path=threshold_path,
+        validate_score=_validate_score,
+    )
+    from stages import rag as rag_stage
+
+    return rag_stage.run(layout, ollama_url=ollama_url)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python stages/pipeline.py",
+        prog="python pipeline.py",
         description=(
             "Canonical CODE-ACCORD pipeline with a complete-run route and "
             "a same-run downstream Table-2 route."
@@ -1509,7 +1369,7 @@ def _parser() -> argparse.ArgumentParser:
 def _run_private_trainer(arguments: list[str]) -> int:
     """Resolve the trainer only from a run ID, approved seed, and tracked config."""
 
-    parser = argparse.ArgumentParser(prog="stages/pipeline.py _train-encoder")
+    parser = argparse.ArgumentParser(prog="pipeline.py _train-encoder")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--training-seed", required=True, type=int)
     parser.add_argument("--config", default=DEFAULT_CONFIG)

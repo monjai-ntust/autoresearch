@@ -13,7 +13,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from utils.pipeline.rag import evaluator
+from utils.rag import evaluator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -249,8 +249,8 @@ class Table2EvaluatorContractTests(unittest.TestCase):
 
     def test_internal_modules_expose_no_file_selector_or_entrypoint(self):
         for relative in (
-            "utils/pipeline/rag/evaluator.py",
-            "utils/pipeline/rag/graph.py",
+            "utils/rag/evaluator.py",
+            "utils/rag/graph.py",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")
             self.assertNotIn("ArgumentParser", source)

@@ -1,6 +1,6 @@
 """Canonical CODE-ACCORD span-NER and relation training.
 
-This private module is invoked only by ``stages/pipeline.py _train-encoder`` with
+This private module is invoked only by ``pipeline.py _train-encoder`` with
 arguments derived from the validated run configuration.
 """
 
@@ -13,15 +13,22 @@ import platform
 import random
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
-from utils.pipeline.encoder import data as code_accord
-from utils.pipeline.encoder.network import BertKGExtractor
+from utils.encoder import data as code_accord
+from utils.encoder.network import BertKGExtractor
+from utils.common.config import PipelineConfig
+from utils.common.paths import RunLayout
+from utils.encoder.model import plan_training
+from utils.evaluation.publication import assemble_seed_candidates
+from utils.rag.runner import require_consistent_encoder_identity
 
 
 def parse_args(argv=None):
@@ -737,3 +744,74 @@ def main(argv=None):
     }
     _atomic_json_write(summary, args.run_summary_out)
     return summary
+
+
+def train_and_generate_development(
+    layout: RunLayout,
+    config: PipelineConfig,
+    *,
+    load_manifest: Callable[[Path, str], dict],
+    validate_training_stage: Callable[..., dict],
+    resume_generation_stage: Callable[..., object],
+    validate_candidate_assembly: Callable[[RunLayout, PipelineConfig, str], object],
+) -> tuple[dict[str, Any], dict[str, object], Path]:
+    """Train all seeds and assemble authenticated development candidates."""
+
+    encoder_identities = []
+    training_hardware: dict[str, object] = {}
+    for seed in config.value["training_seeds"]:
+        dry_manifest = layout.resolve(f"manifests/model-train-dry-run-seed-{seed}.json")
+        if not dry_manifest.is_file():
+            plan_training(
+                layout, config, execution_mode="dry-run", training_seed=seed
+            )
+        validate_training_stage(layout, config, seed, execution_mode="dry-run")
+
+        live_manifest = layout.resolve(f"manifests/model-train-live-seed-{seed}.json")
+        if not live_manifest.is_file():
+            plan_training(layout, config, execution_mode="live", training_seed=seed)
+        training = validate_training_stage(
+            layout, config, seed, execution_mode="live"
+        )
+        checkpoint_identity = load_manifest(
+            layout.resolve(
+                f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
+            ),
+            "checkpoint manifest",
+        )
+        encoder_identities.append(
+            {
+                "base_model": checkpoint_identity["base_model"],
+                "base_model_revision": checkpoint_identity["base_model_revision"],
+            }
+        )
+        if not training_hardware and isinstance(training.get("environment"), dict):
+            training_hardware = training["environment"]
+        resume_generation_stage(layout, config, seed=seed, split="development")
+
+    encoder_identity = require_consistent_encoder_identity(encoder_identities)
+    development_candidates = layout.resolve(
+        "predictions/dev/development-candidates.jsonl"
+    )
+    if not development_candidates.is_file():
+        assemble_seed_candidates(layout, config, split="development")
+    validate_candidate_assembly(layout, config, "development")
+    return encoder_identity, training_hardware, development_candidates
+
+
+def generate_test_candidates(
+    layout: RunLayout,
+    config: PipelineConfig,
+    *,
+    resume_generation_stage: Callable[..., object],
+    validate_candidate_assembly: Callable[[RunLayout, PipelineConfig, str], object],
+) -> Path:
+    """Generate and assemble authenticated final-test candidates."""
+
+    for seed in config.value["training_seeds"]:
+        resume_generation_stage(layout, config, seed=seed, split="test")
+    test_candidates = layout.resolve("predictions/test/candidates.jsonl")
+    if not test_candidates.is_file():
+        assemble_seed_candidates(layout, config, split="test")
+    validate_candidate_assembly(layout, config, "test")
+    return test_candidates

@@ -7,14 +7,14 @@ import os
 from pathlib import Path
 from typing import Any
 
-from utils.pipeline.common.artifact_io import (
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     canonical_json_bytes,
     load_json,
     sha256_file,
 )
-from utils.pipeline.common.paths import RunLayout
+from utils.common.paths import RunLayout
 
 
 CACHE_RELATIVE = "inputs/huggingface"

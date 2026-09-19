@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from utils.pipeline.common.records import Candidate, GoldRecord, StrictTriple, Verdict
+from utils.common.records import Candidate, GoldRecord, StrictTriple, Verdict
 
 
 StrictKey = tuple[str, int, int, str, str, int, int, str]

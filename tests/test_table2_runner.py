@@ -11,8 +11,8 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from stages import pipeline
-from utils.pipeline.rag import runner
+import pipeline
+from utils.rag import runner
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -727,7 +727,7 @@ class Table2RunnerTests(unittest.TestCase):
                 )
 
     def test_runner_has_no_upstream_execution_or_arbitrary_copy_route(self):
-        source = (ROOT / "utils/pipeline/rag/runner.py").read_text(encoding="utf-8")
+        source = (ROOT / "utils/rag/runner.py").read_text(encoding="utf-8")
         self.assertNotIn("build_kg.py", source)
         self.assertNotIn("copy_input", source)
         self.assertNotIn("--inference", source)

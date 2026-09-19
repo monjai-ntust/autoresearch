@@ -8,8 +8,8 @@ import random
 from statistics import fmean, stdev
 from typing import Any, Mapping, Sequence
 
-from utils.pipeline.common.artifact_io import DataContractError
-from utils.pipeline.evaluation.metrics import triple_metrics
+from utils.common.artifact_io import DataContractError
+from utils.evaluation.metrics import triple_metrics
 
 
 def _finite_values(values: Sequence[float], label: str) -> list[float]:

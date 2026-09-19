@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES
-from utils.pipeline.common.artifact_io import (
+from utils.common.config import PipelineConfig
+from utils.common.constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -30,8 +30,8 @@ from utils.pipeline.common.artifact_io import (
     load_json,
     sha256_file,
 )
-from utils.pipeline.common.paths import RunLayout, discover_source_root, resolve_tracked_path
-from utils.pipeline.common.records import Candidate, EntitySpan, StrictTriple, Verdict
+from utils.common.paths import RunLayout, discover_source_root, resolve_tracked_path
+from utils.common.records import Candidate, EntitySpan, StrictTriple, Verdict
 
 
 REASON_CODES = {

@@ -7,9 +7,9 @@ import unittest
 import uuid
 from pathlib import Path
 
-from utils.pipeline.encoder.cache import verify_cache_manifest, write_cache_manifest
-from utils.pipeline.common.artifact_io import DataContractError, atomic_write_bytes
-from utils.pipeline.common.paths import RunLayout, discover_source_root
+from utils.encoder.cache import verify_cache_manifest, write_cache_manifest
+from utils.common.artifact_io import DataContractError, atomic_write_bytes
+from utils.common.paths import RunLayout, discover_source_root
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))

@@ -9,17 +9,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from utils.pipeline.common.config import load_pipeline_config
-from utils.pipeline.common.constants import PROTOCOL_ID
-from utils.pipeline.common.artifact_io import (
+from utils.common.config import load_pipeline_config
+from utils.common.constants import PROTOCOL_ID
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
     sha256_file,
 )
-from utils.pipeline.common.paths import RunLayout, discover_source_root
-from utils.pipeline.common.records import StrictTriple, candidate_id_for
-from utils.pipeline.verifier.verifier import (
+from utils.common.paths import RunLayout, discover_source_root
+from utils.common.records import StrictTriple, candidate_id_for
+from utils.verifier.verifier import (
     HttpResult,
     _verify_live_model,
     run_verifier,
@@ -158,7 +158,7 @@ class VerifierReplayTests(unittest.TestCase):
             model_blob.parent.mkdir(parents=True)
             model_blob.write_bytes(b"fixture")
             with patch(
-                "utils.pipeline.verifier.verifier._verify_live_model"
+                "utils.verifier.verifier._verify_live_model"
             ) as verify_model, \
                  self.assertRaises(DataContractError):
                 run_verifier(
@@ -542,10 +542,10 @@ class VerifierReplayTests(unittest.TestCase):
                 return model_evidence
 
             with patch(
-                "utils.pipeline.verifier.verifier._environment_manifest",
+                "utils.verifier.verifier._environment_manifest",
                 return_value=environment,
             ), patch(
-                "utils.pipeline.verifier.verifier._verify_live_model",
+                "utils.verifier.verifier._verify_live_model",
                 side_effect=verify_model,
             ):
                 manifest = run_verifier(
@@ -611,7 +611,7 @@ class LiveModelIdentityTests(unittest.TestCase):
                 return HttpResult(200, body, hashlib.sha256(b"body").hexdigest())
 
             real_sha256_file = __import__(
-                "utils.pipeline.verifier.verifier", fromlist=["sha256_file"]
+                "utils.verifier.verifier", fromlist=["sha256_file"]
             ).sha256_file
 
             def sha256_file(path):
@@ -625,10 +625,10 @@ class LiveModelIdentityTests(unittest.TestCase):
                 "stdout": "FROM sha256:" + verifier["model_blob_sha256"],
             }
             with patch(
-                "utils.pipeline.verifier.verifier.sha256_file",
+                "utils.verifier.verifier.sha256_file",
                 side_effect=sha256_file,
             ), patch(
-                "utils.pipeline.verifier.verifier._command_output", return_value=command
+                "utils.verifier.verifier._command_output", return_value=command
             ):
                 evidence = _verify_live_model(
                     layout,

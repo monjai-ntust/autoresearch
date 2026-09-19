@@ -19,15 +19,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
-from utils.pipeline.common.config import PipelineConfig
-from utils.pipeline.common.constants import (
+from utils.common.config import PipelineConfig
+from utils.common.constants import (
     CODE_ACCORD_ANNOTATION_FILES,
     ENTITY_TYPES,
     PROTOCOL_ID,
     RELATION_TYPES,
     TREE_HASH_REVISION,
 )
-from utils.pipeline.common.artifact_io import (
+from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
@@ -37,8 +37,8 @@ from utils.pipeline.common.artifact_io import (
     md5_file,
     sha256_file,
 )
-from utils.pipeline.common.paths import RunLayout
-from utils.pipeline.preparation.split import (
+from utils.common.paths import RunLayout
+from utils.preparation.split import (
     SplitItem,
     build_official_code_split,
     official_split_manifest,

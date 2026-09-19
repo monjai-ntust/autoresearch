@@ -33,7 +33,7 @@ claim that canonical results equal the historical statistics.
   the present clone lacks its checkpoints, complete raw logs, full runtime
   manifest, and persisted seed-specific random split memberships.
 - The only pre–Phase A CODE-ACCORD file recoverable from Git is
-  `data/code_accord/entities/train.csv`, blob
+  `resources/data/code-accord-entities-train.csv`, blob
   `1b74f4a7d3693a903d93690adffcc2ef4f276bea`, LF SHA-256
   `c13ad02ab72f0f3a3ddca588c02bcd5d7db1622ae81351d967431623963e4fcd`.
   It byte-matches the official downloaded entity-training member after checkout
@@ -52,9 +52,9 @@ comparison is interpreted that way.
 
 | Invariant | Compatibility host |
 | --- | --- |
-| Encoder/backbone, text adapter, parameter names and shapes | `utils.pipeline.encoder.network.BertKGExtractor`; inactive experimental branches were removed without changing the canonical state-dict keyspace. |
+| Encoder/backbone, text adapter, parameter names and shapes | `utils.encoder.network.BertKGExtractor`; inactive experimental branches were removed without changing the canonical state-dict keyspace. |
 | Span-NER and relation heads | Existing `stages/encoder.py` construction, including the 3H context-between-spans relation head. |
-| Entity/relation label order | Existing `utils.pipeline.encoder.data` four entity types and `NO_REL` plus nine relation types. |
+| Entity/relation label order | Existing `utils.encoder.data` four entity types and `NO_REL` plus nine relation types. |
 | Span enumeration and pair construction | Existing `forward_span_ner`, loss, and evaluation functions. |
 | Losses and weights | Existing focal/label-smoothing/RE loss code with A20+A21+A12 values supplied from `resources/configs/pipeline.json`. |
 | Optimizer and schedule | Existing AdamW, weight decay `0.01`, linear warm-up/decay, 3,500 steps, 250 warm-up steps. |
