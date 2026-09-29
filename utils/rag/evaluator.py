@@ -15,6 +15,22 @@ from typing import Any
 
 MODES = ("llm_only", "text_retrieval", "kg_1hop", "kg_2hop", "hybrid")
 
+RELATION_TEMPLATES = {
+    "used-for": ("What is {head} used for?", "{tail}"),
+    "feature-of": ("What is a feature of {tail}?", "{head}"),
+    "hyponym-of": ("What is {head} a type of?", "{tail}"),
+    "evaluate-for": ("What is {head} evaluated for?", "{tail}"),
+    "evaluated-with": ("What is {head} evaluated with?", "{tail}"),
+    "part-of": ("What is {head} part of?", "{tail}"),
+    "compare": ("What is {head} compared with?", "{tail}"),
+    "compare-with": ("What is {head} compared with?", "{tail}"),
+    "trained-with": ("What is {head} trained with?", "{tail}"),
+    "subclass-of": ("What is {head} a subclass of?", "{tail}"),
+    "subtask-of": ("What is {head} a subtask of?", "{tail}"),
+    "synonym-of": ("What is a synonym of {head}?", "{tail}"),
+    "benchmark-for": ("What is {head} a benchmark for?", "{tail}"),
+}
+
 
 def call_llm(ollama_url, model, prompt):
     """On-premise LLM call via Ollama."""
@@ -36,24 +52,18 @@ def call_llm(ollama_url, model, prompt):
         return f"ERROR: {e}"
 
 
-def generate_questions(records):
+def generate_questions(records, *, additional_templates=None):
     """Generate the complete unique QA panel from gold triples."""
     questions = []
-    rel_templates = {
-        "used-for": ("What is {head} used for?", "{tail}"),
-        "feature-of": ("What is a feature of {tail}?", "{head}"),
-        "hyponym-of": ("What is {head} a type of?", "{tail}"),
-        "evaluate-for": ("What is {head} evaluated for?", "{tail}"),
-        "evaluated-with": ("What is {head} evaluated with?", "{tail}"),
-        "part-of": ("What is {head} part of?", "{tail}"),
-        "compare": ("What is {head} compared with?", "{tail}"),
-        "compare-with": ("What is {head} compared with?", "{tail}"),
-        "trained-with": ("What is {head} trained with?", "{tail}"),
-        "subclass-of": ("What is {head} a subclass of?", "{tail}"),
-        "subtask-of": ("What is {head} a subtask of?", "{tail}"),
-        "synonym-of": ("What is a synonym of {head}?", "{tail}"),
-        "benchmark-for": ("What is {head} a benchmark for?", "{tail}"),
-    }
+    rel_templates = dict(RELATION_TEMPLATES)
+    if additional_templates:
+        overlap = set(rel_templates) & set(additional_templates)
+        if overlap:
+            raise ValueError(
+                "Additional question templates cannot replace frozen templates: "
+                + ", ".join(sorted(overlap))
+            )
+        rel_templates.update(additional_templates)
 
     for rec in records:
         for t in rec.get("gold_triples", []):
@@ -157,21 +167,15 @@ def evaluate(
     kg_identity: str,
     ollama_url: str,
     ollama_model: str,
-    max_questions: int,
     llm_call: Callable[[str, str, str], str] = call_llm,
+    question_panel: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the frozen five-mode transform over authenticated in-memory inputs."""
-    questions = generate_questions(records)
+    questions = generate_questions(records) if question_panel is None else question_panel
     if not questions:
         raise ValueError(
             "No supported questions were generated; refusing to write an empty RAG result."
         )
-    if len(questions) != max_questions:
-        raise ValueError(
-            f"Expected the complete {max_questions}-question panel, "
-            f"but generated {len(questions)} questions."
-        )
-
     results = {mode: [] for mode in MODES}
     correct = {mode: 0 for mode in MODES}
     t0 = time.time()

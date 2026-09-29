@@ -116,7 +116,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
         actual = evaluator.generate_questions(records)
         self.assertEqual(len(actual), 105)
 
-    def test_legacy_question_limit_is_removed(self):
+    def test_evaluator_has_no_question_count_parameter_or_cap(self):
         records = [
             {
                 "doc_id": index,
@@ -131,17 +131,17 @@ class Table2EvaluatorContractTests(unittest.TestCase):
         ]
         questions = evaluator.generate_questions(records)
         self.assertEqual(len(questions), 106)
-        with mock.patch.object(evaluator, "call_llm") as call:
-            with self.assertRaisesRegex(ValueError, "complete 105-question panel"):
-                evaluator.evaluate(
-                    records,
-                    {"nodes": [], "edges": []},
-                    kg_identity="fixture",
-                    ollama_url="http://localhost:11434",
-                    ollama_model="qwen3:32b",
-                    max_questions=CONTRACT["evaluator"]["max_questions"],
-                )
-        call.assert_not_called()
+        prompts = []
+        output = evaluator.evaluate(
+            records,
+            {"nodes": [], "edges": []},
+            kg_identity="fixture",
+            ollama_url="http://localhost:11434",
+            ollama_model="qwen3:32b",
+            llm_call=lambda _url, _model, prompt: prompts.append(prompt) or "answer",
+        )
+        self.assertEqual(output["metadata"]["n_questions"], 106)
+        self.assertEqual(len(prompts), 106 * len(evaluator.MODES))
 
     def test_internal_transform_matches_authoritative_historical_execution(self):
         historical = historical_evaluator()
@@ -200,7 +200,6 @@ class Table2EvaluatorContractTests(unittest.TestCase):
             kg_identity=str(graph_path),
             ollama_url="http://localhost:11434",
             ollama_model="qwen3:32b",
-            max_questions=1,
             llm_call=current_call,
         )
         self.assertEqual(current_prompts, historical_prompts)
@@ -243,7 +242,6 @@ class Table2EvaluatorContractTests(unittest.TestCase):
                     kg_identity="fixture",
                     ollama_url="http://localhost:11434",
                     ollama_model="qwen3:32b",
-                    max_questions=CONTRACT["evaluator"]["max_questions"],
                 )
         call.assert_not_called()
 

@@ -322,7 +322,7 @@ class Table2RunnerTests(unittest.TestCase):
                  ), \
                  mock.patch.object(runner, "fetch_matching_model") as model, \
                  redirect_stdout(io.StringIO()):
-                self.assertEqual(runner.run_command(args, CONTRACT), 0)
+                self.assertEqual(runner.run_protected_command(args, CONTRACT), 0)
             model.assert_not_called()
             self.assertFalse((run_dir / TABLE2_CHILD).exists())
 
@@ -410,7 +410,7 @@ class Table2RunnerTests(unittest.TestCase):
                 runner, "fetch_matching_model", return_value=live_model_capture(summary)
             ), mock.patch.object(runner.evaluator, "evaluate") as evaluate:
                 with self.assertRaisesRegex(runner.PhaseEError, "Source identity changed"):
-                    runner.run_command(args, CONTRACT)
+                    runner.run_protected_command(args, CONTRACT)
             evaluate.assert_not_called()
 
     def test_nested_foreign_run_identity_is_rejected(self):
@@ -521,7 +521,7 @@ class Table2RunnerTests(unittest.TestCase):
             ) as fetch, mock.patch.object(
                 runner.evaluator, "evaluate", side_effect=evaluate
             ), redirect_stdout(io.StringIO()):
-                self.assertEqual(runner.run_command(args, CONTRACT), 0)
+                self.assertEqual(runner.run_protected_command(args, CONTRACT), 0)
                 self.assertEqual(len(evaluator_calls), 3)
                 self.assertEqual(fetch.call_count, 4)
                 for condition in ("confidence", "corrective", "gold"):
@@ -532,7 +532,7 @@ class Table2RunnerTests(unittest.TestCase):
                     )
                 evaluator_calls.clear()
                 fetch.reset_mock()
-                self.assertEqual(runner.run_command(args, CONTRACT), 0)
+                self.assertEqual(runner.run_protected_command(args, CONTRACT), 0)
                 self.assertEqual(evaluator_calls, [])
                 fetch.assert_not_called()
 
@@ -566,14 +566,14 @@ class Table2RunnerTests(unittest.TestCase):
                  mock.patch.object(runner, "write_status", side_effect=fail_final_status), \
                  redirect_stdout(io.StringIO()):
                 with self.assertRaisesRegex(OSError, "injected"):
-                    runner.run_command(args, CONTRACT)
+                    runner.run_protected_command(args, CONTRACT)
             self.assertTrue((run_dir / TABLE2_CHILD / "artifact-hashes.json").is_file())
             with mock.patch.object(runner, "validate_source_contract", return_value=source), \
                  mock.patch.object(runner, "preflight_same_run", return_value=(run_dir, summary, projections, graphs)), \
                  mock.patch.object(runner, "fetch_matching_model", return_value=capture) as resumed_fetch, \
                  mock.patch.object(runner.evaluator, "evaluate") as resumed_evaluate, \
                  redirect_stdout(io.StringIO()):
-                self.assertEqual(runner.run_command(args, CONTRACT), 0)
+                self.assertEqual(runner.run_protected_command(args, CONTRACT), 0)
             resumed_fetch.assert_not_called()
             resumed_evaluate.assert_not_called()
 
@@ -617,7 +617,7 @@ class Table2RunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     runner.PhaseEError, "lineage changed"
                 ):
-                    runner.run_command(args, CONTRACT)
+                    runner.run_protected_command(args, CONTRACT)
             self.assertEqual(evaluate.call_count, 3)
             status = runner.load_json(run_dir / TABLE2_CHILD / "run-status.json")
             self.assertNotEqual(status.get("status"), "complete")
@@ -639,7 +639,7 @@ class Table2RunnerTests(unittest.TestCase):
                 mock.patch.object(runner.evaluator, "evaluate", side_effect=lambda _r, _k, *, kg_identity, **_kw: rag_result(summary, kg_identity)),
             ]
             with common[0], common[1], common[2], common[3], redirect_stdout(io.StringIO()):
-                runner.run_command(args, CONTRACT)
+                runner.run_protected_command(args, CONTRACT)
             status_path = run_dir / TABLE2_CHILD / "run-status.json"
             status = json.loads(status_path.read_text(encoding="utf-8"))
             status["stages"]["rag_corrective"].pop("post_model_identity_check")
@@ -649,7 +649,7 @@ class Table2RunnerTests(unittest.TestCase):
                  mock.patch.object(runner, "fetch_matching_model", return_value=capture) as fetch, \
                  mock.patch.object(runner.evaluator, "evaluate", side_effect=lambda _r, _k, *, kg_identity, **_kw: rag_result(summary, kg_identity)) as evaluate, \
                  redirect_stdout(io.StringIO()):
-                self.assertEqual(runner.run_command(args, CONTRACT), 0)
+                self.assertEqual(runner.run_protected_command(args, CONTRACT), 0)
             self.assertEqual(evaluate.call_count, 2)
             self.assertEqual(fetch.call_count, 2)
 

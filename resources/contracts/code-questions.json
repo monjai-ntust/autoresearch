@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profile_id": "code-original",
+  "base_contract": "resources/contracts/table2.json",
+  "base_contract_sha256": "c80f0879c25176218209d3d6678b41b10b71561b22d7ca5410ee17606db86204",
+  "protected_namespace": "table2-q105",
+  "output_namespace": "table2-code-all",
+  "additional_templates": [
+    {
+      "relation": "necessity",
+      "question": "What is required for {head}?",
+      "answer": "{tail}"
+    },
+    {
+      "relation": "selection",
+      "question": "What is selected or specified for {head}?",
+      "answer": "{tail}"
+    },
+    {
+      "relation": "equal",
+      "question": "What is {head} equal to?",
+      "answer": "{tail}"
+    },
+    {
+      "relation": "greater-equal",
+      "question": "What is the minimum value for {head}?",
+      "answer": "{tail}"
+    },
+    {
+      "relation": "less-equal",
+      "question": "What is the maximum value for {head}?",
+      "answer": "{tail}"
+    },
+    {
+      "relation": "greater",
+      "question": "What value is {head} greater than?",
+      "answer": "{tail}"
+    },
+    {
+      "relation": "less",
+      "question": "What value is {head} less than?",
+      "answer": "{tail}"
+    }
+  ]
+}

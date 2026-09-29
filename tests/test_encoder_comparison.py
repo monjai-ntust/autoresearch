@@ -44,8 +44,7 @@ SOURCE_ROOT = discover_source_root(Path(__file__))
 ENTRYPOINT = SOURCE_ROOT / "encoder_comparison.py"
 PIPELINE = SOURCE_ROOT / "pipeline.py"
 PHASE_F_BASELINE = "5db3bce"
-PHASE_F_FLOW_PATHS = (
-    "pipeline.py",
+PHASE_F_ENCODER_FLOW_PATHS = (
     "resources/configs/experiment_matrix.json",
     "resources/configs/pipeline.json",
     "resources/configs/section5_evidence.json",
@@ -58,7 +57,6 @@ PHASE_F_FLOW_PATHS = (
     "stages/encoder.py",
     "stages/evaluation.py",
     "stages/preparation.py",
-    "stages/rag.py",
     "stages/verifier.py",
     "utils/common/artifact_io.py",
     "utils/common/config.py",
@@ -78,9 +76,7 @@ PHASE_F_FLOW_PATHS = (
     "utils/preparation/acquisition.py",
     "utils/preparation/preparation.py",
     "utils/preparation/split.py",
-    "utils/rag/evaluator.py",
     "utils/rag/graph.py",
-    "utils/rag/runner.py",
     "utils/verifier/pilot.py",
     "utils/verifier/threshold.py",
     "utils/verifier/verifier.py",
@@ -138,8 +134,8 @@ class EncoderComparisonTests(unittest.TestCase):
             ).stdout.strip()
             self.assertEqual(actual_blob, expected_blob, name)
 
-    def test_original_phase_f_pipeline_flow_is_byte_identical(self):
-        for path in PHASE_F_FLOW_PATHS:
+    def test_original_phase_f_encoder_and_shared_flow_is_byte_identical(self):
+        for path in PHASE_F_ENCODER_FLOW_PATHS:
             baseline = subprocess.run(
                 ["git", "rev-parse", f"{PHASE_F_BASELINE}:{path}"],
                 cwd=SOURCE_ROOT,
@@ -238,7 +234,7 @@ class EncoderComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(DataContractError, "40 lowercase hex"):
             _validate_profile(profile, 0)
 
-    def test_entrypoint_is_thin_and_does_not_change_pipeline_dispatch(self):
+    def test_entrypoint_is_thin_and_does_not_enter_pipeline_dispatch(self):
         entry_source = ENTRYPOINT.read_text(encoding="utf-8")
         definitions = [
             node.name
@@ -248,21 +244,6 @@ class EncoderComparisonTests(unittest.TestCase):
         self.assertEqual(definitions, ["_parser", "main"])
         self.assertLessEqual(len(entry_source.splitlines()), 130)
         pipeline_source = PIPELINE.read_text(encoding="utf-8")
-        working_blob = subprocess.run(
-            ["git", "hash-object", "pipeline.py"],
-            cwd=SOURCE_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        committed_blob = subprocess.run(
-            ["git", "rev-parse", "HEAD:pipeline.py"],
-            cwd=SOURCE_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        self.assertEqual(working_blob, committed_blob)
         self.assertNotIn("encoder_comparison", pipeline_source)
 
     def test_stage_reuses_current_preparation_and_data_cache_contracts(self):

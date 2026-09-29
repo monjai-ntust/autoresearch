@@ -1772,10 +1772,15 @@ def validate_rag_output(
     *,
     expected_questions: list[dict[str, str]],
     expected_kg: str,
+    expected_count: int | None = None,
 ) -> dict[str, Any]:
     output = load_json(path)
     modes = list(evaluator.MODES)
-    count = contract["evaluator"]["max_questions"]
+    count = (
+        contract["evaluator"]["max_questions"]
+        if expected_count is None
+        else expected_count
+    )
     if not isinstance(output, dict) or set(output) != {"metadata", "accuracy", "correct_counts", "results"}:
         raise PhaseEError(f"RAG output has changed top-level fields: {path}")
     metadata = output.get("metadata")
@@ -2260,7 +2265,8 @@ def validate_phase_e_child(
     return results
 
 
-def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
+def run_protected_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
+    """Run the immutable 105-question prerequisite child."""
     source = validate_source_contract(contract, require_clean=not args.dry_run)
     run_dir, preflight, projections, graphs = preflight_same_run(args.run_id, contract)
     child_namespace = table2_child_namespace(contract)
@@ -2417,7 +2423,6 @@ def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
                 kg_identity=kg_identity,
                 ollama_url=args.ollama_url.rstrip("/"),
                 ollama_model=preflight["model_identity"]["name"],
-                max_questions=contract["evaluator"]["max_questions"],
             ),
             output_path,
             lambda path, kg_identity=kg_identity: validate_rag_output(
@@ -2497,3 +2502,11 @@ def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
     write_status(status_path, status, child_dir)
     print(json.dumps({"run_dir": str(run_dir), "child": child_namespace, "status": "complete"}, indent=2))
     return 0
+
+
+def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
+    """Run the approved replacement RAG path over original CODE questions."""
+
+    from utils.rag import code_questions
+
+    return code_questions.run_command(args, contract)

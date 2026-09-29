@@ -1,4 +1,4 @@
-"""Primary CODE-ACCORD publication and same-run Table-2 pipeline."""
+"""Primary CODE-ACCORD publication and expanded same-run Table-2 pipeline."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="python pipeline.py",
         description=(
             "Canonical CODE-ACCORD pipeline with a complete-run route and "
-            "a same-run downstream Table-2 route."
+            "a same-run expanded downstream Table-2 route."
         ),
     )
     parser.add_argument(
@@ -102,14 +102,15 @@ def _parser() -> argparse.ArgumentParser:
     full.add_argument("--model-blob-source")
 
     table2 = subparsers.add_parser(
-        "table2", help="Run only downstream Table-2 RAG from a completed same run"
+        "table2",
+        help="Run the expanded downstream Table-2 RAG from a completed same run",
     )
     table2.add_argument("--run-id", required=True)
     table2.add_argument("--ollama-url", default="http://localhost:11434")
     table2.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser(
-        "validate-table2", help="Validate the frozen Table-2 source contract"
+        "validate-table2", help="Validate protected and expanded Table-2 contracts"
     )
     return parser
 
@@ -133,9 +134,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.stage in {"table2", "validate-table2"}:
             contract = table2_runner.load_json(table2_runner.CONTRACT_PATH)
             if args.stage == "validate-table2":
+                from utils.rag import code_questions
+
                 print(
                     json.dumps(
-                        table2_runner.validate_source_contract(contract, False),
+                        {
+                            "source": table2_runner.validate_source_contract(
+                                contract, False
+                            ),
+                            "replacement_rag": code_questions.load_profile(),
+                        },
                         indent=2,
                     )
                 )

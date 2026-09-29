@@ -81,7 +81,7 @@ encoder input. A full run discovers and hashes the Qwen model that is actually
 served, copies its bytes into the run's content-addressed input area, and binds
 all verifier consumers to that run-local identity.
 
-## Generate the canonical upstream artifacts and Table 2
+## Generate the canonical upstream artifacts and expanded Table 2
 
 Choose a new run ID containing 1-64 letters, digits, `.`, `_`, or `-`, beginning
 with a letter or digit. Start Ollama with the configured Qwen model, then run:
@@ -96,7 +96,10 @@ If Ollama's `FROM` path is not directly accessible, add
 `--model-blob-source /absolute/path/to/the/model/blob`. The source must be an
 external immutable input, not a file under any `output/<run-id>/` tree.
 
-The Python entry point performs and resumes the complete ordered workflow. It
+The Python entry point performs and resumes the complete ordered workflow. Its
+RAG stage first seals the 105-question historical-method prerequisite, then
+freshly evaluates the 467-question original-CODE panel and requires exact
+`part-of` result parity. It
 does not replace a different existing artifact, bypass the development pilot,
 or reuse a stage whose manifest/hash binding has changed.
 
@@ -130,8 +133,9 @@ statistics contract, and command contract.
 ## Run only downstream Table 2
 
 Use this route when a complete authenticated run already contains the encoder,
-candidate, threshold, verifier, and score outputs. It never trains the encoder
-or invokes the verifier.
+candidate, threshold, verifier, score outputs, and authenticated
+`table2-q105/` historical-method child. It never trains the encoder or invokes
+the verifier. It does not insert stored answers into the replacement output.
 
 First validate the same-run plan without writes or model calls:
 
@@ -141,8 +145,8 @@ uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --dry-run
 ```
 
-Then execute the frozen answer evaluator against the same Qwen identity that
-the selected run's corrective verifier recorded:
+Then execute the replacement answer evaluator against the same Qwen identity
+that the selected run's corrective verifier recorded:
 
 ```bash
 uv run --frozen --no-sync python -I -B pipeline.py table2 \
@@ -150,29 +154,35 @@ uv run --frozen --no-sync python -I -B pipeline.py table2 \
   --ollama-url http://localhost:11434
 ```
 
-The approved full-panel Table-2 output is confined to
-`output/<run-id>/table2-q105/`. This separate same-run namespace preserves any
-prior 10-question Table-2 child as historical evidence. Missing canonical
-graphs are deterministically reconstructed only from authenticated prepared
-data, gold, seed-42 candidates, the development-selected threshold, and
-corrective verdicts in that same run. If a canonical graph already exists, its
-canonical JSON must exactly equal the reconstruction before it is reused.
+The replacement output is confined to
+`output/<run-id>/table2-code-all/`. The immutable
+`output/<run-id>/table2-q105/` child supplies the authenticated graph projections
+and historical parity oracle. The replacement freshly executes all 467
+questions (7,005 calls across five modes and three graph conditions), extracts
+its 105 `part-of` rows, and requires exact equality with all 1,575 historical
+rows. A mismatch leaves the new output in `parity-failed` state for review; it
+never substitutes stored responses. Missing canonical graphs are
+deterministically reconstructed only from authenticated prepared data, gold,
+seed-42 candidates, the development-selected threshold, and corrective verdicts
+in that same run. If a canonical graph already exists, its canonical JSON must
+exactly equal the reconstruction before it is reused.
 
 ## Frozen Table-2 evaluator
 
 Historical source blob `964893546b28f04e34e8c546bcbbfd4cfbc27354`
-is the prompt and method authority. The internal evaluator preserves its 13
-case-folded relation templates, the approved full 105-question panel, five mode order,
-retrieval behavior, exact prompt construction, `think=false`, temperature
-`0.0`, `num_predict=50`, lenient answer matcher, aggregation, and output
-semantics. The only added behavior is a fail-closed guard for an empty supported
-question set.
+remains the prompt and method authority. The protected generator retains its 13
+case-folded templates and 105-question panel. The replacement adds only the
+seven literal original-CODE templates from the bounded historical source and
+removes sampling, yielding 467 ordered questions on the reference input. Both
+paths preserve five-mode order, retrieval behavior, exact prompt construction,
+`think=false`, temperature `0.0`, `num_predict=50`, lenient answer matching,
+aggregation, output semantics, and the fail-closed empty-panel guard.
 
 The text condition is historical unique-word overlap, not BM25. The
 answer-derived retrieval query, unequal evidence access, and lenient matching
 are retained limitations rather than corrected methodology. The former
-10-question sample-size limitation is replaced only by the approved full
-105-question panel.
+100-question sampling limitation is replaced only by complete ordered coverage
+of the original CODE question generator.
 
 ## Failure and output handling
 
