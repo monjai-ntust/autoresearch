@@ -114,9 +114,9 @@ def rag_output(
 
 class CodeQuestionTests(unittest.TestCase):
     def setUp(self):
-        self.profile = code_questions.load_profile()
+        self.method = code_questions.replacement_method()
 
-    def test_profile_matches_historical_templates_and_keeps_protected_generator(self):
+    def test_method_matches_historical_templates_and_keeps_protected_generator(self):
         records = [
             record(
                 1,
@@ -134,7 +134,7 @@ class CodeQuestionTests(unittest.TestCase):
             )
         ]
         protected = evaluator.generate_questions(records)
-        panels = code_questions.build_question_panels(records, self.profile)
+        panels = code_questions.build_question_panels(records)
         self.assertEqual([row["relation"] for row in protected], ["part-of"])
         self.assertEqual(protected, panels["protected"])
         self.assertEqual(panels["summary"]["relation_counts"]["less"], 0)
@@ -146,7 +146,7 @@ class CodeQuestionTests(unittest.TestCase):
         self.assertEqual(
             tuple(
                 (item["relation"], item["question"], item["answer"])
-                for item in self.profile["additional_templates"]
+                for item in self.method["additional_templates"]
             ),
             code_questions.EXPECTED_ADDITIONAL_TEMPLATES,
         )
@@ -181,7 +181,7 @@ class CodeQuestionTests(unittest.TestCase):
                 sentence="Unrelated source sentence.",
             ),
         ]
-        panels = code_questions.build_question_panels(records, self.profile)
+        panels = code_questions.build_question_panels(records)
         prompts = []
 
         def call(_url, _model, prompt):
@@ -202,15 +202,14 @@ class CodeQuestionTests(unittest.TestCase):
         self.assertIn("Widget Power appears in protected context.", prompts[1])
         self.assertEqual(list(output["results"]), list(evaluator.MODES))
 
-    def test_profile_rejects_template_override_or_extra_fields(self):
-        changed = json.loads(json.dumps(self.profile))
+    def test_method_is_source_defined_without_a_duplicate_resource(self):
+        changed = code_questions.replacement_method()
         changed["additional_templates"][0]["question"] = "Changed {head}?"
-        with self.assertRaisesRegex(runner.PhaseEError, "approved literals"):
-            code_questions.validate_profile(changed)
-        changed = json.loads(json.dumps(self.profile))
-        changed["additional_templates"][0]["extra"] = True
-        with self.assertRaisesRegex(runner.PhaseEError, "malformed"):
-            code_questions.validate_profile(changed)
+        self.assertEqual(
+            code_questions.replacement_method()["additional_templates"][0]["question"],
+            "What is required for {head}?",
+        )
+        self.assertFalse((ROOT / "resources/contracts/code-questions.json").exists())
 
     def test_parity_extracts_fresh_part_of_rows_in_combined_order(self):
         records = [
@@ -219,7 +218,7 @@ class CodeQuestionTests(unittest.TestCase):
             record(3, [("Choice", "selection", "Option")]),
             record(4, [("Piece", "part-of", "Set")]),
         ]
-        panels = code_questions.build_question_panels(records, self.profile)
+        panels = code_questions.build_question_panels(records)
         protected = rag_output(
             panels["protected"], kg="protected-graph", model="model", prefix="protected"
         )
@@ -289,22 +288,22 @@ class CodeQuestionTests(unittest.TestCase):
                 runner, "fetch_matching_model"
             ) as fetch, redirect_stdout(io.StringIO()):
                 self.assertEqual(
-                    code_questions.run_command(args, CONTRACT, self.profile), 0
+                    code_questions.run_command(args, CONTRACT), 0
                 )
             fetch.assert_not_called()
-            self.assertFalse((run_dir / self.profile["output_namespace"]).exists())
+            self.assertFalse((run_dir / code_questions.OUTPUT_NAMESPACE).exists())
 
     def test_replacement_executes_full_panel_and_resumes(self):
         records = [
             record(1, [("Need", "necessity", "Power")], "Need Power context."),
             record(2, [("Part", "part-of", "Whole")], "Part Whole context."),
         ]
-        panels = code_questions.build_question_panels(records, self.profile)
+        panels = code_questions.build_question_panels(records)
         output_root = ROOT / "output"
         output_root.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=output_root) as temporary:
             run_dir = Path(temporary).resolve()
-            protected_dir = run_dir / self.profile["protected_namespace"]
+            protected_dir = run_dir / code_questions.PROTECTED_NAMESPACE
             projection_dir = protected_dir / "projections"
             result_dir = protected_dir / "rag-results"
             projection_dir.mkdir(parents=True)
@@ -360,18 +359,21 @@ class CodeQuestionTests(unittest.TestCase):
                 "run_id": RUN_ID,
                 "run_dir": str(run_dir),
                 "lineage_status": "lineage-valid",
-                "profile_id": self.profile["profile_id"],
-                "profile_sha256": runner.sha256_file(code_questions.PROFILE_PATH),
+                "profile_id": code_questions.PROFILE_ID,
+                "method_sha256": runner.sha256_bytes(
+                    runner.canonical_json_bytes(self.method)
+                ),
                 "base_contract_sha256": runner.sha256_file(runner.CONTRACT_PATH),
                 "base_preflight_identity": runner._preflight_identity(base_preflight),
                 "protected_child": {
-                    "namespace": self.profile["protected_namespace"],
+                    "namespace": code_questions.PROTECTED_NAMESPACE,
                     "identity": {"source_head": "old-source"},
                     "artifact_hashes_sha256": "3" * 64,
                     "inventory_sha256": inventory["inventory_sha256"],
                     "files": inventory["files"],
                 },
                 "questions": panels["summary"],
+                "method": self.method,
                 "model_identity": identity,
                 "environment": {},
             }
@@ -426,7 +428,7 @@ class CodeQuestionTests(unittest.TestCase):
                 evaluator, "evaluate", side_effect=evaluate
             ) as execute, redirect_stdout(io.StringIO()):
                 self.assertEqual(
-                    code_questions.run_command(args, CONTRACT, self.profile), 0
+                    code_questions.run_command(args, CONTRACT), 0
                 )
                 self.assertEqual(len(calls), 3)
                 self.assertTrue(all(item[0] == records for item in calls))
@@ -436,7 +438,7 @@ class CodeQuestionTests(unittest.TestCase):
                 fetch.reset_mock()
                 execute.reset_mock()
                 self.assertEqual(
-                    code_questions.run_command(args, CONTRACT, self.profile), 0
+                    code_questions.run_command(args, CONTRACT), 0
                 )
                 fetch.assert_not_called()
                 execute.assert_not_called()
@@ -445,7 +447,7 @@ class CodeQuestionTests(unittest.TestCase):
             )
             combined = runner.load_json(
                 run_dir
-                / self.profile["output_namespace"]
+                / code_questions.OUTPUT_NAMESPACE
                 / "rag-results/confidence.json"
             )
             historical = protected_results["confidence"]["results"]["llm_only"][0]

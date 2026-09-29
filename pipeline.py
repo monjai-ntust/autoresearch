@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
                             "source": table2_runner.validate_source_contract(
                                 contract, False
                             ),
-                            "replacement_rag": code_questions.load_profile(),
+                            "replacement_rag": code_questions.replacement_method(),
                         },
                         indent=2,
                     )

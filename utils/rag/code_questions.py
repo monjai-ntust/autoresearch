@@ -18,8 +18,9 @@ from typing import Any
 from utils.rag import evaluator, runner
 
 
-PROFILE_PATH = runner.ROOT / "resources/contracts/code-questions.json"
 PROFILE_ID = "code-original"
+PROTECTED_NAMESPACE = "table2-q105"
+OUTPUT_NAMESPACE = "table2-code-all"
 EXPECTED_ADDITIONAL_TEMPLATES = (
     ("necessity", "What is required for {head}?", "{tail}"),
     ("selection", "What is selected or specified for {head}?", "{tail}"),
@@ -31,55 +32,25 @@ EXPECTED_ADDITIONAL_TEMPLATES = (
 )
 
 
-def load_profile() -> dict[str, Any]:
-    """Load and validate the tracked extension profile."""
+def replacement_method() -> dict[str, Any]:
+    """Describe the source-defined replacement method for emitted provenance."""
 
-    return validate_profile(runner.load_json(PROFILE_PATH))
-
-
-def validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    """Fail closed unless the profile is the approved literal extension."""
-
-    expected_keys = {
-        "schema_version",
-        "profile_id",
-        "base_contract",
-        "base_contract_sha256",
-        "protected_namespace",
-        "output_namespace",
-        "additional_templates",
-    }
-    if not isinstance(profile, dict) or set(profile) != expected_keys:
-        raise runner.PhaseEError("CODE question profile fields differ from revision 0.1")
-    if (
-        profile.get("schema_version") != 1
-        or profile.get("profile_id") != PROFILE_ID
-        or profile.get("base_contract") != "resources/contracts/table2.json"
-        or profile.get("protected_namespace") != "table2-q105"
-        or profile.get("output_namespace") != "table2-code-all"
-    ):
-        raise runner.PhaseEError("CODE question profile identity is invalid")
-    if profile.get("base_contract_sha256") != runner.sha256_file(runner.CONTRACT_PATH):
-        raise runner.PhaseEError("CODE question profile does not bind the frozen base contract")
-    templates = profile.get("additional_templates", [])
-    if not isinstance(templates, list) or any(
-        not isinstance(item, dict) or set(item) != {"relation", "question", "answer"}
-        for item in templates
-    ):
-        raise runner.PhaseEError("CODE question template records are malformed")
-    observed = tuple(
-        (item.get("relation"), item.get("question"), item.get("answer"))
-        for item in templates
-    )
-    if observed != EXPECTED_ADDITIONAL_TEMPLATES:
-        raise runner.PhaseEError("CODE question templates differ from the approved literals")
-    return profile
-
-
-def _template_mapping(profile: dict[str, Any]) -> dict[str, tuple[str, str]]:
     return {
-        item["relation"]: (item["question"], item["answer"])
-        for item in profile["additional_templates"]
+        "schema_version": 1,
+        "profile_id": PROFILE_ID,
+        "protected_namespace": PROTECTED_NAMESPACE,
+        "output_namespace": OUTPUT_NAMESPACE,
+        "additional_templates": [
+            {"relation": relation, "question": question, "answer": answer}
+            for relation, question, answer in EXPECTED_ADDITIONAL_TEMPLATES
+        ],
+    }
+
+
+def _template_mapping() -> dict[str, tuple[str, str]]:
+    return {
+        relation: (question, answer)
+        for relation, question, answer in EXPECTED_ADDITIONAL_TEMPLATES
     }
 
 
@@ -93,14 +64,12 @@ def _question_digest(questions: list[dict[str, Any]]) -> str:
     return runner.sha256_bytes(content)
 
 
-def build_question_panels(
-    records: list[dict[str, Any]], profile: dict[str, Any]
-) -> dict[str, Any]:
+def build_question_panels(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Build protected, added, and combined panels with exact ordered removal."""
 
     protected = evaluator.generate_questions(records)
     combined = evaluator.generate_questions(
-        records, additional_templates=_template_mapping(profile)
+        records, additional_templates=_template_mapping()
     )
     protected_subset = [row for row in combined if row["relation"] == "part-of"]
     if protected != protected_subset:
@@ -238,7 +207,6 @@ def _base_preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
 def preflight_code_questions(
     run_id: str,
     base_contract: dict[str, Any],
-    profile: dict[str, Any],
 ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     """Authenticate the same-run parent and immutable protected child."""
 
@@ -247,22 +215,18 @@ def preflight_code_questions(
     )
     protected = _validate_protected_child(run_dir, base_preflight, base_contract)
     records = _records_from_bytes(projections["records"])
-    panels = build_question_panels(records, profile)
-    protected_count = base_contract["evaluator"]["max_questions"]
-    if panels["summary"]["protected_count"] != protected_count:
-        raise runner.PhaseEError(
-            f"Protected child must contain exactly {protected_count} questions"
-        )
+    panels = build_question_panels(records)
+    method = replacement_method()
     summary = {
         "run_id": run_id,
         "run_dir": str(run_dir),
         "lineage_status": "lineage-valid",
-        "profile_id": profile["profile_id"],
-        "profile_sha256": runner.sha256_file(PROFILE_PATH),
+        "profile_id": PROFILE_ID,
+        "method_sha256": runner.sha256_bytes(runner.canonical_json_bytes(method)),
         "base_contract_sha256": runner.sha256_file(runner.CONTRACT_PATH),
         "base_preflight_identity": _base_preflight_identity(base_preflight),
         "protected_child": {
-            "namespace": profile["protected_namespace"],
+            "namespace": base_contract["evaluator"]["output_namespace"],
             "identity": protected["identity"],
             "artifact_hashes_sha256": runner.sha256_file(
                 protected["dir"] / "artifact-hashes.json"
@@ -271,6 +235,7 @@ def preflight_code_questions(
             "files": protected["inventory"]["files"],
         },
         "questions": panels["summary"],
+        "method": method,
         "model_identity": base_preflight["model_identity"],
         "environment": base_preflight["environment"],
     }
@@ -293,7 +258,7 @@ def build_identity(
         "run_id": run_id,
         "source": source,
         "profile_id": summary["profile_id"],
-        "profile_sha256": summary["profile_sha256"],
+        "method_sha256": summary["method_sha256"],
         "base_contract_sha256": summary["base_contract_sha256"],
         "base_preflight_identity": summary["base_preflight_identity"],
         "protected_identity": summary["protected_child"]["identity"],
@@ -310,14 +275,14 @@ def build_identity(
 
 
 def _validate_tracked_extension_source(source: dict[str, str]) -> None:
-    """Require the new controller and profile to be bytes from source HEAD."""
+    """Require the replacement controller to be bytes from source HEAD."""
 
-    for path in (Path(__file__).resolve(), PROFILE_PATH):
-        relative = path.relative_to(runner.ROOT).as_posix()
-        if runner._git_file_bytes(source["head"], relative) != path.read_bytes():
-            raise runner.PhaseEError(
-                f"CODE question source is not identical to source HEAD: {relative}"
-            )
+    path = Path(__file__).resolve()
+    relative = path.relative_to(runner.ROOT).as_posix()
+    if runner._git_file_bytes(source["head"], relative) != path.read_bytes():
+        raise runner.PhaseEError(
+            f"CODE question source is not identical to source HEAD: {relative}"
+        )
 
 
 def validate_execution_snapshot(
@@ -326,17 +291,20 @@ def validate_execution_snapshot(
     summary: dict[str, Any],
     runtime: dict[str, Any],
     base_contract: dict[str, Any],
-    profile: dict[str, Any],
 ) -> None:
-    """Recheck source, profile, projections, and the complete protected child."""
+    """Recheck source, method, projections, and the complete protected child."""
 
     if runner.validate_source_contract(base_contract, require_clean=True) != source:
         raise runner.PhaseEError("Source identity changed after CODE-question preflight")
     _validate_tracked_extension_source(source)
-    if validate_profile(runner.load_json(PROFILE_PATH)) != profile:
-        raise runner.PhaseEError("CODE question profile changed after preflight")
-    if runner.sha256_file(PROFILE_PATH) != summary["profile_sha256"]:
-        raise runner.PhaseEError("CODE question profile hash changed after preflight")
+    method = replacement_method()
+    if method != summary["method"]:
+        raise runner.PhaseEError("CODE question method changed after preflight")
+    if (
+        runner.sha256_bytes(runner.canonical_json_bytes(method))
+        != summary["method_sha256"]
+    ):
+        raise runner.PhaseEError("CODE question method hash changed after preflight")
     if runner.sha256_file(runner.CONTRACT_PATH) != summary["base_contract_sha256"]:
         raise runner.PhaseEError("Base Table-2 contract changed after preflight")
     if build_identity(summary["run_id"], source, summary) != identity:
@@ -351,18 +319,16 @@ def validate_execution_snapshot(
             != runtime["base_preflight"]["projection_sha256"][name]
         ):
             raise runner.PhaseEError(f"Protected projection changed: {name}")
-    rebuilt = build_question_panels(runtime["records"], profile)
+    rebuilt = build_question_panels(runtime["records"])
     if rebuilt["summary"] != summary["questions"]:
         raise runner.PhaseEError("CODE question panel changed after preflight")
 
 
-def question_ledger(
-    run_id: str, panels: dict[str, Any], profile: dict[str, Any]
-) -> dict[str, Any]:
+def question_ledger(run_id: str, panels: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": "phase-g-code-question-ledger-1.0",
         "run_id": run_id,
-        "profile_id": profile["profile_id"],
+        "profile_id": PROFILE_ID,
         "hash_serialization": (
             "UTF-8 JSON, ensure_ascii=false, sort_keys=true, separators=(',', ':'), "
             "no trailing newline"
@@ -537,7 +503,6 @@ def validate_extension_child(
     identity: dict[str, Any],
     summary: dict[str, Any],
     runtime: dict[str, Any],
-    profile: dict[str, Any],
 ) -> dict[str, Any]:
     """Validate every replacement artifact and its immutable parity oracle."""
 
@@ -561,7 +526,7 @@ def validate_extension_child(
     validate_child_inventory(
         runtime["protected"]["dir"], runtime["protected"]["inventory"]
     )
-    expected_ledger = question_ledger(summary["run_id"], runtime["panels"], profile)
+    expected_ledger = question_ledger(summary["run_id"], runtime["panels"])
     if runner.load_json(child_dir / "question-ledger.json") != expected_ledger:
         raise runner.PhaseEError("CODE question ledger changed")
     expected_parent = {
@@ -575,7 +540,7 @@ def validate_extension_child(
         "schema_version": "phase-g-code-question-method-1.0",
         "run_id": summary["run_id"],
         "identity": identity,
-        "profile": profile,
+        "method": summary["method"],
         "base_contract": runner.load_json(runner.CONTRACT_PATH),
         "reuse": {
             "protected_results": "comparison-only",
@@ -671,7 +636,7 @@ def validate_extension_child(
     expected_summary = {
         "schema_version": "phase-g-code-question-results-1.0",
         "run_id": summary["run_id"],
-        "profile_id": profile["profile_id"],
+        "profile_id": PROFILE_ID,
         "question_summary": summary["questions"],
         "conditions": condition_summaries,
         "historical_part_of_parity": {
@@ -700,29 +665,25 @@ def validate_extension_child(
 def run_command(
     args: argparse.Namespace,
     base_contract: dict[str, Any],
-    profile: dict[str, Any] | None = None,
 ) -> int:
     """Validate or execute the full-panel same-run replacement RAG."""
 
-    profile = load_profile() if profile is None else validate_profile(profile)
     source = runner.validate_source_contract(
         base_contract, require_clean=not args.dry_run
     )
-    run_dir, summary, runtime = preflight_code_questions(
-        args.run_id, base_contract, profile
-    )
+    run_dir, summary, runtime = preflight_code_questions(args.run_id, base_contract)
     if args.dry_run:
         print(json.dumps({"source": source, **summary}, indent=2, sort_keys=True))
         return 0
 
-    child_dir = run_dir / profile["output_namespace"]
+    child_dir = run_dir / OUTPUT_NAMESPACE
     status_path = child_dir / "run-status.json"
     runner.validate_child_write_surface(child_dir)
     identity = build_identity(args.run_id, source, summary)
     new_child = not child_dir.exists() or not status_path.exists()
     if child_dir.exists() and not status_path.exists() and any(child_dir.iterdir()):
         raise runner.PhaseEError(
-            f"{profile['output_namespace']} exists without a resumable status identity"
+            f"{OUTPUT_NAMESPACE} exists without a resumable status identity"
         )
     if new_child:
         status = {
@@ -741,7 +702,7 @@ def run_command(
             raise runner.PhaseEError("Existing CODE question child identity differs")
         if status.get("status") == "complete":
             validate_extension_child(
-                child_dir, status, identity, summary, runtime, profile
+                child_dir, status, identity, summary, runtime
             )
             print(
                 json.dumps(
@@ -781,7 +742,7 @@ def run_command(
 
     runner.write_json_once(
         child_dir / "question-ledger.json",
-        question_ledger(args.run_id, runtime["panels"], profile),
+        question_ledger(args.run_id, runtime["panels"]),
         child_dir,
     )
     runner.write_json_once(
@@ -799,7 +760,7 @@ def run_command(
             "schema_version": "phase-g-code-question-method-1.0",
             "run_id": args.run_id,
             "identity": identity,
-            "profile": profile,
+            "method": summary["method"],
             "base_contract": base_contract,
             "reuse": {
                 "protected_results": "comparison-only",
@@ -831,7 +792,7 @@ def run_command(
     for condition in ("confidence", "corrective", "gold"):
         stage_name = f"rag_{condition}"
         validate_execution_snapshot(
-            identity, source, summary, runtime, base_contract, profile
+            identity, source, summary, runtime, base_contract
         )
         stage = status.get("stages", {}).get(stage_name)
         reuse_completed = False
@@ -872,7 +833,7 @@ def run_command(
         )
         if not reuse_completed:
             validate_execution_snapshot(
-                identity, source, summary, runtime, base_contract, profile
+                identity, source, summary, runtime, base_contract
             )
             evidence, tags_bytes, show_bytes = runner.fetch_matching_model(
                 args.ollama_url, summary["model_identity"]
@@ -930,7 +891,7 @@ def run_command(
     result_summary = {
         "schema_version": "phase-g-code-question-results-1.0",
         "run_id": args.run_id,
-        "profile_id": profile["profile_id"],
+        "profile_id": PROFILE_ID,
         "question_summary": summary["questions"],
         "conditions": condition_summaries,
         "historical_part_of_parity": {
@@ -953,10 +914,10 @@ def run_command(
         child_dir,
     )
     validate_execution_snapshot(
-        identity, source, summary, runtime, base_contract, profile
+        identity, source, summary, runtime, base_contract
     )
     _final_run, final_summary, _final_runtime = preflight_code_questions(
-        args.run_id, base_contract, profile
+        args.run_id, base_contract
     )
     if (
         final_summary["base_preflight_identity"] != summary["base_preflight_identity"]
@@ -979,7 +940,7 @@ def run_command(
     completed["status"] = "complete"
     completed["finished_at"] = runner.utc_now()
     validate_extension_child(
-        child_dir, completed, identity, summary, runtime, profile
+        child_dir, completed, identity, summary, runtime
     )
     status.clear()
     status.update(completed)
@@ -988,7 +949,7 @@ def run_command(
         json.dumps(
             {
                 "run_dir": str(run_dir),
-                "child": profile["output_namespace"],
+                "child": OUTPUT_NAMESPACE,
                 "status": "complete",
             },
             indent=2,
