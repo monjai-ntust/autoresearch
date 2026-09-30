@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from utils.common.artifact_io import DataContractError
 from utils.encoder.cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE
 from utils.rag import evaluator
 from utils.rag.graph import build_table_graphs, canonical_json, project_graph
@@ -681,8 +682,7 @@ def _validate_candidate_generation(
         "prediction_ledger": sha256_file(prediction_path),
     }
     try:
-        from artifact_io import DataContractError
-        from model import validate_prediction_artifacts
+        from utils.encoder.model import validate_prediction_artifacts
 
         validate_prediction_artifacts(
             sentences_path=run_file(run_dir, prepared_relative),
@@ -927,8 +927,7 @@ def _validate_verifier_stage(
         run_dir, responses_relative, ledger, expected=responses_hash
     )
     try:
-        from artifact_io import DataContractError
-        from verifier import validate_verifier_artifacts
+        from utils.verifier.verifier import validate_verifier_artifacts
 
         validate_verifier_artifacts(
             mode=mode,
