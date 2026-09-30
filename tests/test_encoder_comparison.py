@@ -248,7 +248,7 @@ class EncoderComparisonTests(unittest.TestCase):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
         self.assertEqual(definitions, ["_parser", "main"])
-        self.assertLessEqual(len(entry_source.splitlines()), 130)
+        self.assertLessEqual(len(entry_source.splitlines()), 140)
         pipeline_source = PIPELINE.read_text(encoding="utf-8")
         self.assertNotIn("encoder_comparison", pipeline_source)
 

@@ -16,6 +16,7 @@ from stages.encoder_comparison import (
     generate,
     plan_training,
     prepare,
+    recover_checkout,
     record_admission,
     run_private,
     run_smoke,
@@ -37,15 +38,16 @@ def _parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate-profile")
     validate_arm = subparsers.add_parser("validate-arm")
     prepare_parser = subparsers.add_parser("prepare")
+    recover = subparsers.add_parser("recover-checkout")
     smoke = subparsers.add_parser("smoke")
     admit = subparsers.add_parser("record-admission")
     plan = subparsers.add_parser("plan-training")
     train = subparsers.add_parser("train")
     predict = subparsers.add_parser("generate")
     validate.add_argument("--profile", required=True)
-    for command in (validate_arm, prepare_parser, smoke, admit, plan, train, predict):
+    for command in (validate_arm, prepare_parser, recover, smoke, admit, plan, train, predict):
         command.add_argument("--arm", required=True)
-    for command in (prepare_parser, smoke, admit, plan, train, predict):
+    for command in (prepare_parser, recover, smoke, admit, plan, train, predict):
         command.add_argument("--run-id", required=True)
     for command in (smoke, plan, train, predict):
         command.add_argument("--training-seed", required=True, type=int)
@@ -90,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         layout = RunLayout(source_root=source_root, run_id=args.run_id)
         if args.action == "prepare":
             prepare(layout, selection)
+        elif args.action == "recover-checkout":
+            print(json.dumps(recover_checkout(layout, selection), indent=2))
         elif args.action == "smoke":
             print(json.dumps(run_smoke(layout, selection, args.training_seed), indent=2))
         elif args.action == "record-admission":

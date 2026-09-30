@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
-from stages.preparation import run as run_preparation
+from stages.preparation import _validate_existing_checkout, run as run_preparation
 from utils.common.artifact_io import (
     DataContractError,
+    _load_manifest,
+    _require_fields,
     atomic_write_bytes,
     atomic_write_json,
+    canonical_json_bytes,
     load_json,
     sha256_file,
 )
 from utils.common.constants import MATCHER_ID, PROTOCOL_ID, TRAINING_SEEDS
+from utils.common.environment import run_doctor
 from utils.common.paths import RunLayout, discover_source_root
 from utils.encoder.cache import (
     CACHE_RELATIVE,
@@ -48,6 +55,234 @@ def prepare(layout: RunLayout, selection: ComparisonSelection) -> dict[str, Any]
 
     run_preparation(layout, selection.config.pipeline)
     return bind_selection(layout, selection)
+
+
+_CHECKOUT_RELATIVE = "manifests/00-checkout-manifest.json"
+_CHECKOUT_RECOVERY = "audit/checkout-recovery"
+
+
+def _checkout_only_files(
+    layout: RunLayout,
+    selection: ComparisonSelection,
+    *,
+    transient: tuple[str, ...] = (),
+) -> None:
+    """Admit only checkout evidence, never acquired or downstream artifacts."""
+
+    receipts = []
+    snapshots = set()
+    for path in layout.run_root.rglob("*"):
+        if path.is_symlink():
+            raise DataContractError("checkout recovery refuses symlinked run paths")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(layout.run_root).as_posix()
+        if relative == _CHECKOUT_RELATIVE or relative in transient:
+            continue
+        if relative == f"{_CHECKOUT_RECOVERY}/recovery.lock":
+            raise DataContractError("another checkout recovery is active or interrupted")
+        match = re.fullmatch(
+            rf"{_CHECKOUT_RECOVERY}/(blocked-checkout|checkout-attempt|recovery)-"
+            r"([0-9a-f]{64})\.json",
+            relative,
+        )
+        if match is None:
+            raise DataContractError(
+                f"checkout recovery refuses downstream or unknown artifact: {relative}"
+            )
+        if sha256_file(path) != match[2]:
+            raise DataContractError(f"checkout recovery evidence hash differs: {relative}")
+        document = _load_manifest(path, "checkout recovery evidence")
+        if match[1] == "recovery":
+            _require_fields(
+                document,
+                {
+                    "schema_version": "phase-g-checkout-recovery-1.0",
+                    "run_id": layout.run_id,
+                    "arm_id": selection.arm.arm_id,
+                    "comparison_config_sha256": selection.config.sha256,
+                },
+                "checkout recovery evidence",
+            )
+            if document.get("status") not in {"checkout-admitted", "blocked"}:
+                raise DataContractError("checkout recovery evidence status is unsupported")
+            receipts.append(document)
+        else:
+            _require_fields(
+                document,
+                {
+                    "schema_version": "phase-b-checkout-manifest-2.0",
+                    "protocol_id": selection.config.pipeline.value["protocol_id"],
+                    "workflow_id": selection.config.pipeline.value["workflow_id"],
+                    "matcher_id": selection.config.pipeline.value["matcher_id"],
+                    "run_id": layout.run_id,
+                },
+                "archived checkout evidence",
+            )
+            if document.get("status") not in {"pass", "blocked"}:
+                raise DataContractError("archived checkout status is unsupported")
+            if match[1] == "blocked-checkout" and document["status"] != "blocked":
+                raise DataContractError("failed checkout archive was not blocked")
+            snapshots.add(relative)
+    for receipt in receipts:
+        for key, prefix in (
+            ("previous_checkout", "blocked-checkout"),
+            ("attempt_checkout", "checkout-attempt"),
+        ):
+            binding = receipt.get(key)
+            if (
+                not isinstance(binding, dict)
+                or binding.get("path") not in snapshots
+                or binding["path"]
+                != f"{_CHECKOUT_RECOVERY}/{prefix}-{binding.get('sha256')}.json"
+            ):
+                raise DataContractError("checkout recovery evidence binding differs")
+
+
+def _write_checkout_evidence(layout: RunLayout, kind: str, payload: bytes) -> dict[str, str]:
+    digest = hashlib.sha256(payload).hexdigest()
+    relative = f"{_CHECKOUT_RECOVERY}/{kind}-{digest}.json"
+    path = layout.resolve(relative)
+    if path.exists():
+        if path.read_bytes() != payload:
+            raise DataContractError("immutable checkout recovery evidence differs")
+    else:
+        atomic_write_bytes(path, payload)
+    if sha256_file(path) != digest:
+        raise DataContractError("checkout recovery evidence copy failed hash verification")
+    return {"path": relative, "sha256": digest}
+
+
+def recover_checkout(layout: RunLayout, selection: ComparisonSelection) -> dict[str, Any]:
+    """Re-admit a dirty-checkout-only failure without importing any old input."""
+
+    layout.require_existing()
+    _checkout_only_files(layout, selection)
+    path = layout.resolve(_CHECKOUT_RELATIVE, must_exist=True)
+    previous_bytes = path.read_bytes()
+    previous = _load_manifest(path, "blocked checkout manifest")
+    config = selection.config.pipeline
+    _require_fields(
+        previous,
+        {
+            "schema_version": "phase-b-checkout-manifest-2.0",
+            "protocol_id": config.value["protocol_id"],
+            "workflow_id": config.value["workflow_id"],
+            "matcher_id": config.value["matcher_id"],
+            "run_id": layout.run_id,
+        },
+        "blocked checkout manifest",
+    )
+    if previous.get("status") == "pass":
+        _validate_existing_checkout(layout, config)
+        return {"run_id": layout.run_id, "status": "checkout-already-admitted"}
+    source = previous.get("source")
+    checks = previous.get("checks")
+    if (
+        previous.get("status") != "blocked"
+        or not isinstance(source, dict)
+        or source.get("worktree_clean") is not False
+        or not isinstance(checks, list)
+        or not checks
+        or any(
+            not isinstance(check, dict)
+            or not isinstance(check.get("check_id"), str)
+            or check.get("status") not in {"pass", "fail"}
+            for check in checks
+        )
+        or len({check["check_id"] for check in checks}) != len(checks)
+        or [check.get("check_id") for check in checks if check["status"] == "fail"]
+        != ["clean-tracked-source"]
+    ):
+        raise DataContractError("recovery requires a dirty-checkout-only blocked run")
+    commit = source.get("commit")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise DataContractError("blocked checkout lacks an immutable source commit")
+    relative_config = config.path.relative_to(layout.source_root).as_posix()
+    if source.get("config") != {
+        "path": relative_config, "sha256": sha256_file(config.path)
+    }:
+        raise DataContractError("blocked checkout configuration differs")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
+        cwd=layout.source_root, capture_output=True, check=False,
+    )
+    if ancestor.returncode != 0:
+        raise DataContractError("blocked checkout source is not an ancestor of HEAD")
+    original_config = subprocess.run(
+        ["git", "show", f"{commit}:{relative_config}"],
+        cwd=layout.source_root, capture_output=True, check=False,
+    )
+    if (
+        original_config.returncode != 0
+        or hashlib.sha256(original_config.stdout).hexdigest()
+        != source["config"]["sha256"]
+    ):
+        raise DataContractError("blocked checkout configuration is not authenticated by Git")
+
+    attempt_id = uuid.uuid4().hex
+    pending_relative = f"{_CHECKOUT_RECOVERY}/.pending-{attempt_id}.json"
+    lock_relative = f"{_CHECKOUT_RECOVERY}/recovery.lock"
+    lock = layout.resolve(lock_relative)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with lock.open("xb") as stream:
+            stream.write(attempt_id.encode("ascii"))
+    except FileExistsError as exc:
+        raise DataContractError("another checkout recovery is active or interrupted") from exc
+
+    class RetryLayout(RunLayout):
+        def create(self) -> Path:
+            return self.require_existing()
+
+        def resolve(self, relative, *, must_exist=False) -> Path:
+            if Path(relative).as_posix() == _CHECKOUT_RELATIVE:
+                relative = pending_relative
+            return super().resolve(relative, must_exist=must_exist)
+
+    retry = RetryLayout(layout.source_root, layout.run_id)
+    pending = layout.resolve(pending_relative)
+    try:
+        _checkout_only_files(layout, selection, transient=(lock_relative,))
+        archived = _write_checkout_evidence(layout, "blocked-checkout", previous_bytes)
+        manifest, passed = run_doctor(retry, config)
+        fresh_bytes = pending.read_bytes()
+        attempted = _write_checkout_evidence(layout, "checkout-attempt", fresh_bytes)
+        receipt = {
+            "schema_version": "phase-g-checkout-recovery-1.0",
+            "run_id": layout.run_id,
+            "attempt_id": attempt_id,
+            "arm_id": selection.arm.arm_id,
+            "comparison_config_sha256": selection.config.sha256,
+            "previous_checkout": archived,
+            "attempt_checkout": attempted,
+            "status": "blocked",
+        }
+        try:
+            if not passed:
+                raise DataContractError(f"Checkout recovery doctor failed: {manifest}")
+            _validate_existing_checkout(retry, config)
+            _checkout_only_files(
+                layout, selection, transient=(lock_relative, pending_relative)
+            )
+            if path.read_bytes() != previous_bytes:
+                raise DataContractError("blocked checkout changed during recovery")
+            if pending.read_bytes() != fresh_bytes:
+                raise DataContractError("checkout attempt changed during recovery")
+            atomic_write_bytes(path, fresh_bytes)
+            receipt["status"] = "checkout-admitted"
+        except (DataContractError, OSError, ValueError) as exc:
+            receipt["error"] = str(exc)
+            _write_checkout_evidence(layout, "recovery", canonical_json_bytes(receipt))
+            raise
+        receipt_binding = _write_checkout_evidence(
+            layout, "recovery", canonical_json_bytes(receipt)
+        )
+        return {**receipt, "recovery_manifest": receipt_binding}
+    finally:
+        # These are this invocation's transient files, never scientific output.
+        pending.unlink(missing_ok=True)
+        lock.unlink()
 
 
 def _validate_prepared_inputs(layout: RunLayout, selection: ComparisonSelection) -> None:

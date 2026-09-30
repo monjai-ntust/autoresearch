@@ -83,10 +83,46 @@ uv run --frozen --no-sync python -I -B encoder_comparison.py \
   validate-arm --arm bert-base-common
 ```
 
-The implemented lifecycle commands are `prepare`, `smoke`,
+The implemented lifecycle commands are `recover-checkout`, `prepare`, `smoke`,
 `record-admission`, `plan-training`, `train`, and `generate`; each takes
 `--arm`. The four arms and statistical protocol are frozen. `pipeline.py` has
 no import or dispatch route to this comparison path.
+
+### Recover a checkout-only failure
+
+If an earlier `prepare` failed solely because source was dirty, its immutable
+checkout manifest records `status: blocked`. Cleaning the source does not turn
+that old observation into a pass. Do not remove the admission check, edit the
+old status, delete the run, or copy another run's artifacts. A commit is the
+source definition; a checkout manifest is evidence of the actual execution
+environment and admission outcome.
+
+For a run containing only that blocked checkout (and any verified evidence from
+earlier recovery attempts), use the explicit same-run retry:
+
+```bash
+uv run --frozen --no-sync python -I -B encoder_comparison.py \
+  recover-checkout --arm bert-base-common --run-id g05-bert-base-common
+```
+
+Recovery verifies run/configuration identity and Git ancestry, preserves the
+exact failed bytes in `audit/checkout-recovery/blocked-checkout-<sha256>.json`,
+and invokes the unchanged checkout doctor against current source. Every fresh
+attempt and recovery receipt is content-addressed and hash-verified in that
+same audit namespace. Only after fresh admission and a source recheck pass
+does it atomically install the new checkout manifest, reporting
+`checkout-admitted`. If the fresh doctor fails, the original manifest remains
+unchanged and the new failure is retained. Recovery refuses any acquired,
+prepared, selection, model, checkpoint, smoke, or unknown artifact, as well as
+foreign identities, changed configuration, non-ancestor source, evidence
+tampering, symlinks, and active/interrupted recovery locks.
+
+Recovery does not acquire data or models, run a smoke, admit training, or open
+final test. Run it for all blocked arms before starting any preparation or
+smoke. Then continue with normal `prepare` and `smoke` under the same run IDs.
+Do not update source between recovery, preparation, and smoke: normal resume
+still requires the admitted source commit. Preserve any interrupted lock or
+unexpected artifact for diagnosis instead of forcing or deleting it.
 
 After `prepare`, run one bounded seed-42 smoke in the same arm-specific run:
 
