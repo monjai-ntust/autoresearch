@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from utils.encoder.cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE
 from utils.rag import evaluator
 from utils.rag.graph import build_table_graphs, canonical_json, project_graph
 
@@ -237,6 +238,70 @@ def _verified_file(
     if expected is not None and observed != validate_sha256(expected, f"{relative} expected hash"):
         raise PhaseEError(f"Same-run artifact hash differs from its producer: {relative}")
     return path
+
+
+def _validate_training_checkpoint_identity(
+    *,
+    seed: int,
+    train_manifest: dict[str, Any],
+    checkpoint_manifest: dict[str, Any],
+    training_config: dict[str, Any],
+    split_seed: int,
+    split: dict[str, Any],
+    expected_inputs: dict[str, str],
+) -> None:
+    """Require the training manifest to bind every checkpoint dependency."""
+
+    checkpoint_manifest_relative = f"checkpoints/seed-{seed}/checkpoint-manifest.json"
+    checkpoint_blob_relative = f"checkpoints/seed-{seed}/checkpoint.pt"
+    model_cache_relative = checkpoint_manifest.get("model_cache_manifest")
+    model_cache_sha256 = checkpoint_manifest.get("model_cache_manifest_sha256")
+    compatibility_relative = checkpoint_manifest.get("dataset_compatibility_report")
+    if (
+        model_cache_relative != HF_CACHE_MANIFEST_RELATIVE
+        or not isinstance(model_cache_sha256, str)
+        or SHA256_RE.fullmatch(model_cache_sha256) is None
+        or not isinstance(compatibility_relative, str)
+    ):
+        raise PhaseEError(f"seed-{seed} checkpoint lacks a valid training dependency")
+
+    expected_outputs = {
+        "checkpoint": checkpoint_blob_relative,
+        "checkpoint_manifest": checkpoint_manifest_relative,
+        "dataset_compatibility_report": compatibility_relative,
+        "model_cache_manifest": model_cache_relative,
+        "progress_log": f"logs/model-train-seed-{seed}.log",
+        "restart_state": f"checkpoints/seed-{seed}/restart-state.pt",
+        "training_summary": f"checkpoints/seed-{seed}/training-summary.json",
+    }
+    expected_inputs = {
+        **expected_inputs,
+        "model_cache_manifest_sha256": model_cache_sha256,
+    }
+    recipe = train_manifest.get("recipe")
+    outputs = train_manifest.get("outputs")
+    training_inputs = train_manifest.get("inputs")
+    resume = train_manifest.get("resume")
+    train_split = train_manifest.get("split")
+    if (
+        not isinstance(recipe, dict)
+        or recipe != training_config
+        or recipe.get("base_model") != checkpoint_manifest.get("base_model")
+        or recipe.get("base_model_revision")
+        != checkpoint_manifest.get("base_model_revision")
+        or outputs != expected_outputs
+        or training_inputs != expected_inputs
+        or not isinstance(resume, dict)
+        or resume.get("restart_state_sha256")
+        != checkpoint_manifest.get("restart_state_sha256")
+        or not isinstance(train_split, dict)
+        or train_split.get("split_id") != "CODE-SPLIT-1"
+        or train_split.get("seed") != split_seed
+        or train_split.get("train_sentences") != split.get("train")
+        or train_split.get("development_sentences") != split.get("development")
+        or train_split.get("test_sentences") != split.get("test")
+    ):
+        raise PhaseEError(f"seed-{seed} training and checkpoint identities disagree")
 
 
 def load_verifier_model_identity(path: Path, expected_hash: str) -> dict[str, Any]:
@@ -1181,6 +1246,19 @@ def validate_parent_lineage(
             ledger,
             expected=checkpoint_manifest.get("dataset_compatibility_sha256"),
         )
+        model_cache_relative = checkpoint_manifest.get("model_cache_manifest")
+        model_cache_sha256 = checkpoint_manifest.get("model_cache_manifest_sha256")
+        if (
+            model_cache_relative != HF_CACHE_MANIFEST_RELATIVE
+            or not isinstance(model_cache_sha256, str)
+        ):
+            raise PhaseEError(f"seed-{seed} checkpoint lacks model-cache evidence")
+        _verified_file(
+            run_dir,
+            model_cache_relative,
+            ledger,
+            expected=model_cache_sha256,
+        )
         _verified_file(run_dir, progress_relative, ledger)
         summary = load_json(_verified_file(run_dir, summary_relative, ledger))
         selected_metrics = summary.get("selected_metrics")
@@ -1242,19 +1320,6 @@ def validate_parent_lineage(
             },
             f"seed-{seed} training manifest",
         )
-        recipe = train_manifest.get("recipe")
-        outputs = train_manifest.get("outputs")
-        training_inputs = train_manifest.get("inputs")
-        resume = train_manifest.get("resume")
-        train_split = train_manifest.get("split")
-        expected_training_outputs = {
-            "checkpoint": checkpoint_blob_relative,
-            "checkpoint_manifest": checkpoint_manifest_relative,
-            "dataset_compatibility_report": compatibility_relative,
-            "progress_log": progress_relative,
-            "restart_state": restart_relative,
-            "training_summary": summary_relative,
-        }
         expected_training_inputs = {
             "acquisition_manifest_sha256": ledger[acquisition_relative]["sha256"],
             "checkout_manifest_sha256": ledger[paths["checkout_manifest"]]["sha256"],
@@ -1263,27 +1328,15 @@ def validate_parent_lineage(
             "split_manifest_sha256": split_manifest_sha,
             "train_jsonl_sha256": ledger[paths["prepared_train"]]["sha256"],
         }
-        if (
-            not isinstance(recipe, dict)
-            or recipe.get("base_model") != checkpoint_manifest.get("base_model")
-            or recipe.get("base_model_revision")
-            != checkpoint_manifest.get("base_model_revision")
-            or outputs != expected_training_outputs
-            or training_inputs != expected_training_inputs
-            or not isinstance(resume, dict)
-            or resume.get("restart_state_sha256")
-            != checkpoint_manifest.get("restart_state_sha256")
-            or not isinstance(train_split, dict)
-            or train_split.get("split_id") != "CODE-SPLIT-1"
-            or train_split.get("seed") != pipeline["split_seed"]
-            or train_split.get("train_sentences")
-            != split.get("train")
-            or train_split.get("development_sentences")
-            != split.get("development")
-            or train_split.get("test_sentences")
-            != split.get("test")
-        ):
-            raise PhaseEError(f"seed-{seed} training and checkpoint identities disagree")
+        _validate_training_checkpoint_identity(
+            seed=seed,
+            train_manifest=train_manifest,
+            checkpoint_manifest=checkpoint_manifest,
+            training_config=training_config,
+            split_seed=pipeline["split_seed"],
+            split=split,
+            expected_inputs=expected_training_inputs,
+        )
         if hardware is None:
             hardware = train_manifest.get("environment")
         for split_name, prepared_key, count_key in (

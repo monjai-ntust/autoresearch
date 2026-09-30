@@ -215,6 +215,93 @@ class Table2RunnerTests(unittest.TestCase):
         self.assertFalse(comparison["all_fields_match"])
         self.assertFalse(comparison["fields"]["base_model_revision"]["match"])
 
+    def test_training_cache_manifest_is_an_exact_parent_lineage_binding(self):
+        seed = 42
+        digest = "a" * 64
+        training_config = {
+            "base_model": "microsoft/deberta-large",
+            "base_model_revision": "b" * 40,
+        }
+        checkpoint = {
+            **training_config,
+            "dataset_compatibility_report": (
+                "audit/model-training-dataset-compatibility.json"
+            ),
+            "model_cache_manifest": "manifests/huggingface-model-cache.json",
+            "model_cache_manifest_sha256": digest,
+            "restart_state_sha256": "c" * 64,
+        }
+        inputs = {
+            "acquisition_manifest_sha256": "1" * 64,
+            "checkout_manifest_sha256": "2" * 64,
+            "development_jsonl_sha256": "3" * 64,
+            "preparation_manifest_sha256": "4" * 64,
+            "split_manifest_sha256": "5" * 64,
+            "train_jsonl_sha256": "6" * 64,
+        }
+        manifest = {
+            "recipe": training_config,
+            "inputs": {**inputs, "model_cache_manifest_sha256": digest},
+            "outputs": {
+                "checkpoint": f"checkpoints/seed-{seed}/checkpoint.pt",
+                "checkpoint_manifest": (
+                    f"checkpoints/seed-{seed}/checkpoint-manifest.json"
+                ),
+                "dataset_compatibility_report": checkpoint[
+                    "dataset_compatibility_report"
+                ],
+                "model_cache_manifest": checkpoint["model_cache_manifest"],
+                "progress_log": f"logs/model-train-seed-{seed}.log",
+                "restart_state": f"checkpoints/seed-{seed}/restart-state.pt",
+                "training_summary": (
+                    f"checkpoints/seed-{seed}/training-summary.json"
+                ),
+            },
+            "resume": {"restart_state_sha256": checkpoint["restart_state_sha256"]},
+            "split": {
+                "split_id": "CODE-SPLIT-1",
+                "seed": 42,
+                "train_sentences": 586,
+                "development_sentences": 103,
+                "test_sentences": 173,
+            },
+        }
+        arguments = {
+            "seed": seed,
+            "checkpoint_manifest": checkpoint,
+            "training_config": training_config,
+            "split_seed": 42,
+            "split": {"train": 586, "development": 103, "test": 173},
+            "expected_inputs": inputs,
+        }
+
+        runner._validate_training_checkpoint_identity(
+            train_manifest=manifest, **arguments
+        )
+        for mapping, field in (
+            ("inputs", "model_cache_manifest_sha256"),
+            ("outputs", "model_cache_manifest"),
+        ):
+            with self.subTest(mapping=mapping):
+                changed = json.loads(json.dumps(manifest))
+                changed[mapping].pop(field)
+                with self.assertRaisesRegex(
+                    runner.PhaseEError,
+                    "training and checkpoint identities disagree",
+                ):
+                    runner._validate_training_checkpoint_identity(
+                        train_manifest=changed, **arguments
+                    )
+
+        changed = json.loads(json.dumps(manifest))
+        changed["outputs"]["unrecognized"] = "same-run-but-undeclared.json"
+        with self.assertRaisesRegex(
+            runner.PhaseEError, "training and checkpoint identities disagree"
+        ):
+            runner._validate_training_checkpoint_identity(
+                train_manifest=changed, **arguments
+            )
+
     def test_authenticated_older_run_config_uses_explicit_legacy_compatibility(self):
         commit = "3e4e5d9584cf2208eba7830550fc3b01cafa456f"
         path = "configs/phase_b_path_a.json"
