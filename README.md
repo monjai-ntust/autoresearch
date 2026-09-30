@@ -127,7 +127,10 @@ BERT-base, DeBERTa-base, and DeBERTa-large under the common base recipe, plus
 DeBERTa-large under A20+A21+A12. Historical values are provenance only; eligible
 new results use the matched canonical protocol. Live use remains gated on
 run-local model acquisition, storage and accelerator checks, and G-05 smoke
-admission. See `docs/encoder-comparison.md` for the source/reuse boundary,
+admission. The `smoke` action runs one training step, reloads its restart state,
+and produces a one-record candidate ledger on CUDA. Full `train` actions fail
+closed until a separately recorded post-review admission exists. See
+`docs/encoder-comparison.md` for the source/reuse boundary,
 statistics contract, and command contract.
 
 ## Run only downstream Table 2

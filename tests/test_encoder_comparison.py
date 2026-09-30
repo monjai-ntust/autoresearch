@@ -21,7 +21,13 @@ import torch.nn as nn
 
 from stages import encoder_comparison as comparison_stage
 from stages import preparation as preparation_stage
-from utils.common.artifact_io import DataContractError, atomic_write_bytes
+from utils.common.artifact_io import (
+    DataContractError,
+    atomic_write_bytes,
+    atomic_write_json,
+    load_json,
+    sha256_file,
+)
 from utils.common.paths import RunLayout, discover_source_root
 from utils.encoder import data as canonical_data
 from utils.encoder.cache import write_cache_manifest
@@ -429,6 +435,21 @@ class EncoderComparisonTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(DataContractError, "weight bytes differ"):
                 comparison_stage._verify_profile_cache(layout, bad_selection)
+            torch.save(
+                {"first": torch.zeros(3, 4), "second": torch.zeros(2)},
+                snapshot / "pytorch_model.bin",
+            )
+            counted_selection = replace(
+                fixture_selection,
+                profile=replace(
+                    profile,
+                    weight_bytes=(snapshot / "pytorch_model.bin").stat().st_size,
+                    weight_sha256=sha256_file(snapshot / "pytorch_model.bin"),
+                ),
+            )
+            self.assertEqual(
+                comparison_stage._base_parameter_count(layout, counted_selection), 14
+            )
 
     def test_checkpoint_summary_substitution_fails_before_manifest_promotion(self):
         with _temporary_output_directory() as temporary:
@@ -465,6 +486,109 @@ class EncoderComparisonTests(unittest.TestCase):
                         "cache_tree_sha256": "1" * 64,
                     },
                 )
+
+    def test_smoke_is_bounded_validated_and_required_for_admission(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "smoke")
+            layout.create()
+            selection = self.config.select_arm("bert-base-common")
+            bind_selection(layout, selection)
+            atomic_write_json(layout.resolve("data-prepared/split-manifest.json"), {})
+            arguments = comparison_stage._smoke_training_arguments(
+                layout, selection, 42
+            )
+            self.assertEqual(
+                arguments[arguments.index("--max-steps") + 1], "1"
+            )
+            self.assertIn(
+                "diagnostics/encoder-comparison-smoke",
+                "/".join(arguments).replace("\\", "/"),
+            )
+
+            paths = comparison_stage._smoke_paths(layout)
+            identity = comparison_stage._smoke_identity(layout, selection, 42)
+            atomic_write_json(paths["identity"], identity)
+            atomic_write_bytes(paths["checkpoint"], b"checkpoint\n")
+            atomic_write_bytes(paths["restart"], b"restart\n")
+            atomic_write_bytes(paths["progress"], b"smoke\n")
+            checkpoint_sha256 = sha256_file(paths["checkpoint"])
+            atomic_write_bytes(
+                paths["checkpoint_before_resume"],
+                (checkpoint_sha256 + "\n").encode("ascii"),
+            )
+            summary = {
+                "status": "completed",
+                "seed": 42,
+                "model_name": selection.profile.model,
+                "model_revision": selection.profile.revision,
+                "completed_steps": 1,
+                "selected_metrics": {"triple_f1": 0.0},
+                "test_evaluated": False,
+                "resumed_from": None,
+                "environment": {"cuda_available": True, "cuda_device": "fixture"},
+            }
+            atomic_write_json(paths["training_summary"], summary)
+            atomic_write_json(
+                paths["resume_summary"],
+                {**summary, "resumed_from": str(paths["restart"])},
+            )
+            atomic_write_bytes(
+                paths["sentence"],
+                b'{"example_id":"example-1","words":["x"]}\n',
+            )
+            atomic_write_bytes(
+                paths["ledger"],
+                (
+                    json.dumps(
+                        {
+                            "protocol_id": "B04-PATH-A-1.3",
+                            "example_id": "example-1",
+                            "training_seed": 42,
+                            "predicted_spans": [],
+                            "predicted_relations": [],
+                        },
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode(),
+            )
+            atomic_write_json(
+                paths["roundtrip"],
+                {
+                    "schema_version": "phase-g-encoder-smoke-roundtrip-1.0",
+                    "checkpoint_sha256": checkpoint_sha256,
+                    "checkpoint_unchanged_after_resume": True,
+                    "candidate_rows": 1,
+                    "example_id": "example-1",
+                },
+            )
+            evidence = comparison_stage._validate_smoke_outputs(
+                layout, selection, 42
+            )
+            self.assertEqual(evidence["cuda_device"], "fixture")
+
+            smoke_path = layout.resolve(comparison_stage.SMOKE_MANIFEST_RELATIVE)
+            atomic_write_json(
+                smoke_path,
+                {
+                    "status": "smoke-complete-awaiting-admission",
+                    "run_id": layout.run_id,
+                    "table1_arm": selection.arm.manifest(),
+                },
+            )
+            admission = comparison_stage.record_admission(
+                layout,
+                selection,
+                decision="admit",
+                reason="fixture review passed",
+            )
+            self.assertEqual(admission["decision"], "admit")
+            self.assertEqual(
+                comparison_stage._require_admission(layout, selection), admission
+            )
+            atomic_write_json(smoke_path, {**load_json(smoke_path), "changed": True})
+            with self.assertRaisesRegex(DataContractError, "lacks an admitted smoke"):
+                comparison_stage._require_admission(layout, selection)
 
 
 if __name__ == "__main__":

@@ -83,11 +83,40 @@ uv run --frozen --no-sync python -I -B encoder_comparison.py \
   validate-arm --arm bert-base-common
 ```
 
-The implemented lifecycle commands are `prepare`, `plan-training`, `train`,
-and `generate`; each takes `--arm`. The four arms and statistical protocol are
-frozen, but live use still requires G-05 model-cache/tokenizer/accelerator smoke
-admission. `pipeline.py` has no import or dispatch route to this comparison
-path.
+The implemented lifecycle commands are `prepare`, `smoke`,
+`record-admission`, `plan-training`, `train`, and `generate`; each takes
+`--arm`. The four arms and statistical protocol are frozen. `pipeline.py` has
+no import or dispatch route to this comparison path.
+
+After `prepare`, run one bounded seed-42 smoke in the same arm-specific run:
+
+```bash
+uv run --frozen --no-sync python -I -B encoder_comparison.py \
+  smoke --arm bert-base-common --run-id phase-g-bert-base-common \
+  --training-seed 42
+```
+
+The smoke acquires and freezes the pinned model in that run, requires CUDA,
+executes one training step and development evaluation, loads the restart state,
+verifies the selected checkpoint is unchanged, and generates a one-record raw
+prediction ledger. It writes
+`manifests/encoder-comparison-smoke.json` with status
+`smoke-complete-awaiting-admission`; smoke output cannot populate Table 1.
+
+Review the smoke manifest, log, model digest, tokenizer behavior, memory, and
+candidate row before recording `admit` or `reject` with a nonblank reason:
+
+```bash
+uv run --frozen --no-sync python -I -B encoder_comparison.py \
+  record-admission --arm bert-base-common \
+  --run-id phase-g-bert-base-common --decision admit \
+  --reason "reviewed external G-05 evidence"
+```
+
+`train` fails closed without an admitted decision bound to the exact smoke
+manifest. Admission does not grant final-test access: all admitted development
+runs must complete or receive a retained disposition before the separate
+final-test gate in the frozen protocol.
 
 ## Validation boundary
 
@@ -98,5 +127,7 @@ prepared-data/BIO compatibility, reject profile or run substitution, and prove
 every executable/resource file in the original Phase F pipeline flow remains
 byte-identical to `5db3bce`. The full canonical test suite must also pass. These
 are static and CPU-local
-contracts; tokenizer smoke, forward/backward, checkpoint round-trip, resume
-equivalence, accelerator memory, and scientific outcomes remain later gates.
+contracts. The live `smoke` command supplies tokenizer, forward/backward,
+checkpoint, restart, candidate-ledger, and accelerator evidence; its output and
+full-run admission still require external review. Scientific outcomes remain
+later gates.

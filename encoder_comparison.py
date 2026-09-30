@@ -16,7 +16,9 @@ from stages.encoder_comparison import (
     generate,
     plan_training,
     prepare,
+    record_admission,
     run_private,
+    run_smoke,
     run_training,
 )
 from utils.common.artifact_io import DataContractError
@@ -35,24 +37,30 @@ def _parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate-profile")
     validate_arm = subparsers.add_parser("validate-arm")
     prepare_parser = subparsers.add_parser("prepare")
+    smoke = subparsers.add_parser("smoke")
+    admit = subparsers.add_parser("record-admission")
     plan = subparsers.add_parser("plan-training")
     train = subparsers.add_parser("train")
     predict = subparsers.add_parser("generate")
     validate.add_argument("--profile", required=True)
-    for command in (validate_arm, prepare_parser, plan, train, predict):
+    for command in (validate_arm, prepare_parser, smoke, admit, plan, train, predict):
         command.add_argument("--arm", required=True)
-    for command in (prepare_parser, plan, train, predict):
+    for command in (prepare_parser, smoke, admit, plan, train, predict):
         command.add_argument("--run-id", required=True)
-    for command in (plan, train, predict):
+    for command in (smoke, plan, train, predict):
         command.add_argument("--training-seed", required=True, type=int)
+    admit.add_argument("--decision", choices=("admit", "reject"), required=True)
+    admit.add_argument("--reason", required=True)
     predict.add_argument("--split", choices=("development", "test"), required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"_train-encoder", "_predict-encoder"}:
-        action = "train" if arguments[0] == "_train-encoder" else "predict"
+    if arguments and arguments[0] in {
+        "_train-encoder", "_predict-encoder", "_smoke-encoder"
+    }:
+        action = arguments[0].removeprefix("_").removesuffix("-encoder")
         try:
             return run_private(
                 arguments[1:], action=action, default_config=DEFAULT_CONFIG
@@ -82,6 +90,20 @@ def main(argv: list[str] | None = None) -> int:
         layout = RunLayout(source_root=source_root, run_id=args.run_id)
         if args.action == "prepare":
             prepare(layout, selection)
+        elif args.action == "smoke":
+            print(json.dumps(run_smoke(layout, selection, args.training_seed), indent=2))
+        elif args.action == "record-admission":
+            print(
+                json.dumps(
+                    record_admission(
+                        layout,
+                        selection,
+                        decision=args.decision,
+                        reason=args.reason,
+                    ),
+                    indent=2,
+                )
+            )
         elif args.action == "plan-training":
             print(json.dumps(plan_training(layout, selection, args.training_seed), indent=2))
         elif args.action == "train":

@@ -113,7 +113,9 @@ run/artifact utilities but does not modify or dispatch the canonical encoder.
 Its approved four-arm Table 1 matrix and statistical protocol are frozen in
 `resources/configs/encoder-comparison.json`. Live execution remains subject to
 the model-cache, storage, accelerator, and G-05 smoke gates documented in
-`docs/encoder-comparison.md`.
+`docs/encoder-comparison.md`. Each arm uses a distinct run, and full training is
+unreachable until its bounded CUDA smoke has been reviewed and an explicit
+admission decision has been recorded.
 
 ## Table-2-only route
 

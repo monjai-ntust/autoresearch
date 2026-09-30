@@ -12,6 +12,7 @@ from typing import Any
 from stages.preparation import run as run_preparation
 from utils.common.artifact_io import (
     DataContractError,
+    atomic_write_bytes,
     atomic_write_json,
     load_json,
     sha256_file,
@@ -106,6 +107,23 @@ def _verify_profile_cache(
         ),
         "cache_tree_sha256": manifest["tree_sha256"],
     }
+
+
+def _base_parameter_count(
+    layout: RunLayout, selection: ComparisonSelection
+) -> int:
+    """Count pinned backbone parameters from the verified PyTorch state dict."""
+
+    import torch
+
+    weight = _cache_snapshot_root(layout, selection) / selection.profile.weight_path
+    state = torch.load(weight, map_location="cpu", weights_only=True)
+    if not isinstance(state, dict) or not state:
+        raise DataContractError("selected encoder weight is not a state dictionary")
+    tensors = list(state.values())
+    if any(not isinstance(value, torch.Tensor) for value in tensors):
+        raise DataContractError("selected encoder state dictionary contains non-tensors")
+    return sum(value.numel() for value in tensors)
 
 
 def trainer_arguments(
@@ -250,6 +268,291 @@ def _private_command(
     return command
 
 
+SMOKE_RELATIVE = "diagnostics/encoder-comparison-smoke"
+SMOKE_MANIFEST_RELATIVE = "manifests/encoder-comparison-smoke.json"
+ADMISSION_RELATIVE = "manifests/encoder-comparison-admission.json"
+
+
+def _replace_argument(arguments: list[str], name: str, value: str) -> None:
+    try:
+        index = arguments.index(name)
+    except ValueError as exc:
+        raise DataContractError(f"private comparison arguments lack {name}") from exc
+    arguments[index + 1] = value
+
+
+def _smoke_paths(layout: RunLayout) -> dict[str, Path]:
+    root = layout.resolve(SMOKE_RELATIVE)
+    return {
+        "root": root,
+        "identity": root / "identity.json",
+        "checkpoint": root / "checkpoint.pt",
+        "restart": root / "restart-state.pt",
+        "progress": root / "progress.log",
+        "training_summary": root / "training-summary.json",
+        "resume_summary": root / "resume-summary.json",
+        "checkpoint_before_resume": root / "checkpoint-before-resume.sha256",
+        "sentence": root / "development-one.jsonl",
+        "ledger": root / "prediction-ledger.jsonl",
+        "roundtrip": root / "roundtrip.json",
+    }
+
+
+def _smoke_identity(
+    layout: RunLayout, selection: ComparisonSelection, seed: int
+) -> dict[str, Any]:
+    return {
+        "schema_version": "phase-g-encoder-smoke-identity-1.0",
+        "run_id": layout.run_id,
+        "training_seed": seed,
+        "table1_arm": selection.arm.manifest(),
+        "selection_manifest_sha256": sha256_file(
+            layout.resolve("manifests/encoder-comparison-selection.json", must_exist=True)
+        ),
+        "split_manifest_sha256": sha256_file(
+            layout.resolve("data-prepared/split-manifest.json", must_exist=True)
+        ),
+    }
+
+
+def _smoke_training_arguments(
+    layout: RunLayout, selection: ComparisonSelection, seed: int
+) -> list[str]:
+    paths = _smoke_paths(layout)
+    arguments = trainer_arguments(layout, selection, seed, mode="train")
+    replacements = {
+        "--max-steps": "1",
+        "--eval-every": "1",
+        "--save-best-to": str(paths["checkpoint"]),
+        "--save-last-to": str(paths["restart"]),
+        "--progress-log": str(paths["progress"]),
+        "--run-summary-out": str(paths["training_summary"]),
+    }
+    for name, value in replacements.items():
+        _replace_argument(arguments, name, value)
+    return arguments
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    try:
+        values = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DataContractError(f"invalid smoke JSONL: {path.name}") from exc
+    if any(not isinstance(value, dict) for value in values):
+        raise DataContractError(f"smoke JSONL contains a non-object: {path.name}")
+    return values
+
+
+def _validate_smoke_outputs(
+    layout: RunLayout,
+    selection: ComparisonSelection,
+    seed: int,
+) -> dict[str, Any]:
+    paths = _smoke_paths(layout)
+    identity = _smoke_identity(layout, selection, seed)
+    if load_json(paths["identity"]) != identity:
+        raise DataContractError("encoder comparison smoke identity differs")
+    first = load_json(paths["training_summary"])
+    resumed = load_json(paths["resume_summary"])
+    for label, summary in (("training", first), ("resume", resumed)):
+        if (
+            summary.get("status") != "completed"
+            or summary.get("seed") != seed
+            or summary.get("model_name") != selection.profile.model
+            or summary.get("model_revision") != selection.profile.revision
+            or summary.get("completed_steps") != 1
+            or summary.get("test_evaluated") is not False
+            or summary.get("environment", {}).get("cuda_available") is not True
+        ):
+            raise DataContractError(f"encoder comparison {label} smoke summary differs")
+    if first.get("resumed_from") is not None:
+        raise DataContractError("initial encoder smoke unexpectedly resumed")
+    if resumed.get("resumed_from") != str(paths["restart"]):
+        raise DataContractError("encoder smoke did not round-trip its restart state")
+    if first.get("selected_metrics") != resumed.get("selected_metrics"):
+        raise DataContractError("encoder smoke resume changed selected metrics")
+    ledger = _read_jsonl(paths["ledger"])
+    sentence = _read_jsonl(paths["sentence"])
+    if (
+        len(sentence) != 1
+        or len(ledger) != 1
+        or ledger[0].get("protocol_id") != PROTOCOL_ID
+        or ledger[0].get("training_seed") != seed
+        or ledger[0].get("example_id") != sentence[0].get("example_id")
+        or not isinstance(ledger[0].get("predicted_spans"), list)
+        or not isinstance(ledger[0].get("predicted_relations"), list)
+    ):
+        raise DataContractError("encoder smoke candidate ledger is invalid")
+    roundtrip = load_json(paths["roundtrip"])
+    before_resume = paths["checkpoint_before_resume"].read_text(encoding="ascii").strip()
+    if (
+        roundtrip.get("schema_version") != "phase-g-encoder-smoke-roundtrip-1.0"
+        or roundtrip.get("checkpoint_unchanged_after_resume") is not True
+        or roundtrip.get("checkpoint_sha256") != before_resume
+        or sha256_file(paths["checkpoint"]) != before_resume
+        or roundtrip.get("candidate_rows") != 1
+        or roundtrip.get("example_id") != sentence[0].get("example_id")
+    ):
+        raise DataContractError("encoder smoke round-trip evidence is invalid")
+    return {
+        "cuda_device": first["environment"]["cuda_device"],
+        "selected_metrics": first["selected_metrics"],
+        "artifacts": {
+            layout.relative_identity(path): sha256_file(path)
+            for name, path in paths.items()
+            if name != "root"
+        },
+    }
+
+
+def run_smoke(
+    layout: RunLayout,
+    selection: ComparisonSelection,
+    seed: int,
+    *,
+    command_runner=subprocess.run,
+) -> dict[str, Any]:
+    """Run one bounded accelerator smoke and retain an admission boundary."""
+
+    _validate_prepared_inputs(layout, selection)
+    if seed not in TRAINING_SEEDS:
+        raise DataContractError(f"training seed {seed} is outside seeds 42-49")
+    paths = _smoke_paths(layout)
+    identity = _smoke_identity(layout, selection, seed)
+    if paths["identity"].is_file():
+        if load_json(paths["identity"]) != identity:
+            raise DataContractError("existing encoder smoke belongs to another identity")
+    else:
+        atomic_write_json(paths["identity"], identity)
+    manifest_path = layout.resolve(SMOKE_MANIFEST_RELATIVE)
+    if not manifest_path.is_file():
+        command = _private_command(layout, selection, seed, "smoke")
+        try:
+            command_runner(command, cwd=layout.source_root, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise DataContractError(
+                f"encoder comparison smoke failed with exit status {exc.returncode}; "
+                "retain this run and rerun the same command after diagnosis"
+            ) from exc
+        if layout.resolve(CACHE_MANIFEST_RELATIVE).is_file():
+            verify_cache_manifest(
+                layout,
+                model=selection.profile.model,
+                revision=selection.profile.revision,
+            )
+        else:
+            write_cache_manifest(
+                layout,
+                model=selection.profile.model,
+                revision=selection.profile.revision,
+            )
+        cache_identity = {
+            **_verify_profile_cache(layout, selection),
+            "base_parameter_count": _base_parameter_count(layout, selection),
+            "base_parameter_count_source": selection.profile.base_parameter_count_source,
+        }
+        evidence = _validate_smoke_outputs(layout, selection, seed)
+        manifest = {
+            "schema_version": "phase-g-encoder-smoke-1.0",
+            "status": "smoke-complete-awaiting-admission",
+            "run_id": layout.run_id,
+            "training_seed": seed,
+            "table1_arm": selection.arm.manifest(),
+            "identity": identity,
+            "cache_identity": cache_identity,
+            "evidence": evidence,
+            "full_run_admitted": False,
+            "final_test_accessed": False,
+        }
+        atomic_write_json(manifest_path, manifest)
+    manifest = load_json(manifest_path)
+    if (
+        manifest.get("schema_version") != "phase-g-encoder-smoke-1.0"
+        or manifest.get("run_id") != layout.run_id
+        or manifest.get("training_seed") != seed
+        or manifest.get("table1_arm") != selection.arm.manifest()
+        or manifest.get("identity") != identity
+        or manifest.get("full_run_admitted") is not False
+        or manifest.get("final_test_accessed") is not False
+    ):
+        raise DataContractError("encoder comparison smoke manifest differs")
+    current_cache_identity = {
+        **_verify_profile_cache(layout, selection),
+        "base_parameter_count": _base_parameter_count(layout, selection),
+        "base_parameter_count_source": selection.profile.base_parameter_count_source,
+    }
+    if manifest.get("cache_identity") != current_cache_identity:
+        raise DataContractError("encoder comparison smoke cache identity changed")
+    evidence = _validate_smoke_outputs(layout, selection, seed)
+    if manifest.get("evidence") != evidence:
+        raise DataContractError("encoder comparison smoke artifacts changed")
+    return manifest
+
+
+def record_admission(
+    layout: RunLayout,
+    selection: ComparisonSelection,
+    *,
+    decision: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Record the explicit post-smoke decision needed before full training."""
+
+    if decision not in {"admit", "reject"} or not reason.strip():
+        raise DataContractError("comparison admission needs admit/reject and a reason")
+    smoke_path = layout.resolve(SMOKE_MANIFEST_RELATIVE, must_exist=True)
+    smoke = load_json(smoke_path)
+    selection_manifest = validate_selection(layout, selection)
+    if (
+        smoke.get("status") != "smoke-complete-awaiting-admission"
+        or smoke.get("run_id") != layout.run_id
+        or smoke.get("table1_arm") != selection.arm.manifest()
+    ):
+        raise DataContractError("comparison smoke is not eligible for admission")
+    value = {
+        "schema_version": "phase-g-encoder-admission-1.0",
+        "run_id": layout.run_id,
+        "table1_arm": selection.arm.manifest(),
+        "selection_manifest_sha256": sha256_file(
+            layout.resolve("manifests/encoder-comparison-selection.json", must_exist=True)
+        ),
+        "smoke_manifest_sha256": sha256_file(smoke_path),
+        "decision": decision,
+        "reason": reason.strip(),
+        "final_test_accessed": False,
+        "selection": selection_manifest,
+    }
+    path = layout.resolve(ADMISSION_RELATIVE)
+    if path.is_file():
+        if load_json(path) != value:
+            raise DataContractError("existing comparison admission decision differs")
+    else:
+        atomic_write_json(path, value)
+    return value
+
+
+def _require_admission(
+    layout: RunLayout, selection: ComparisonSelection
+) -> dict[str, Any]:
+    path = layout.resolve(ADMISSION_RELATIVE, must_exist=True)
+    value = load_json(path)
+    smoke_path = layout.resolve(SMOKE_MANIFEST_RELATIVE, must_exist=True)
+    if (
+        value.get("schema_version") != "phase-g-encoder-admission-1.0"
+        or value.get("run_id") != layout.run_id
+        or value.get("table1_arm") != selection.arm.manifest()
+        or value.get("decision") != "admit"
+        or value.get("smoke_manifest_sha256") != sha256_file(smoke_path)
+        or value.get("final_test_accessed") is not False
+    ):
+        raise DataContractError("encoder comparison arm lacks an admitted smoke decision")
+    return value
+
+
 def plan_training(
     layout: RunLayout, selection: ComparisonSelection, seed: int
 ) -> dict[str, Any]:
@@ -391,6 +694,7 @@ def run_training(
     *,
     command_runner=subprocess.run,
 ) -> dict[str, Any]:
+    _require_admission(layout, selection)
     plan = plan_training(layout, selection, seed)
     checkpoint_dir = layout.resolve(f"checkpoints/seed-{seed}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -500,6 +804,95 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
     selection = config.select_arm(args.arm)
     layout = RunLayout(source_root=source_root, run_id=args.run_id)
     _validate_prepared_inputs(layout, selection)
+    if action == "smoke":
+        import torch
+
+        if not torch.cuda.is_available():
+            raise DataContractError("encoder comparison smoke requires CUDA")
+        paths = _smoke_paths(layout)
+        if load_json(paths["identity"]) != _smoke_identity(
+            layout, selection, args.training_seed
+        ):
+            raise DataContractError("private smoke identity changed during dispatch")
+        from utils.encoder_comparison.trainer import main as trainer_main
+
+        training_arguments = _smoke_training_arguments(
+            layout, selection, args.training_seed
+        )
+        if not paths["training_summary"].is_file():
+            trainer_main(training_arguments)
+        if not paths["checkpoint"].is_file() or not paths["restart"].is_file():
+            raise DataContractError("private smoke did not write checkpoint state")
+        checkpoint_sha256 = sha256_file(paths["checkpoint"])
+        if paths["checkpoint_before_resume"].is_file():
+            if (
+                paths["checkpoint_before_resume"].read_text(encoding="ascii").strip()
+                != checkpoint_sha256
+            ):
+                raise DataContractError("smoke checkpoint changed before resume")
+        else:
+            atomic_write_bytes(
+                paths["checkpoint_before_resume"],
+                (checkpoint_sha256 + "\n").encode("ascii"),
+            )
+        if not paths["resume_summary"].is_file():
+            resume_arguments = list(training_arguments)
+            _replace_argument(
+                resume_arguments, "--run-summary-out", str(paths["resume_summary"])
+            )
+            resume_arguments.extend(["--resume-from", str(paths["restart"])])
+            if "--model-local-files-only" not in resume_arguments:
+                resume_arguments.append("--model-local-files-only")
+            trainer_main(resume_arguments)
+        if sha256_file(paths["checkpoint"]) != checkpoint_sha256:
+            raise DataContractError("smoke resume changed the selected checkpoint")
+        if not paths["sentence"].is_file():
+            development = layout.resolve(
+                "data-prepared/development.jsonl", must_exist=True
+            )
+            first_line = next(
+                (line for line in development.read_bytes().splitlines() if line), None
+            )
+            if first_line is None:
+                raise DataContractError("development split is empty during smoke")
+            atomic_write_bytes(paths["sentence"], first_line + b"\n")
+        if not paths["ledger"].is_file():
+            prediction_arguments = trainer_arguments(
+                layout,
+                selection,
+                args.training_seed,
+                mode="predict",
+                split="development",
+            )
+            _replace_argument(
+                prediction_arguments, "--checkpoint", str(paths["checkpoint"])
+            )
+            _replace_argument(
+                prediction_arguments, "--sentences", str(paths["sentence"])
+            )
+            _replace_argument(
+                prediction_arguments,
+                "--prediction-ledger-out",
+                str(paths["ledger"]),
+            )
+            if "--model-local-files-only" not in prediction_arguments:
+                prediction_arguments.append("--model-local-files-only")
+            trainer_main(prediction_arguments)
+        ledger = _read_jsonl(paths["ledger"])
+        sentence = _read_jsonl(paths["sentence"])
+        atomic_write_json(
+            paths["roundtrip"],
+            {
+                "schema_version": "phase-g-encoder-smoke-roundtrip-1.0",
+                "checkpoint_sha256": checkpoint_sha256,
+                "checkpoint_unchanged_after_resume": (
+                    sha256_file(paths["checkpoint"]) == checkpoint_sha256
+                ),
+                "candidate_rows": len(ledger),
+                "example_id": sentence[0].get("example_id") if sentence else None,
+            },
+        )
+        return 0
     if action == "train":
         plan_path = layout.resolve(
             f"manifests/encoder-comparison-train-plan-seed-{args.training_seed}.json",
