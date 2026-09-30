@@ -9,7 +9,7 @@ from utils.rag import runner
 
 
 def run(layout: RunLayout, *, ollama_url: str) -> int:
-    """Execute the protected prerequisite and replacement Table-2 RAG stage."""
+    """Execute the independent full-panel replacement Table-2 RAG stage."""
 
     contract = runner.load_json(runner.CONTRACT_PATH)
     runner.validate_parent_lineage(layout.run_root, layout.run_id, contract)
@@ -18,5 +18,4 @@ def run(layout: RunLayout, *, ollama_url: str) -> int:
         ollama_url=ollama_url,
         dry_run=False,
     )
-    runner.run_protected_command(arguments, contract)
     return runner.run_command(arguments, contract)

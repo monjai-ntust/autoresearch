@@ -1,8 +1,8 @@
-"""Additive original-CODE question coverage for an authenticated Table-2 child.
+"""Original-CODE question coverage from authenticated same-run parents.
 
-The replacement deliberately treats ``table2-q105`` as an immutable, separately
-authenticated parity oracle. It freshly evaluates the complete expanded panel
-and writes every new artifact to the sibling ``table2-code-all`` namespace.
+The replacement freshly evaluates the complete expanded panel and writes its
+own projections and results beneath ``table2-code-all``. Historical
+``table2-q105`` output is an external comparison oracle, never a runtime input.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from utils.rag import evaluator, runner
 
 
 PROFILE_ID = "code-original"
-PROTECTED_NAMESPACE = "table2-q105"
 OUTPUT_NAMESPACE = "table2-code-all"
 EXPECTED_ADDITIONAL_TEMPLATES = (
     ("necessity", "What is required for {head}?", "{tail}"),
@@ -38,7 +37,6 @@ def replacement_method() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "profile_id": PROFILE_ID,
-        "protected_namespace": PROTECTED_NAMESPACE,
         "output_namespace": OUTPUT_NAMESPACE,
         "additional_templates": [
             {"relation": relation, "question": question, "answer": answer}
@@ -111,7 +109,7 @@ def _records_from_bytes(content: bytes) -> list[dict[str, Any]]:
     return rows
 
 
-def _protected_projection_paths(child_dir: Path) -> dict[str, Path]:
+def _projection_paths(child_dir: Path) -> dict[str, Path]:
     projection_dir = child_dir / "projections"
     return {
         "records": projection_dir / "test-with-private-gold.jsonl",
@@ -121,83 +119,8 @@ def _protected_projection_paths(child_dir: Path) -> dict[str, Path]:
     }
 
 
-def child_inventory(child_dir: Path) -> dict[str, Any]:
-    """Hash every protected file, including its status and hash manifest."""
-
-    runner.validate_child_write_surface(child_dir)
-    files = {
-        path.relative_to(child_dir).as_posix(): {
-            "sha256": runner.sha256_file(path),
-            "bytes": path.stat().st_size,
-        }
-        for path in sorted(child_dir.rglob("*"))
-        if path.is_file()
-    }
-    if not files:
-        raise runner.PhaseEError("Protected Table-2 child has no files")
-    return {
-        "files": files,
-        "inventory_sha256": runner.sha256_bytes(runner.canonical_json_bytes(files)),
-    }
-
-
-def validate_child_inventory(child_dir: Path, expected: dict[str, Any]) -> None:
-    if child_inventory(child_dir) != expected:
-        raise runner.PhaseEError("Protected Table-2 child inventory changed")
-
-
 def _question_contract(questions: list[dict[str, Any]]) -> list[dict[str, str]]:
     return [{"q": row["question"], "gold": row["gold_answer"]} for row in questions]
-
-
-def _validate_protected_child(
-    run_dir: Path,
-    base_preflight: dict[str, Any],
-    base_contract: dict[str, Any],
-) -> dict[str, Any]:
-    child_dir = run_dir / base_contract["evaluator"]["output_namespace"]
-    paths = _protected_projection_paths(child_dir)
-    status = runner.load_json(child_dir / "run-status.json")
-    results = runner.validate_phase_e_child(
-        child_dir,
-        status,
-        base_contract,
-        base_preflight,
-        paths,
-    )
-    environment = runner.load_json(child_dir / "environment.json")
-    protected_source = environment.get("source") if isinstance(environment, dict) else None
-    if (
-        not isinstance(protected_source, dict)
-        or set(protected_source) != {"head", "branch", "baseline"}
-        or status.get("identity")
-        != runner.build_child_identity(
-            base_preflight["run_id"], protected_source, base_preflight
-        )
-    ):
-        raise runner.PhaseEError(
-            "Protected Table-2 child identity does not match its recorded source"
-        )
-    method = runner.load_json(child_dir / "method-manifest.json")
-    if (
-        method.get("run_id") != base_preflight["run_id"]
-        or method.get("contract") != base_contract
-        or method.get("contract_sha256") != runner.sha256_file(runner.CONTRACT_PATH)
-    ):
-        raise runner.PhaseEError("Protected Table-2 method provenance changed")
-    inventory = child_inventory(child_dir)
-    return {
-        "dir": child_dir,
-        "paths": paths,
-        "status": status,
-        "identity": status.get("identity"),
-        "inventory": inventory,
-        "results": results,
-        "result_documents": {
-            condition: runner.load_json(child_dir / "rag-results" / f"{condition}.json")
-            for condition in ("confidence", "corrective", "gold")
-        },
-    }
 
 
 def _base_preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
@@ -208,15 +131,25 @@ def preflight_code_questions(
     run_id: str,
     base_contract: dict[str, Any],
 ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
-    """Authenticate the same-run parent and immutable protected child."""
+    """Authenticate same-run parents and derive replacement-local projections."""
 
     run_dir, base_preflight, projections, graphs = runner.preflight_same_run(
         run_id, base_contract
     )
-    protected = _validate_protected_child(run_dir, base_preflight, base_contract)
     records = _records_from_bytes(projections["records"])
     panels = build_question_panels(records)
     method = replacement_method()
+    graph_summaries = {
+        name: {
+            **value,
+            "source_path": (
+                f"{OUTPUT_NAMESPACE}/canonical-graphs/{name}/manifest.json"
+                if value["source"] == "constructed"
+                else value["source_path"]
+            ),
+        }
+        for name, value in base_preflight["graphs"].items()
+    }
     summary = {
         "run_id": run_id,
         "run_dir": str(run_dir),
@@ -225,15 +158,9 @@ def preflight_code_questions(
         "method_sha256": runner.sha256_bytes(runner.canonical_json_bytes(method)),
         "base_contract_sha256": runner.sha256_file(runner.CONTRACT_PATH),
         "base_preflight_identity": _base_preflight_identity(base_preflight),
-        "protected_child": {
-            "namespace": base_contract["evaluator"]["output_namespace"],
-            "identity": protected["identity"],
-            "artifact_hashes_sha256": runner.sha256_file(
-                protected["dir"] / "artifact-hashes.json"
-            ),
-            "inventory_sha256": protected["inventory"]["inventory_sha256"],
-            "files": protected["inventory"]["files"],
-        },
+        "projection_sha256": base_preflight["projection_sha256"],
+        "graphs": graph_summaries,
+        "record_summary": base_preflight["records"],
         "questions": panels["summary"],
         "method": method,
         "model_identity": base_preflight["model_identity"],
@@ -245,7 +172,6 @@ def preflight_code_questions(
         "graphs": graphs,
         "records": records,
         "panels": panels,
-        "protected": protected,
     }
     return run_dir, summary, runtime
 
@@ -261,10 +187,7 @@ def build_identity(
         "method_sha256": summary["method_sha256"],
         "base_contract_sha256": summary["base_contract_sha256"],
         "base_preflight_identity": summary["base_preflight_identity"],
-        "protected_identity": summary["protected_child"]["identity"],
-        "protected_inventory_sha256": summary["protected_child"][
-            "inventory_sha256"
-        ],
+        "projection_sha256": summary["projection_sha256"],
         "question_sha256": {
             name: summary["questions"][f"{name}_sha256"]
             for name in ("protected", "added", "combined")
@@ -292,7 +215,7 @@ def validate_execution_snapshot(
     runtime: dict[str, Any],
     base_contract: dict[str, Any],
 ) -> None:
-    """Recheck source, method, projections, and the complete protected child."""
+    """Recheck source, method, parent lineage, projections, and questions."""
 
     if runner.validate_source_contract(base_contract, require_clean=True) != source:
         raise runner.PhaseEError("Source identity changed after CODE-question preflight")
@@ -309,18 +232,15 @@ def validate_execution_snapshot(
         raise runner.PhaseEError("Base Table-2 contract changed after preflight")
     if build_identity(summary["run_id"], source, summary) != identity:
         raise runner.PhaseEError("CODE question child identity changed after preflight")
-    protected = runtime["protected"]
-    validate_child_inventory(protected["dir"], protected["inventory"])
-    runner.validate_child_hashes(protected["dir"], summary["run_id"])
-    for name, path in protected["paths"].items():
-        if (
-            not path.is_file()
-            or runner.sha256_file(path)
-            != runtime["base_preflight"]["projection_sha256"][name]
-        ):
-            raise runner.PhaseEError(f"Protected projection changed: {name}")
-    rebuilt = build_question_panels(runtime["records"])
-    if rebuilt["summary"] != summary["questions"]:
+    _run_dir, current_preflight, current_projections, _graphs = (
+        runner.preflight_same_run(summary["run_id"], base_contract)
+    )
+    if _base_preflight_identity(current_preflight) != summary["base_preflight_identity"]:
+        raise runner.PhaseEError("Same-run parent lineage changed after preflight")
+    if current_preflight["projection_sha256"] != summary["projection_sha256"]:
+        raise runner.PhaseEError("Replacement projections changed after preflight")
+    rebuilt = build_question_panels(_records_from_bytes(current_projections["records"]))
+    if rebuilt["summary"] != summary["questions"] or rebuilt != runtime["panels"]:
         raise runner.PhaseEError("CODE question panel changed after preflight")
 
 
@@ -393,83 +313,62 @@ def _panel_indices(panels: dict[str, Any]) -> tuple[list[int], list[int]]:
     return protected_indices, additional_indices
 
 
-def build_parity_document(
+def build_part_of_document(
     *,
     run_id: str,
     condition: str,
     panels: dict[str, Any],
-    protected_output: dict[str, Any],
-    protected_path: str,
-    protected_sha256: str,
     replacement_output: dict[str, Any],
     replacement_path: str,
     replacement_sha256: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Compare newly executed part-of rows with the authenticated historical rows."""
+    """Extract freshly executed part-of rows for later external-oracle comparison."""
 
     protected_indices, additional_indices = _panel_indices(panels)
     statistics: dict[str, Any] = {}
-    modes: dict[str, Any] = {}
+    results: dict[str, Any] = {}
+    row_hashes: dict[str, str] = {}
     for mode in evaluator.MODES:
-        historical_rows = protected_output["results"][mode]
         combined_rows = replacement_output["results"][mode]
         part_of_rows = [combined_rows[index] for index in protected_indices]
         additional_rows = [combined_rows[index] for index in additional_indices]
         _validate_result_rows(
-            historical_rows, panels["protected"], f"historical {condition}/{mode}"
-        )
-        _validate_result_rows(
             combined_rows, panels["combined"], f"replacement {condition}/{mode}"
         )
-        equal = part_of_rows == historical_rows
-        first_mismatch = None
-        if not equal:
-            for index, (historical, replacement) in enumerate(
-                zip(historical_rows, part_of_rows)
-            ):
-                if historical != replacement:
-                    first_mismatch = {
-                        "protected_index": index,
-                        "combined_index": protected_indices[index],
-                        "historical": historical,
-                        "replacement": replacement,
-                    }
-                    break
-        modes[mode] = {
-            "equal": equal,
-            "compared_rows": len(historical_rows),
-            "historical_rows_sha256": _rows_digest(historical_rows),
-            "replacement_part_of_rows_sha256": _rows_digest(part_of_rows),
-            "first_mismatch": first_mismatch,
-        }
+        _validate_result_rows(
+            part_of_rows, panels["protected"], f"part-of {condition}/{mode}"
+        )
+        results[mode] = part_of_rows
+        row_hashes[mode] = _rows_digest(part_of_rows)
         statistics[mode] = {
             "part_of": _panel_statistics(part_of_rows),
             "additional": _panel_statistics(additional_rows),
             "combined": _panel_statistics(combined_rows),
         }
-    parity = {
-        "schema_version": "phase-g-code-question-parity-1.0",
+    document = {
+        "schema_version": "phase-g-part-of-results-1.0",
         "run_id": run_id,
         "condition": condition,
-        "historical": {
-            "path": protected_path,
-            "sha256": protected_sha256,
-            "time_seconds": protected_output["metadata"]["time_seconds"],
-        },
-        "replacement": {
+        "source": {
             "path": replacement_path,
             "sha256": replacement_sha256,
             "time_seconds": replacement_output["metadata"]["time_seconds"],
         },
-        "protected_indices": protected_indices,
-        "modes": modes,
-        "overall_equal": all(item["equal"] for item in modes.values()),
+        "question_sha256": _question_digest(panels["protected"]),
+        "combined_indices": protected_indices,
+        "row_sha256": row_hashes,
+        "results": results,
+        "oracle_comparison": {
+            "status": "pending-external-oracle",
+            "runtime_input": False,
+        },
     }
-    return parity, statistics
+    return document, statistics
 
 
 def _validate_replacement_output(
     path: Path,
+    child_dir: Path,
     runtime: dict[str, Any],
     condition: str,
     model_name: str,
@@ -479,9 +378,31 @@ def _validate_replacement_output(
         {},
         model_name,
         expected_questions=_question_contract(runtime["panels"]["combined"]),
-        expected_kg=runner.stable_child_path(runtime["protected"]["paths"][condition]),
+        expected_kg=runner.stable_child_path(_projection_paths(child_dir)[condition]),
         expected_count=len(runtime["panels"]["combined"]),
     )
+
+
+def _projection_manifest(
+    child_dir: Path,
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    paths = _projection_paths(child_dir)
+    return {
+        "schema_version": "phase-g-code-question-projections-1.0",
+        "run_id": summary["run_id"],
+        "representation_only": True,
+        "historical_child_used": False,
+        "inputs": {
+            "base_preflight_identity": summary["base_preflight_identity"],
+            "graphs": summary["graphs"],
+        },
+        "outputs": {
+            path.relative_to(child_dir).as_posix(): runner.sha256_file(path)
+            for path in paths.values()
+        },
+        "record_summary": summary["record_summary"],
+    }
 
 
 def _artifact_hash_document(child_dir: Path, run_id: str) -> dict[str, Any]:
@@ -504,7 +425,7 @@ def validate_extension_child(
     summary: dict[str, Any],
     runtime: dict[str, Any],
 ) -> dict[str, Any]:
-    """Validate every replacement artifact and its immutable parity oracle."""
+    """Validate every independently generated replacement artifact."""
 
     runner.validate_child_write_surface(child_dir)
     if (
@@ -523,19 +444,27 @@ def validate_extension_child(
         expected_model=summary["model_identity"],
         condition=None,
     )
-    validate_child_inventory(
-        runtime["protected"]["dir"], runtime["protected"]["inventory"]
-    )
     expected_ledger = question_ledger(summary["run_id"], runtime["panels"])
     if runner.load_json(child_dir / "question-ledger.json") != expected_ledger:
         raise runner.PhaseEError("CODE question ledger changed")
-    expected_parent = {
-        "schema_version": "phase-g-protected-table2-parent-1.0",
-        "run_id": summary["run_id"],
-        **summary["protected_child"],
-    }
-    if runner.load_json(child_dir / "protected-parent.json") != expected_parent:
-        raise runner.PhaseEError("Protected Table-2 parent binding changed")
+    projection_paths = _projection_paths(child_dir)
+    for name, path in projection_paths.items():
+        if (
+            not path.is_file()
+            or runner.sha256_file(path) != summary["projection_sha256"][name]
+        ):
+            raise runner.PhaseEError(f"Replacement projection changed: {name}")
+    expected_projection_manifest = _projection_manifest(child_dir, summary)
+    if (
+        runner.load_json(child_dir / "projections" / "manifest.json")
+        != expected_projection_manifest
+    ):
+        raise runner.PhaseEError("Replacement projection manifest changed")
+    for name, graph in runtime["graphs"].items():
+        if summary["graphs"][name]["source"] == "constructed":
+            path = child_dir / "canonical-graphs" / name / "manifest.json"
+            if runner.load_json(path) != graph:
+                raise runner.PhaseEError(f"Replacement canonical graph changed: {name}")
     expected_method = {
         "schema_version": "phase-g-code-question-method-1.0",
         "run_id": summary["run_id"],
@@ -543,9 +472,9 @@ def validate_extension_child(
         "method": summary["method"],
         "base_contract": runner.load_json(runner.CONTRACT_PATH),
         "reuse": {
-            "protected_results": "comparison-only",
-            "projection": True,
-            "graphs": True,
+            "historical_results": False,
+            "historical_projections": False,
+            "same_run_graph_construction": True,
             "evaluation_kernel": True,
         },
     }
@@ -563,7 +492,6 @@ def validate_extension_child(
             "python",
             "source",
             "model_identity",
-            "protected_environment_path",
         }
         or environment.get("schema_version")
         != "phase-g-code-question-environment-1.0"
@@ -571,19 +499,17 @@ def validate_extension_child(
         or environment.get("captured_at") != status.get("created_at")
         or environment.get("source") != identity["source"]
         or environment.get("model_identity") != summary["model_identity"]
-        or environment.get("protected_environment_path")
-        != runner.stable_child_path(runtime["protected"]["dir"] / "environment.json")
         or not isinstance(environment.get("platform"), str)
         or not isinstance(environment.get("python"), str)
     ):
         raise runner.PhaseEError("CODE question environment manifest changed")
     condition_summaries = {}
-    parity_summaries = {}
+    part_of_hashes = {}
     for condition in ("confidence", "corrective", "gold"):
-        protected_path = runtime["protected"]["dir"] / "rag-results" / f"{condition}.json"
         replacement_path = child_dir / "rag-results" / f"{condition}.json"
         replacement_validation = _validate_replacement_output(
             replacement_path,
+            child_dir,
             runtime,
             condition,
             summary["model_identity"]["name"],
@@ -604,34 +530,19 @@ def validate_extension_child(
             condition=condition,
         )
         replacement_output = runner.load_json(replacement_path)
-        parity, statistics = build_parity_document(
+        part_of, statistics = build_part_of_document(
             run_id=summary["run_id"],
             condition=condition,
             panels=runtime["panels"],
-            protected_output=runtime["protected"]["result_documents"][condition],
-            protected_path=runner.stable_child_path(protected_path),
-            protected_sha256=runner.sha256_file(protected_path),
             replacement_output=replacement_output,
             replacement_path=runner.stable_child_path(replacement_path),
             replacement_sha256=runner.sha256_file(replacement_path),
         )
-        if runner.load_json(child_dir / "part-of-parity" / f"{condition}.json") != parity:
-            raise runner.PhaseEError(f"CODE question parity evidence changed: {condition}")
+        part_of_path = child_dir / "part-of-results" / f"{condition}.json"
+        if runner.load_json(part_of_path) != part_of:
+            raise runner.PhaseEError(f"CODE question part-of evidence changed: {condition}")
         condition_summaries[condition] = statistics
-        parity_summaries[condition] = {
-            "overall_equal": parity["overall_equal"],
-            "modes": {
-                mode: {
-                    "equal": value["equal"],
-                    "compared_rows": value["compared_rows"],
-                    "historical_rows_sha256": value["historical_rows_sha256"],
-                    "replacement_part_of_rows_sha256": value[
-                        "replacement_part_of_rows_sha256"
-                    ],
-                }
-                for mode, value in parity["modes"].items()
-            },
-        }
+        part_of_hashes[condition] = runner.sha256_file(part_of_path)
     result_summary = runner.load_json(child_dir / "code-question-results.json")
     expected_summary = {
         "schema_version": "phase-g-code-question-results-1.0",
@@ -639,11 +550,10 @@ def validate_extension_child(
         "profile_id": PROFILE_ID,
         "question_summary": summary["questions"],
         "conditions": condition_summaries,
-        "historical_part_of_parity": {
-            "overall_equal": all(
-                value["overall_equal"] for value in parity_summaries.values()
-            ),
-            "conditions": parity_summaries,
+        "historical_part_of_comparison": {
+            "status": "pending-external-oracle",
+            "runtime_input": False,
+            "result_artifact_sha256": part_of_hashes,
         },
         "note": (
             "Expanded Table-2-format diagnostic on canonical upstream outputs; "
@@ -652,10 +562,6 @@ def validate_extension_child(
     }
     if result_summary != expected_summary:
         raise runner.PhaseEError("CODE question result summary changed")
-    if not expected_summary["historical_part_of_parity"]["overall_equal"]:
-        raise runner.PhaseEError(
-            "Replacement part-of results differ from the authenticated historical run"
-        )
     hash_document = runner.load_json(child_dir / "artifact-hashes.json")
     if hash_document != _artifact_hash_document(child_dir, summary["run_id"]):
         raise runner.PhaseEError("CODE question artifact hashes differ")
@@ -740,18 +646,24 @@ def run_command(
         )
         runner.write_status(status_path, status, child_dir)
 
+    projection_paths = _projection_paths(child_dir)
+    for name, path in projection_paths.items():
+        runner.write_bytes_once(path, runtime["projections"][name], child_dir)
+    for name, graph in runtime["graphs"].items():
+        if summary["graphs"][name]["source"] == "constructed":
+            runner.write_json_once(
+                child_dir / "canonical-graphs" / name / "manifest.json",
+                graph,
+                child_dir,
+            )
     runner.write_json_once(
-        child_dir / "question-ledger.json",
-        question_ledger(args.run_id, runtime["panels"]),
+        child_dir / "projections" / "manifest.json",
+        _projection_manifest(child_dir, summary),
         child_dir,
     )
     runner.write_json_once(
-        child_dir / "protected-parent.json",
-        {
-            "schema_version": "phase-g-protected-table2-parent-1.0",
-            "run_id": args.run_id,
-            **summary["protected_child"],
-        },
+        child_dir / "question-ledger.json",
+        question_ledger(args.run_id, runtime["panels"]),
         child_dir,
     )
     runner.write_json_once(
@@ -763,9 +675,9 @@ def run_command(
             "method": summary["method"],
             "base_contract": base_contract,
             "reuse": {
-                "protected_results": "comparison-only",
-                "projection": True,
-                "graphs": True,
+                "historical_results": False,
+                "historical_projections": False,
+                "same_run_graph_construction": True,
                 "evaluation_kernel": True,
             },
         },
@@ -781,9 +693,6 @@ def run_command(
             "python": sys.version,
             "source": source,
             "model_identity": summary["model_identity"],
-            "protected_environment_path": runner.stable_child_path(
-                runtime["protected"]["dir"] / "environment.json"
-            ),
         },
         child_dir,
     )
@@ -807,7 +716,7 @@ def run_command(
             )
             reuse_completed = True
         output_path = child_dir / "rag-results" / f"{condition}.json"
-        kg_path = runtime["protected"]["paths"][condition]
+        kg_path = projection_paths[condition]
         records = runtime["records"]
         kg = runner.load_json(kg_path)
         runner.run_stage(
@@ -823,6 +732,7 @@ def run_command(
             output_path,
             lambda path, condition=condition: _validate_replacement_output(
                 path,
+                child_dir,
                 runtime,
                 condition,
                 summary["model_identity"]["name"],
@@ -854,39 +764,25 @@ def run_command(
         replacement_outputs[condition] = runner.load_json(output_path)
 
     condition_summaries = {}
-    parity_summaries = {}
+    part_of_hashes = {}
     for condition in ("confidence", "corrective", "gold"):
-        protected_path = runtime["protected"]["dir"] / "rag-results" / f"{condition}.json"
         replacement_path = child_dir / "rag-results" / f"{condition}.json"
-        parity, statistics = build_parity_document(
+        part_of, statistics = build_part_of_document(
             run_id=args.run_id,
             condition=condition,
             panels=runtime["panels"],
-            protected_output=runtime["protected"]["result_documents"][condition],
-            protected_path=runner.stable_child_path(protected_path),
-            protected_sha256=runner.sha256_file(protected_path),
             replacement_output=replacement_outputs[condition],
             replacement_path=runner.stable_child_path(replacement_path),
             replacement_sha256=runner.sha256_file(replacement_path),
         )
+        part_of_path = child_dir / "part-of-results" / f"{condition}.json"
         runner.write_json_once(
-            child_dir / "part-of-parity" / f"{condition}.json", parity, child_dir
+            part_of_path,
+            part_of,
+            child_dir,
         )
         condition_summaries[condition] = statistics
-        parity_summaries[condition] = {
-            "overall_equal": parity["overall_equal"],
-            "modes": {
-                mode: {
-                    "equal": value["equal"],
-                    "compared_rows": value["compared_rows"],
-                    "historical_rows_sha256": value["historical_rows_sha256"],
-                    "replacement_part_of_rows_sha256": value[
-                        "replacement_part_of_rows_sha256"
-                    ],
-                }
-                for mode, value in parity["modes"].items()
-            },
-        }
+        part_of_hashes[condition] = runner.sha256_file(part_of_path)
 
     result_summary = {
         "schema_version": "phase-g-code-question-results-1.0",
@@ -894,11 +790,10 @@ def run_command(
         "profile_id": PROFILE_ID,
         "question_summary": summary["questions"],
         "conditions": condition_summaries,
-        "historical_part_of_parity": {
-            "overall_equal": all(
-                value["overall_equal"] for value in parity_summaries.values()
-            ),
-            "conditions": parity_summaries,
+        "historical_part_of_comparison": {
+            "status": "pending-external-oracle",
+            "runtime_input": False,
+            "result_artifact_sha256": part_of_hashes,
         },
         "note": (
             "Expanded Table-2-format diagnostic on canonical upstream outputs; "
@@ -921,21 +816,10 @@ def run_command(
     )
     if (
         final_summary["base_preflight_identity"] != summary["base_preflight_identity"]
-        or final_summary["protected_child"] != summary["protected_child"]
+        or final_summary["projection_sha256"] != summary["projection_sha256"]
         or final_summary["questions"] != summary["questions"]
     ):
         raise runner.PhaseEError("Same-run parent changed during CODE question execution")
-    if not result_summary["historical_part_of_parity"]["overall_equal"]:
-        status["status"] = "parity-failed"
-        status["finished_at"] = runner.utc_now()
-        status["historical_part_of_parity"] = result_summary[
-            "historical_part_of_parity"
-        ]
-        runner.write_status(status_path, status, child_dir)
-        raise runner.PhaseEError(
-            "Replacement part-of results differ from the authenticated historical run; "
-            "outputs were retained for review"
-        )
     completed = dict(status)
     completed["status"] = "complete"
     completed["finished_at"] = runner.utc_now()

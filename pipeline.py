@@ -110,7 +110,7 @@ def _parser() -> argparse.ArgumentParser:
     table2.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser(
-        "validate-table2", help="Validate protected and expanded Table-2 contracts"
+        "validate-table2", help="Validate historical-method and replacement RAG contracts"
     )
     return parser
 

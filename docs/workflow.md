@@ -94,8 +94,8 @@ The command runs or resumes these stages in order:
 9. Eight final-test candidate ledgers and assembly.
 10. Simple and corrective verifier execution.
 11. Strict scoring and publication metrics.
-12. Same-run graph construction/projection, protected 105-question evaluation,
-    and 467-question replacement evaluation with exact historical-result parity.
+12. Same-run graph construction/projection and independent 467-question
+    replacement evaluation, including an exported 105-question `part-of` subset.
 
 This route produces the canonical CODE-ACCORD successors to the encoder and
 verifier analyses plus a new same-run Table 2. It does not regenerate the
@@ -117,8 +117,8 @@ the model-cache, storage, accelerator, and G-05 smoke gates documented in
 
 ## Table-2-only route
 
-For a run that already completed stages 1–11 and contains an authenticated
-completed `table2-q105/` child, execute the replacement downstream Table 2:
+For a run that already completed stages 1–11, execute the replacement downstream
+Table 2. No historical RAG child is required:
 
 ```bash
 uv run --frozen --no-sync python -I -B pipeline.py table2 \
@@ -136,9 +136,8 @@ The command freshly evaluates all 467 questions: the 105 historical `part-of`
 questions plus 362 questions from the seven restored original-CODE templates.
 Across five modes and three graph conditions this is 7,005 model calls. Stored
 historical responses are comparison evidence only and are never inserted into
-the new output. The new 105-question subset must equal all 1,575 corresponding
-historical response rows exactly; otherwise the replacement is retained as
-`parity-failed` for review.
+the new output. The command exports the new 105-question subset for an exact
+post-execution comparison with all 1,575 separately archived historical rows.
 
 Three graphs are used: seed-42 confidence-filtered candidates at the
 development-selected threshold, seed-42 correction-capable verifier emissions,
@@ -161,13 +160,12 @@ complete producer manifest and every declared output validate.
 Development-pilot calls never use recovery caches.
 
 Table-2 stages record a run identity before their first write. A validated
-completed stage is reusable. The protected prerequisite uses
-`output/<run-id>/table2-q105/`; the replacement and its recovery evidence use
-`output/<run-id>/table2-code-all/`. An unverified interrupted result is moved
+completed stage is reusable. The replacement, its own projections, and its
+recovery evidence use `output/<run-id>/table2-code-all/`. An unverified interrupted result is moved
 under its own child's `recovery/` directory before a new attempt. Cross-run paths,
 symlinks/junctions, changed inputs, mismatched model identities, malformed or
-empty model responses, historical `part-of` result mismatch, and output
-collisions fail closed.
+empty model responses, and output collisions fail closed. Historical `part-of`
+comparison happens outside runtime after both result sets exist.
 
 ## Primary artifacts
 
@@ -184,13 +182,10 @@ Important run-relative paths include:
 - `verifier/{simple,corrective}/verdicts.jsonl`
 - `metrics/metrics.json`
 - `manifests/score-manifest.json`
-- `table2-q105/projections/`
-- `table2-q105/rag-results/`
-- `table2-q105/table2-results.json`
-- `table2-q105/artifact-hashes.json`
+- `table2-code-all/projections/`
 - `table2-code-all/question-ledger.json`
 - `table2-code-all/rag-results/`
-- `table2-code-all/part-of-parity/`
+- `table2-code-all/part-of-results/`
 - `table2-code-all/code-question-results.json`
 - `table2-code-all/artifact-hashes.json`
 

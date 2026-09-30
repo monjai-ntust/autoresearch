@@ -97,9 +97,9 @@ If Ollama's `FROM` path is not directly accessible, add
 external immutable input, not a file under any `output/<run-id>/` tree.
 
 The Python entry point performs and resumes the complete ordered workflow. Its
-RAG stage first seals the 105-question historical-method prerequisite, then
-freshly evaluates the 467-question original-CODE panel and requires exact
-`part-of` result parity. It
+RAG stage independently materializes same-run projections and freshly evaluates
+the 467-question original-CODE panel. It emits the new 105-question `part-of`
+subset for later comparison with a separately archived historical oracle. It
 does not replace a different existing artifact, bypass the development pilot,
 or reuse a stage whose manifest/hash binding has changed.
 
@@ -133,9 +133,9 @@ statistics contract, and command contract.
 ## Run only downstream Table 2
 
 Use this route when a complete authenticated run already contains the encoder,
-candidate, threshold, verifier, score outputs, and authenticated
-`table2-q105/` historical-method child. It never trains the encoder or invokes
-the verifier. It does not insert stored answers into the replacement output.
+candidate, threshold, verifier, and score outputs. It never trains the encoder
+or invokes the verifier. It neither requires nor reads `table2-q105/`, and it
+does not insert stored answers into the replacement output.
 
 First validate the same-run plan without writes or model calls:
 
@@ -155,13 +155,11 @@ uv run --frozen --no-sync python -I -B pipeline.py table2 \
 ```
 
 The replacement output is confined to
-`output/<run-id>/table2-code-all/`. The immutable
-`output/<run-id>/table2-q105/` child supplies the authenticated graph projections
-and historical parity oracle. The replacement freshly executes all 467
-questions (7,005 calls across five modes and three graph conditions), extracts
-its 105 `part-of` rows, and requires exact equality with all 1,575 historical
-rows. A mismatch leaves the new output in `parity-failed` state for review; it
-never substitutes stored responses. Missing canonical graphs are
+`output/<run-id>/table2-code-all/`. It derives its own authenticated projections
+from same-run parents, freshly executes all 467 questions (7,005 calls across
+five modes and three graph conditions), and writes the 105 new `part-of` rows
+under `part-of-results/`. Historical results are archived and compared only
+after execution; they are never runtime inputs. Missing canonical graphs are
 deterministically reconstructed only from authenticated prepared data, gold,
 seed-42 candidates, the development-selected threshold, and corrective verdicts
 in that same run. If a canonical graph already exists, its canonical JSON must
