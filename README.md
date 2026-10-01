@@ -133,6 +133,87 @@ closed until a separately recorded post-review admission exists. See
 `docs/encoder-comparison.md` for the source/reuse boundary,
 statistics contract, and command contract.
 
+### Detached full-training and prediction launcher
+
+Run this Bash block from the standalone source checkout, with dependencies
+already synchronized. Set `comparison_prefix` to the **unchanged** prefix of
+your four existing, prepared, smoke-reviewed and admitted runs; the example
+uses `g05-<arm>`. Do not update source during an authenticated run. This block
+does not prepare, admit, delete or copy runs, or rerun the canonical pipeline.
+Final-test access must also have received the review required by the protocol.
+It completes all four arms' seeds 42-49 before generating test predictions.
+Missing run directories are reported and skipped; if any arm is missing, it
+trains the available arms but skips final-test generation for the whole matrix.
+Other validation/training errors still stop the launcher.
+
+```bash
+comparison_prefix="${COMPARISON_PREFIX:-g05}"
+job_dir="output/comparison-launch-$(date -u +%Y%m%dT%H%M%S%N)-$$"
+mkdir -p "$job_dir/logs"
+log="$job_dir/logs/runner.log"
+
+nohup bash -s -- "$job_dir" "$comparison_prefix" >"$log" 2>&1 <<'BASH' &
+set -euo pipefail
+job_dir=$1
+prefix=$2
+export PYTHONUNBUFFERED=1 DISABLE_SAFETENSORS_CONVERSION=1
+trap 'rc=$?; printf "\nFINISHED %s exit_code=%s\n" "$(date -u +%FT%TZ)" "$rc"' EXIT
+[[ -f encoder_comparison.py && -f uv.lock ]] ||
+  { printf 'Run this from the source checkout.\n'; exit 1; }
+mkdir -p output/comparison-launcher
+exec 9>output/comparison-launcher/full.lock
+flock -n 9 || { printf 'Another comparison launcher holds the lock.\n'; exit 1; }
+
+arms=(bert-base-common deberta-base-common deberta-large-common deberta-large-a20-a21-a12)
+seeds=(42 43 44 45 46 47 48 49)
+available=()
+for arm in "${arms[@]}"; do
+  run_dir="output/$prefix-$arm"
+  if [[ ! -d "$run_dir" ]]; then
+    printf 'SKIP missing directory: %s\n' "$run_dir"
+    continue
+  fi
+  [[ -s "$run_dir/manifests/encoder-comparison-admission.json" ]] ||
+    { printf 'Missing admission: %s\n' "$run_dir"; exit 1; }
+  available+=("$arm")
+done
+
+for arm in "${available[@]}"; do
+  for seed in "${seeds[@]}"; do
+    printf '\nTRAIN arm=%s seed=%s\n' "$arm" "$seed"
+    uv run --frozen --no-sync python -I -B -u encoder_comparison.py \
+      train --arm "$arm" --run-id "$prefix-$arm" --training-seed "$seed"
+  done
+done
+
+if (( ${#available[@]} == ${#arms[@]} )); then
+  printf '\nALL 32 TRAINING RUNS COMPLETE\n'
+  for arm in "${arms[@]}"; do
+    for seed in "${seeds[@]}"; do
+      printf '\nGENERATE arm=%s seed=%s\n' "$arm" "$seed"
+      uv run --frozen --no-sync python -I -B -u encoder_comparison.py \
+        generate --arm "$arm" --run-id "$prefix-$arm" --training-seed "$seed" --split test
+    done
+  done
+  printf '\nALL TRAINING AND TEST PREDICTION GENERATION COMPLETE\n'
+else
+  printf '\nSKIP final-test generation: the four-arm matrix is incomplete.\n'
+fi
+BASH
+
+printf 'PID: %s\nLog: %s\nFollow: tail -f %q\n' "$!" "$log" "$log"
+```
+
+Requires Linux Bash, `nohup`, `flock` and `uv`. The generated `job_dir` holds
+launcher logs only; scientific inputs/results remain in their original
+arm-specific runs. The shared lock prevents overlapping copies of this
+launcher, not independently launched comparison commands. `nohup` lets the
+job continue after SSH disconnect. Check the log for the final completion
+message and `exit_code=0`; a missing-directory skip is not a complete matrix.
+Training summaries contain development-selected metrics. `generate` writes
+test prediction/candidate JSONL, not scored, aggregated publication statistics.
+Those require subsequent strict scoring under the declared statistics contract.
+
 ## Run only downstream Table 2
 
 Use this route when a complete authenticated run already contains the encoder,
@@ -196,3 +277,51 @@ values are comparison metadata only; they are not inputs or tuning targets.
 See `docs/workflow.md` for the artifact and resume contract and
 `docs/model-training-compatibility.md` for the canonical encoder compatibility
 boundary. See `docs/encoder-comparison.md` for the isolated Phase G path.
+
+### ZIP the comparison or pipeline text outputs
+
+After the launchers exit with zero, run this Bash block from the source checkout.
+It uses `file` to identify text by content (including extensionless and empty
+files), preserves paths, and omits binary weights/checkpoints. Missing paths
+print a message and are skipped; no archive is created when none exist or none
+contain text. Requires `file`, `find` and `zip`. Keep `job_dir` and
+`comparison_prefix` from the launcher above, or set them to the existing job
+directory and run prefix in a new SSH session. Set `PIPELINE_RUN_ID` to the
+actual pipeline run ID; do not create or rename a run to package it.
+
+```bash
+archive_dir="output/text-handoff-$(date -u +%Y%m%dT%H%M%S%N)-$$"
+pipeline_dir="${PIPELINE_RUN_ID:+output/$PIPELINE_RUN_ID}"
+
+zip_text() (
+  set -euo pipefail
+  archive=$1; shift
+  paths=()
+  for path in "$@"; do
+    if [[ -e "$path" ]]; then paths+=("$path")
+    else printf 'SKIP missing path: %s\n' "${path:-<unset>}"; fi
+  done
+  (( ${#paths[@]} )) || { printf 'SKIP archive: no input paths.\n'; return 0; }
+  mkdir -p "$archive_dir"
+  list=$(mktemp "$archive_dir/.text-list-XXXXXX")
+  trap 'rm -f -- "$list"' EXIT
+  find "${paths[@]}" -type f \( -empty -o -exec sh -c \
+    '[ "$(file -b --mime-encoding "$1")" != binary ]' sh {} \; \) -print >"$list"
+  [[ -s "$list" ]] || { printf 'SKIP archive: no text files.\n'; return 0; }
+  zip -q "$archive" -@ <"$list"
+  printf 'Archive: %s\n' "$archive"
+)
+
+comparison_prefix="${comparison_prefix:-${COMPARISON_PREFIX:-g05}}"
+zip_text "$archive_dir/comparison-text.zip" \
+  output/"$comparison_prefix"-{bert-base-common,deberta-base-common,deberta-large-common,deberta-large-a20-a21-a12} \
+  "${job_dir:-}"
+zip_text "$archive_dir/pipeline-text.zip" "$pipeline_dir"
+```
+
+The generated `archive_dir` is a text-only handoff namespace, not a new
+scientific run. These ZIPs are diagnostic exports, not complete authenticated
+run archives: keep the original run trees and binary artifacts for full lineage
+validation and final retention. The ZIP list supports spaces in names but not
+embedded newlines. A zero launcher exit is assumed here, not checked by the ZIP
+helper; inspect any reported skips before treating an export as complete.
