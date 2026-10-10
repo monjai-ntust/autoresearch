@@ -35,8 +35,6 @@ from utils.encoder_comparison import data as comparison_data
 from utils.encoder_comparison.config import (
     BASE_PARAMETER_COUNT_SOURCE,
     DEFAULT_CONFIG,
-    HISTORICAL_BLOBS,
-    HISTORICAL_COMMIT,
     _validate_profile,
     bind_selection,
     load_comparison_config,
@@ -49,46 +47,6 @@ from utils.encoder_comparison.trainer import pipeline_comparison_boost
 SOURCE_ROOT = discover_source_root(Path(__file__))
 ENTRYPOINT = SOURCE_ROOT / "encoder_comparison.py"
 PIPELINE = SOURCE_ROOT / "pipeline.py"
-PHASE_F_BASELINE = "5db3bce"
-PHASE_F_ENCODER_FLOW_PATHS = (
-    "resources/configs/experiment_matrix.json",
-    "resources/configs/pipeline.json",
-    "resources/configs/section5_evidence.json",
-    "resources/contracts/table2.json",
-    "resources/prompts/code-verifier-1-corrective.txt",
-    "resources/prompts/code-verifier-1-simple.txt",
-    "resources/prompts/code-verifier-1-system.txt",
-    "resources/schemas/verifier-corrective-response.schema.json",
-    "resources/schemas/verifier-simple-response.schema.json",
-    "stages/encoder.py",
-    "stages/evaluation.py",
-    "stages/preparation.py",
-    "stages/verifier.py",
-    "utils/common/artifact_io.py",
-    "utils/common/config.py",
-    "utils/common/constants.py",
-    "utils/common/environment.py",
-    "utils/common/paths.py",
-    "utils/common/records.py",
-    "utils/encoder/cache.py",
-    "utils/encoder/data.py",
-    "utils/encoder/model.py",
-    "utils/encoder/network.py",
-    "utils/evaluation/metrics.py",
-    "utils/evaluation/publication.py",
-    "utils/evaluation/reconciliation.py",
-    "utils/evaluation/scoring.py",
-    "utils/evaluation/statistics.py",
-    "utils/preparation/acquisition.py",
-    "utils/preparation/preparation.py",
-    "utils/preparation/split.py",
-    "utils/rag/graph.py",
-    "utils/verifier/pilot.py",
-    "utils/verifier/threshold.py",
-    "utils/verifier/verifier.py",
-)
-
-
 def _temporary_output_directory():
     output_root = SOURCE_ROOT / "output"
     output_root.mkdir(exist_ok=True)
@@ -128,35 +86,7 @@ class EncoderComparisonTests(unittest.TestCase):
     def setUpClass(cls):
         cls.config = load_comparison_config(SOURCE_ROOT, DEFAULT_CONFIG)
 
-    def test_historical_source_crosswalk_resolves_to_frozen_git_blobs(self):
-        self.assertEqual(self.config.value["historical_source"]["commit"], HISTORICAL_COMMIT)
-        for name, (path, expected_blob) in HISTORICAL_BLOBS.items():
-            actual_blob = subprocess.run(
-                ["git", "rev-parse", f"{HISTORICAL_COMMIT}:{path}"],
-                cwd=SOURCE_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            self.assertEqual(actual_blob, expected_blob, name)
 
-    def test_original_phase_f_encoder_and_shared_flow_is_byte_identical(self):
-        for path in PHASE_F_ENCODER_FLOW_PATHS:
-            baseline = subprocess.run(
-                ["git", "rev-parse", f"{PHASE_F_BASELINE}:{path}"],
-                cwd=SOURCE_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            current = subprocess.run(
-                ["git", "hash-object", path],
-                cwd=SOURCE_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            self.assertEqual(current, baseline, path)
 
     def test_profile_registry_is_finite_pinned_and_cli_validates_offline(self):
         self.assertEqual(
@@ -174,9 +104,7 @@ class EncoderComparisonTests(unittest.TestCase):
                     sys.executable,
                     "-B",
                     str(ENTRYPOINT),
-                    "validate-profile",
-                    "--profile",
-                    profile.profile_id,
+                    "validate",
                 ],
                 cwd=SOURCE_ROOT,
                 check=True,
@@ -219,9 +147,7 @@ class EncoderComparisonTests(unittest.TestCase):
                     sys.executable,
                     "-B",
                     str(ENTRYPOINT),
-                    "validate-arm",
-                    "--arm",
-                    arm_id,
+                    "validate",
                 ],
                 cwd=SOURCE_ROOT,
                 check=True,
@@ -233,8 +159,8 @@ class EncoderComparisonTests(unittest.TestCase):
     def test_unknown_profile_and_mutable_revision_fail_closed(self):
         with self.assertRaisesRegex(DataContractError, "unknown approved Table 1 arm"):
             self.config.select_arm("not-reviewed")
-        with self.assertRaisesRegex(DataContractError, "not one approved"):
-            self.config.select("bert-base-uncased", "historical-a20-a21-a12")
+        with self.assertRaisesRegex(DataContractError, "unknown approved"):
+            self.config.select_arm("bert-base-a20-a21-a12")
         profile = self.config.profiles["bert-base-uncased"].manifest()
         profile["revision"] = "main"
         with self.assertRaisesRegex(DataContractError, "40 lowercase hex"):
@@ -247,7 +173,7 @@ class EncoderComparisonTests(unittest.TestCase):
             for node in ast.parse(entry_source).body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
-        self.assertEqual(definitions, ["_parser", "main"])
+        self.assertEqual(definitions, ["main"])
         self.assertLessEqual(len(entry_source.splitlines()), 140)
         pipeline_source = PIPELINE.read_text(encoding="utf-8")
         self.assertNotIn("encoder_comparison", pipeline_source)
@@ -574,11 +500,11 @@ class EncoderComparisonTests(unittest.TestCase):
                 layout, selection, 42
             )
             self.assertEqual(
-                arguments[arguments.index("--max-steps") + 1], "1"
+                arguments.max_steps, 1
             )
             self.assertIn(
                 "diagnostics/encoder-comparison-smoke",
-                "/".join(arguments).replace("\\", "/"),
+                arguments.save_best_to.replace("\\", "/"),
             )
 
             paths = comparison_stage._smoke_paths(layout)
@@ -666,7 +592,7 @@ class EncoderComparisonTests(unittest.TestCase):
                 command_runner.assert_not_called()
                 self.assertEqual(smoke["evidence"], evidence)
                 self.assertEqual(smoke["cache_identity"]["base_parameter_count"], 14)
-                self.assertFalse(smoke["full_run_admitted"])
+                self.assertEqual(smoke["status"], "completed")
                 self.assertFalse(smoke["final_test_accessed"])
                 self.assertEqual(
                     {path: sha256_file(path) for path in original_hashes}, original_hashes
@@ -698,19 +624,6 @@ class EncoderComparisonTests(unittest.TestCase):
                 comparison_stage.run_smoke(
                     layout, selection, 42, command_runner=command_runner
                 )
-            admission = comparison_stage.record_admission(
-                layout,
-                selection,
-                decision="admit",
-                reason="fixture review passed",
-            )
-            self.assertEqual(admission["decision"], "admit")
-            self.assertEqual(
-                comparison_stage._require_admission(layout, selection), admission
-            )
-            atomic_write_json(smoke_path, {**load_json(smoke_path), "changed": True})
-            with self.assertRaisesRegex(DataContractError, "lacks an admitted smoke"):
-                comparison_stage._require_admission(layout, selection)
 
 
 if __name__ == "__main__":

@@ -13,14 +13,9 @@ from typing import Any
 from utils.common.artifact_io import (
     DataContractError,
     _load_manifest,
-    _next_recovery_path,
-    _quarantine_run_artifact,
     _require_fields,
-    _same_run_seal_path,
-    _validate_recovery_provenance,
-    _validate_same_run_seal,
-    _write_recovery_provenance,
-    _write_same_run_seal,
+    validate_stage_receipt,
+    write_stage_receipt,
     atomic_write_json,
     iter_jsonl,
     sha256_file,
@@ -32,7 +27,7 @@ from utils.evaluation.publication import prepare_verifier_pilot
 from utils.rag import runner as table2_runner
 from utils.verifier.pilot import PilotInputs, run_verifier_pilot
 from utils.verifier.threshold import select_threshold
-from utils.verifier.verifier import run_verifier, validate_response_cache
+from utils.verifier.verifier import run_verifier
 
 
 @dataclass(frozen=True)
@@ -130,7 +125,6 @@ def run_pilot(
                 ollama_url=ollama_url,
                 artifact_prefix=prefix,
                 pilot_selection=pilot_selection,
-                allow_response_cache=False,
             )
             capture_rows.append(
                 {
@@ -234,7 +228,7 @@ def _validate_pilot_capture_seals(layout: RunLayout, capture_index: Path) -> Non
             must_exist=True,
         )
         manifest = _load_manifest(producer, "pilot verifier producer manifest")
-        _validate_same_run_seal(layout, producer, manifest)
+        validate_stage_receipt(layout, producer, manifest)
 
 
 def _validate_threshold(layout: RunLayout, config) -> dict:
@@ -386,150 +380,29 @@ def _validate_verifier_stage(
     ):
         raise DataContractError(f"{mode} verifier environment uses another Qwen")
     if require_seal:
-        _validate_same_run_seal(layout, manifest_path, manifest)
+        validate_stage_receipt(layout, manifest_path, manifest)
     return manifest
 
 
-def _resume_verifier_stage(
-    layout: RunLayout,
-    config,
-    *,
-    mode: str,
-    sentences: Path,
-    candidates: Path,
-    development: Path,
-    warmup_candidates: Path,
-    model_blob: Path,
-    ollama_url: str,
-    artifact_prefix: str = "",
-    pilot_selection: Path | None = None,
-    allow_response_cache: bool = True,
-) -> dict:
+def _resume_verifier_stage(layout: RunLayout, config, *, mode: str, sentences: Path,
+        candidates: Path, development: Path, warmup_candidates: Path, model_blob: Path,
+        ollama_url: str, artifact_prefix: str = "", pilot_selection: Path | None = None) -> dict:
     prefix = artifact_prefix.strip("/")
-    manifest_name = (
-        f"verifier-{prefix.replace('/', '-')}-{mode}-live.json"
-        if prefix
-        else f"verifier-{mode}-live.json"
-    )
-    manifest_path = layout.resolve(f"manifests/{manifest_name}")
-    seal_path = _same_run_seal_path(manifest_path)
-    if manifest_path.is_file():
-        manifest = _validate_verifier_stage(
-            layout,
-            config,
-            manifest_path,
-            mode=mode,
-            artifact_prefix=prefix,
-            require_seal=False,
-        )
-        if not seal_path.is_file():
-            _write_same_run_seal(layout, manifest_path, manifest)
-        return _validate_verifier_stage(
-            layout, config, manifest_path, mode=mode, artifact_prefix=prefix
-        )
-
-    bindings = {"sentences": sentences, "candidates": candidates}
-    identity: dict[str, object] = {
-        "mode": mode,
-        "condition_id": f"VER-{mode.upper()}",
-    }
-    if prefix:
-        identity["artifact_prefix"] = prefix
-    base = f"verifier/{prefix}/{mode}" if prefix else f"verifier/{mode}"
-    response_path = layout.resolve(f"{base}/responses.jsonl")
-    recovery_label = f"verifier-{prefix.replace('/', '-') + '-' if prefix else ''}{mode}"
-    cache: Path | None = None
-    if (
-        allow_response_cache
-        and response_path.is_file()
-        and response_path.stat().st_size
-    ):
-        try:
-            validate_response_cache(
-                layout,
-                config,
-                mode=mode,
-                sentences_path=sentences,
-                candidates_path=candidates,
-                cache_ledger_path=response_path,
-            )
-        except DataContractError:
-            _quarantine_run_artifact(layout, response_path, recovery_label)
-        else:
-            cache = _next_recovery_path(
-                layout, recovery_label, "responses.jsonl"
-            )
-            os.replace(response_path, cache)
-            _write_recovery_provenance(
-                layout,
-                cache,
-                kind="verifier-responses",
-                identity=identity,
-                bindings=bindings,
-            )
-    if cache is None:
-        directory = layout.resolve(f"inputs/recovery/{recovery_label}")
-        if allow_response_cache and directory.is_dir():
-            for recovery_candidate in sorted(
-                directory.glob("*-responses.jsonl"), reverse=True
-            ):
-                try:
-                    _validate_recovery_provenance(
-                        layout,
-                        recovery_candidate,
-                        kind="verifier-responses",
-                        identity=identity,
-                        bindings=bindings,
-                    )
-                    validate_response_cache(
-                        layout,
-                        config,
-                        mode=mode,
-                        sentences_path=sentences,
-                        candidates_path=candidates,
-                        cache_ledger_path=recovery_candidate,
-                    )
-                except DataContractError:
-                    continue
-                cache = recovery_candidate
-                break
-    partials = [
-        layout.resolve(f"{base}/{name}")
-        for name in (
-            "requests.jsonl",
-            "warmup-request.jsonl",
-            "warmup-response.jsonl",
-            "verdicts.jsonl",
-            "environment-manifest.json",
-            "run-log.jsonl",
-            "model/tags.json",
-            "model/show.json",
-            "model/ollama-modelfile.txt",
-        )
-    ]
-    partials.extend([response_path, seal_path])
-    for partial in partials:
-        _quarantine_run_artifact(layout, partial, recovery_label)
-    manifest = run_verifier(
-        layout,
-        config,
-        mode=mode,
-        execution_mode="live",
-        sentences_path=sentences,
-        candidates_path=candidates,
-        warmup_sentences_path=development,
-        warmup_candidates_path=warmup_candidates,
-        response_ledger_path=None,
-        cache_ledger_path=cache,
-        ollama_url=ollama_url,
-        model_blob_path=model_blob,
-        pilot_selection_path=pilot_selection,
-        artifact_prefix=prefix,
-    )
-    _write_same_run_seal(layout, manifest_path, manifest)
-    return _validate_verifier_stage(
-        layout, config, manifest_path, mode=mode, artifact_prefix=prefix
-    )
+    name = f"verifier-{prefix.replace('/', '-') + '-' if prefix else ''}{mode}-live.json"
+    manifest_path = layout.resolve(f"manifests/{name}")
+    if not manifest_path.exists():
+        manifest = run_verifier(layout, config, mode=mode, execution_mode="live",
+            sentences_path=sentences, candidates_path=candidates,
+            warmup_sentences_path=development, warmup_candidates_path=warmup_candidates,
+            ollama_url=ollama_url, model_blob_path=model_blob,
+            pilot_selection_path=pilot_selection, artifact_prefix=prefix)
+        write_stage_receipt(layout, manifest_path, manifest)
+    else:
+        manifest = _validate_verifier_stage(layout, config, manifest_path,
+            mode=mode, artifact_prefix=prefix, require_seal=False)
+        if manifest.get("receipt_version") != 1:
+            write_stage_receipt(layout, manifest_path, manifest)
+    return _validate_verifier_stage(layout, config, manifest_path, mode=mode, artifact_prefix=prefix)
 
 
 def _validate_pilot_audit(layout: RunLayout, config) -> dict:
@@ -563,7 +436,7 @@ def _discover_live_model(
     ollama_url: str,
     model_blob_source: str | None,
 ) -> tuple[Path, dict[str, object]]:
-    """Resolve the current Qwen bytes; tracked digests are comparison metadata."""
+    """Resolve and bind the actual Qwen bytes for this run."""
     verifier_config = config.value["verifier"]
     origin = table2_runner.validate_ollama_url(ollama_url)
     tags, _tags_bytes, _tags_hash = table2_runner.fetch_ollama_json(
@@ -627,12 +500,6 @@ def _discover_live_model(
         raise DataContractError(
             "A new run may not import a Qwen blob from another output run; use the external Ollama store"
         )
-    reference = {
-        "tag_digest": verifier_config["reference_registry_manifest_sha256"],
-        "blob_sha256": verifier_config["reference_model_blob_sha256"],
-    }
-    # Downstream verifier and pilot code consume the authenticated identity of
-    # this run. The tracked values above remain comparison metadata only.
     verifier_config["registry_manifest_sha256"] = tag_digest
     verifier_config["model_blob_sha256"] = digest
     return source, {
@@ -640,11 +507,7 @@ def _discover_live_model(
         "tag_digest": tag_digest,
         "blob_sha256": digest,
         "details": observed_details,
-        "historical_reference": reference,
-        "historical_reference_match": {
-            "tag_digest": tag_digest == reference["tag_digest"],
-            "blob_sha256": digest == reference["blob_sha256"],
-        },
+
     }
 
 
@@ -675,7 +538,7 @@ def _write_full_run_manifest(
     encoder_identity: dict[str, str],
     hardware: dict[str, object],
 ) -> None:
-    path = layout.resolve("manifests/debug-full-run.json")
+    path = layout.resolve("manifests/pipeline-run.json")
     source = layout.source_root
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=source, check=True, capture_output=True, text=True
@@ -683,8 +546,6 @@ def _write_full_run_manifest(
     branch = subprocess.run(
         ["git", "branch", "--show-current"], cwd=source, check=True, capture_output=True, text=True
     ).stdout.strip()
-    contract = table2_runner.load_json(table2_runner.CONTRACT_PATH)
-    reference = contract["reference_profile"]
     observed_profile = {
         "hardware": hardware,
         "encoder": encoder_identity,
@@ -693,37 +554,22 @@ def _write_full_run_manifest(
             for key in ("name", "tag_digest", "blob_sha256", "details")
         },
     }
-    comparisons = {
-        key: table2_runner._compare_profile(observed_profile[key], reference[key])
-        for key in ("hardware", "encoder", "qwen")
-    }
     document = {
-        "schema_version": "phase-b-debug-full-run-1.0",
+        "schema_version": "pipeline-run-1",
         "run_id": layout.run_id,
         "config": config.path.relative_to(source).as_posix(),
         "config_sha256": sha256_file(config.path),
         "source_commit": commit,
         "source_branch": branch,
-        "source_upstream": "recorded-by-python-pipeline",
         "ollama_model": model_identity["name"],
         "ollama_tag_digest": model_identity["tag_digest"],
         "run_local_model_blob": model_relative,
         "model_blob_sha256": model_identity["blob_sha256"],
         "observed_profile": observed_profile,
-        "historical_reference_profile": reference,
-        "historical_reference_match": {
-            **comparisons,
-            "overall": all(
-                value["all_fields_match"] for value in comparisons.values()
-            ),
-            "admission_effect": "none",
-        },
-        "conditional_b07_approval": True,
         "training_seeds": config.value["training_seeds"],
         "protocol_id": config.value["protocol_id"],
         "workflow_id": config.value["workflow_id"],
         "python_version": platform.python_version(),
-        "uv_version": "environment-managed",
         "ollama_blob_discovery": "Ollama /api/show Modelfile FROM",
         "failure_policy": "fail_closed_and_resume_valid_completed_stages",
     }

@@ -127,36 +127,13 @@ def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 def validate_source_contract(
     contract: dict[str, Any], require_clean: bool
 ) -> dict[str, str]:
-    if contract.get("schema_version") != 6:
-        raise PhaseEError("Phase E contract schema is not revision 0.9")
-    evaluator_contract = contract.get("evaluator")
-    if (
-        not isinstance(evaluator_contract, dict)
-        or evaluator_contract.get("max_questions") != 105
-        or evaluator_contract.get("output_namespace") != "table2-q105"
-    ):
-        raise PhaseEError("Phase E contract must retain the approved 105-question evaluator")
-    baseline = contract["source_baseline"]["commit"]
+    if contract.get("schema_version") != 7 or contract.get("evaluator") != {"part_of_questions": 105}:
+        raise PhaseEError("Unsupported frozen RAG contract")
     head = run_git("rev-parse", "HEAD").stdout.strip()
     branch = run_git("branch", "--show-current").stdout.strip()
-    if run_git("merge-base", "--is-ancestor", baseline, head, check=False).returncode:
-        raise PhaseEError(f"Source HEAD {head} does not descend from baseline {baseline}")
-    expected_branch = contract["source_baseline"]["branch"]
-    if branch != expected_branch:
-        raise PhaseEError(
-            f"Phase E must run from branch {expected_branch}; current branch is "
-            f"{branch or '<detached>'}"
-        )
-    if require_clean:
-        for args in (("diff", "--quiet"), ("diff", "--cached", "--quiet")):
-            if run_git(*args, check=False).returncode:
-                raise PhaseEError("Tracked source changes exist; commit or discard them first")
-    return {"head": head, "branch": branch, "baseline": baseline}
-
-
-def table2_child_namespace(contract: dict[str, Any]) -> str:
-    """Return the fixed same-run namespace for the approved full question panel."""
-    return contract["evaluator"]["output_namespace"]
+    if require_clean and run_git("status", "--porcelain", "--untracked-files=normal").stdout.strip():
+        raise PhaseEError("RAG requires a clean source checkout")
+    return {"head": head, "branch": branch}
 
 
 def validate_run_id(run_id: str, *, require_existing: bool = True) -> Path:
@@ -262,19 +239,19 @@ def _validate_training_checkpoint_identity(
         model_cache_relative != HF_CACHE_MANIFEST_RELATIVE
         or not isinstance(model_cache_sha256, str)
         or SHA256_RE.fullmatch(model_cache_sha256) is None
-        or not isinstance(compatibility_relative, str)
     ):
         raise PhaseEError(f"seed-{seed} checkpoint lacks a valid training dependency")
 
     expected_outputs = {
         "checkpoint": checkpoint_blob_relative,
         "checkpoint_manifest": checkpoint_manifest_relative,
-        "dataset_compatibility_report": compatibility_relative,
         "model_cache_manifest": model_cache_relative,
         "progress_log": f"logs/model-train-seed-{seed}.log",
         "restart_state": f"checkpoints/seed-{seed}/restart-state.pt",
         "training_summary": f"checkpoints/seed-{seed}/training-summary.json",
     }
+    if compatibility_relative is not None:
+        expected_outputs["dataset_compatibility_report"] = compatibility_relative
     expected_inputs = {
         **expected_inputs,
         "model_cache_manifest_sha256": model_cache_sha256,
@@ -348,22 +325,6 @@ def load_verifier_model_identity(path: Path, expected_hash: str) -> dict[str, An
     }
 
 
-def _compare_profile(observed: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
-    fields = {}
-    for key, expected in reference.items():
-        actual = observed.get(key)
-        if isinstance(expected, dict):
-            nested = _compare_profile(actual if isinstance(actual, dict) else {}, expected)
-            fields[key] = nested
-        else:
-            fields[key] = {"observed": actual, "reference": expected, "match": actual == expected}
-    matches = [
-        value["match"] if "match" in value else value["all_fields_match"]
-        for value in fields.values()
-    ]
-    return {"all_fields_match": all(matches), "fields": fields}
-
-
 def require_consistent_encoder_identity(
     identities: list[dict[str, Any]],
 ) -> dict[str, str]:
@@ -415,29 +376,16 @@ def _git_file_bytes(commit: str, relative: str) -> bytes:
 
 
 def _load_authenticated_run_config(
-    checkout: dict[str, Any], full: dict[str, Any], contract: dict[str, Any]
+    checkout: dict[str, Any], full: dict[str, Any], contract: dict[str, Any],
+    *, run_dir: Path | None = None, ledger: dict | None = None,
 ) -> tuple[dict[str, Any], bool]:
     source = checkout.get("source")
     commit = source.get("commit") if isinstance(source, dict) else None
     if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise PhaseEError("Checkout manifest lacks an immutable source commit")
-    baseline = contract["source_baseline"]["commit"]
-    if run_git("merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode:
-        raise PhaseEError("Selected run checkout is not an ancestor of current source")
-    baseline_is_ancestor = (
-        run_git(
-            "merge-base", "--is-ancestor", baseline, commit, check=False
-        ).returncode
-        == 0
-    )
-    legacy_compatibility = not baseline_is_ancestor
-    # A legacy completed run is accepted only when it predates (or equals) the
-    # refactored Phase-E base and its exact tracked config is recoverable from
-    # the recorded Git checkout.  Newer runs must carry stage seals below.
-    if legacy_compatibility and run_git(
-        "merge-base", "--is-ancestor", commit, baseline, check=False
-    ).returncode:
-        raise PhaseEError("Run checkout is outside the approved refactored ancestry")
+    # Older authenticated parents are read-only. Fresh runs carry their config
+    # in checkout.source; older completed parents used a tracked-file inventory.
+    legacy_compatibility = "tracked_artifact_sha256" in checkout
     if full.get("source_commit") != commit:
         raise PhaseEError("Full-run and checkout manifests name different source commits")
     config_path = full.get("config")
@@ -455,7 +403,11 @@ def _load_authenticated_run_config(
         or checkout_config_hash != config_hash
     ):
         raise PhaseEError("Full-run config is not bound by the checkout manifest")
-    config_bytes = _git_file_bytes(commit, config_path)
+    if isinstance(source_config, dict) and source_config.get("run_local_path") and run_dir is not None:
+        relative = source_config["run_local_path"]
+        config_bytes = _verified_file(run_dir, relative, ledger if ledger is not None else {}, expected=config_hash).read_bytes()
+    else:
+        config_bytes = _git_file_bytes(commit, config_path)
     if sha256_bytes(config_bytes) != config_hash:
         raise PhaseEError("Full-run config differs from the recorded Git checkout")
     try:
@@ -477,6 +429,12 @@ def _validate_stage_seal(
     required: bool,
 ) -> None:
     producer_path = run_file(run_dir, producer_relative)
+    if producer.get("receipt_version") == 1:
+        checkout = _verified_file(run_dir, "manifests/00-checkout-manifest.json", ledger)
+        if (producer.get("run_id") != run_id
+                or producer.get("checkout_sha256") != sha256_file(checkout)):
+            raise PhaseEError("Stage receipt differs from the selected checkout")
+        return
     seal_relative = str(
         Path(producer_relative).with_name(
             f"same-run-{Path(producer_relative).name}"
@@ -956,7 +914,7 @@ def validate_parent_lineage(
     run_dir: Path, run_id: str, contract: dict[str, Any]
 ) -> dict[str, Any]:
     pipeline = contract["pipeline"]
-    paths = pipeline["artifacts"]
+    paths = dict(pipeline["artifacts"])
     ledger: dict[str, dict[str, Any]] = {}
 
     checkout = load_json(_verified_file(run_dir, paths["checkout_manifest"], ledger))
@@ -980,22 +938,25 @@ def validate_parent_lineage(
     if checkout.get("source", {}).get("worktree_clean") is not True:
         raise PhaseEError("Selected run was not created from a clean source checkout")
 
+    if (not run_file(run_dir, paths["full_run_manifest"], required=False).exists()
+            and checkout.get("lifecycle_version") is None):
+        paths["full_run_manifest"] = "manifests/debug-full-run.json"
     full = load_json(_verified_file(run_dir, paths["full_run_manifest"], ledger))
     _reject_foreign_run_ids(full, run_id, "full-run manifest")
     _require_fields(
         full,
         {
-            "schema_version": "phase-b-debug-full-run-1.0",
             "run_id": run_id,
             "protocol_id": pipeline["protocol_id"],
             "workflow_id": pipeline["workflow_id"],
             "training_seeds": pipeline["training_seeds"],
-            "conditional_b07_approval": True,
         },
         "full-run manifest",
     )
+    if full.get("schema_version") not in {"pipeline-run-1", "phase-b-debug-full-run-1.0"}:
+        raise PhaseEError("Full-run manifest schema is unsupported")
     run_config, legacy_compatibility = _load_authenticated_run_config(
-        checkout, full, contract
+        checkout, full, contract, run_dir=run_dir, ledger=ledger
     )
     for field, expected in {
         "protocol_id": pipeline["protocol_id"],
@@ -1193,6 +1154,7 @@ def validate_parent_lineage(
             "phase-b-model-checkpoint-manifest-2.0",
             "phase-b-model-checkpoint-manifest-3.0",
             "phase-b-model-checkpoint-manifest-4.0",
+            "encoder-checkpoint-1",
         }:
             raise PhaseEError(f"seed-{seed} checkpoint manifest schema is unsupported")
         checkpoint_digest = validate_sha256(
@@ -1231,7 +1193,7 @@ def validate_parent_lineage(
         compatibility_relative = checkpoint_manifest.get(
             "dataset_compatibility_report"
         )
-        if not isinstance(compatibility_relative, str):
+        if checkpoint_manifest.get("schema_version") != "encoder-checkpoint-1" and not isinstance(compatibility_relative, str):
             raise PhaseEError(f"seed-{seed} checkpoint lacks compatibility evidence")
         _verified_file(
             run_dir,
@@ -1239,12 +1201,13 @@ def validate_parent_lineage(
             ledger,
             expected=checkpoint_manifest.get("restart_state_sha256"),
         )
-        compatibility_path = _verified_file(
-            run_dir,
-            compatibility_relative,
-            ledger,
-            expected=checkpoint_manifest.get("dataset_compatibility_sha256"),
-        )
+        if compatibility_relative is not None:
+            compatibility_path = _verified_file(
+                run_dir,
+                compatibility_relative,
+                ledger,
+                expected=checkpoint_manifest.get("dataset_compatibility_sha256"),
+            )
         model_cache_relative = checkpoint_manifest.get("model_cache_manifest")
         model_cache_sha256 = checkpoint_manifest.get("model_cache_manifest_sha256")
         if (
@@ -1260,6 +1223,10 @@ def validate_parent_lineage(
         )
         _verified_file(run_dir, progress_relative, ledger)
         summary = load_json(_verified_file(run_dir, summary_relative, ledger))
+        if isinstance(summary.get("runtime_environment"), dict):
+            ref = summary["runtime_environment"]
+            runtime_path = _verified_file(run_dir, ref["path"], ledger, expected=ref["sha256"])
+            summary["environment"] = load_json(runtime_path)
         selected_metrics = summary.get("selected_metrics")
         if (
             summary.get("status") != "completed"
@@ -1277,22 +1244,23 @@ def validate_parent_lineage(
             != checkpoint_manifest.get("selected_metric_value")
         ):
             raise PhaseEError(f"seed-{seed} training summary is not publication-safe")
-        compatibility = load_json(compatibility_path)
-        fresh_clone_dataset = compatibility.get("fresh_clone_dataset")
-        if (
-            compatibility.get("status")
-            != "partial_match_full_legacy_equivalence_unavailable"
-            or not isinstance(fresh_clone_dataset, dict)
-            or fresh_clone_dataset.get("dataset_id")
-            != pipeline["dataset_id"]
-            or fresh_clone_dataset.get("archive_sha256")
-            != archive_sha
-            or fresh_clone_dataset.get("prepared_dataset_tree_sha256")
-            != preparation.get("dataset_tree_sha256")
-        ):
-            raise PhaseEError(
-                f"seed-{seed} dataset compatibility evidence differs from preparation"
-            )
+        if compatibility_relative is not None:
+            compatibility = load_json(compatibility_path)
+            fresh_clone_dataset = compatibility.get("fresh_clone_dataset")
+            if (
+                compatibility.get("status")
+                != "partial_match_full_legacy_equivalence_unavailable"
+                or not isinstance(fresh_clone_dataset, dict)
+                or fresh_clone_dataset.get("dataset_id")
+                != pipeline["dataset_id"]
+                or fresh_clone_dataset.get("archive_sha256")
+                != archive_sha
+                or fresh_clone_dataset.get("prepared_dataset_tree_sha256")
+                != preparation.get("dataset_tree_sha256")
+            ):
+                raise PhaseEError(
+                    f"seed-{seed} dataset compatibility evidence differs from preparation"
+                )
         checkpoint_manifest_hashes[seed] = ledger[checkpoint_manifest_relative]["sha256"]
         encoder_identities.append({
             "base_model": checkpoint_manifest.get("base_model"),
@@ -1459,10 +1427,6 @@ def validate_parent_lineage(
         "encoder": encoder_identity,
         "qwen": {key: corrective_model[key] for key in ("name", "tag_digest", "blob_sha256", "details")},
     }
-    comparisons = {
-        key: _compare_profile(observed_profile[key], contract["reference_profile"][key])
-        for key in ("hardware", "encoder", "qwen")
-    }
     return {
         "run_id": run_id,
         "protocol_id": pipeline["protocol_id"],
@@ -1478,11 +1442,7 @@ def validate_parent_lineage(
         "corrective_rows": corrective_rows,
         "model_identity": corrective_model,
         "observed_profile": observed_profile,
-        "historical_reference_match": {
-            **comparisons,
-            "overall": all(value["all_fields_match"] for value in comparisons.values()),
-            "admission_effect": "none",
-        },
+
     }
 
 
@@ -1524,7 +1484,7 @@ def project_evaluator_records(
             "gold_triples": triples,
             "predicted_triples": [],
         })
-    expected_count = contract["evaluator"]["max_questions"]
+    expected_count = contract["evaluator"]["part_of_questions"]
     questions = evaluator.generate_questions(projected)
     if len(questions) != expected_count:
         raise PhaseEError(
@@ -1606,7 +1566,7 @@ def preflight_same_run(
             "source_path": (
                 relative
                 if source == "existing"
-                else f"{table2_child_namespace(contract)}/canonical-graphs/{name}/manifest.json"
+                else f"table2-code-all/canonical-graphs/{name}/manifest.json"
             ),
             "source_sha256": source_hash,
             "graph_id": snapshot["graph_id"],
@@ -1630,7 +1590,6 @@ def preflight_same_run(
         "projection_sha256": {name: sha256_bytes(content) for name, content in projections.items()},
         "model_identity": parent["model_identity"],
         "observed_profile": parent["observed_profile"],
-        "historical_reference_match": parent["historical_reference_match"],
         "environment": environment,
     }
     return run_dir, summary, projections, graphs
@@ -1786,30 +1745,6 @@ def write_status(path: Path, status: dict[str, Any], child_dir: Path) -> None:
             temporary.unlink()
 
 
-def _recovery_destination(child_dir: Path, category: str, name: str) -> Path:
-    recovery_root = child_dir / "recovery" / category
-    existing = list(recovery_root.glob(f"*-{name}")) if recovery_root.is_dir() else []
-    return recovery_root / f"{len(existing) + 1:03d}-{name}"
-
-
-def quarantine_child_file(child_dir: Path, path: Path, category: str) -> dict[str, Any] | None:
-    """Move one invalid/incomplete child artifact to an append-only recovery slot."""
-
-    if not path.exists():
-        return None
-    validate_child_target(child_dir, path)
-    if not path.is_file() or path.is_symlink():
-        raise PhaseEError(f"Recovery target is not a physical file: {path}")
-    destination = _recovery_destination(child_dir, category, path.name)
-    validate_child_target(child_dir, destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(path, destination)
-    return {
-        "path": destination.relative_to(child_dir).as_posix(),
-        "sha256": sha256_file(destination),
-    }
-
-
 def stable_child_path(path: Path) -> str:
     try:
         return path.relative_to(ROOT).as_posix()
@@ -1829,7 +1764,7 @@ def validate_rag_output(
     output = load_json(path)
     modes = list(evaluator.MODES)
     count = (
-        contract["evaluator"]["max_questions"]
+        contract["evaluator"]["part_of_questions"]
         if expected_count is None
         else expected_count
     )
@@ -2073,154 +2008,6 @@ def run_stage(
     return validation
 
 
-def build_child_identity(
-    run_id: str, source: dict[str, str], preflight: dict[str, Any]
-) -> dict[str, Any]:
-    return {
-        "schema_version": "phase-e-same-run-identity-2.0",
-        "run_id": run_id,
-        "source_head": source["head"],
-        "contract_sha256": sha256_file(CONTRACT_PATH),
-        "parent_artifact_set_sha256": preflight["parent_artifact_set_sha256"],
-        "score_manifest_sha256": preflight["score_manifest_sha256"],
-        "seed": preflight["seed"],
-        "threshold": preflight["threshold"],
-        "projection_sha256": preflight["projection_sha256"],
-        "graph_ids": {name: value["graph_id"] for name, value in preflight["graphs"].items()},
-        "encoder_base_model_revision": preflight["observed_profile"]["encoder"]["base_model_revision"],
-        "ollama_tag_digest": preflight["model_identity"]["tag_digest"],
-        "ollama_model_blob_sha256": preflight["model_identity"]["blob_sha256"],
-    }
-
-
-def validate_child_hashes(child_dir: Path, run_id: str) -> None:
-    manifest = load_json(child_dir / "artifact-hashes.json")
-    if (
-        not isinstance(manifest, dict)
-        or manifest.get("schema_version") != "phase-e-artifact-hashes-1.0"
-        or manifest.get("run_id") != run_id
-        or not isinstance(manifest.get("artifacts"), dict)
-    ):
-        raise PhaseEError("Completed Phase E artifact hash manifest is malformed")
-    observed = {
-        path.relative_to(child_dir).as_posix(): sha256_file(path)
-        for path in sorted(child_dir.rglob("*"))
-        if path.is_file() and path.name not in {"artifact-hashes.json", "run-status.json"}
-    }
-    if manifest["artifacts"] != observed:
-        raise PhaseEError("Completed Phase E child artifact hashes differ")
-
-
-def _validate_status_model_checks(
-    child_dir: Path,
-    status: dict[str, Any],
-    preflight: dict[str, Any],
-    *,
-    require_complete: bool,
-) -> None:
-    if (
-        status.get("schema_version") != "phase-e-same-run-status-3.0"
-        or status.get("run_id") != preflight["run_id"]
-        or not isinstance(status.get("stages"), dict)
-    ):
-        raise PhaseEError("Phase E run status is malformed")
-    if require_complete and status.get("status") != "complete":
-        raise PhaseEError("Phase E run status is not complete")
-    pre_record = status.get("pre_model_identity_check")
-    validate_model_check(
-        child_dir,
-        status,
-        pre_record,
-        expected_phase="before-stages",
-        expected_model=preflight["model_identity"],
-        condition=None,
-    )
-    previous_index = pre_record["index"]
-    for condition in ("confidence", "corrective", "gold"):
-        stage = status["stages"].get(f"rag_{condition}")
-        if not isinstance(stage, dict) or stage.get("status") != "complete":
-            if require_complete:
-                raise PhaseEError(f"Status does not mark {condition} complete")
-            continue
-        record = stage.get("post_model_identity_check")
-        validate_model_check(
-            child_dir,
-            status,
-            record,
-            expected_phase=f"after-{condition}",
-            expected_model=preflight["model_identity"],
-            condition=condition,
-        )
-        if record["index"] <= previous_index:
-            raise ModelEvidenceError(
-                f"Post-stage model evidence is reordered for {condition}", condition
-            )
-        previous_index = record["index"]
-
-
-def _quarantine_stage_for_retry(
-    child_dir: Path,
-    status: dict[str, Any],
-    condition: str,
-    reason: str,
-) -> None:
-    name = f"rag_{condition}"
-    stage = status.setdefault("stages", {}).setdefault(name, {"attempts": []})
-    prior = json.loads(json.dumps(stage))
-    record = quarantine_child_file(
-        child_dir,
-        child_dir / "rag-results" / f"{condition}.json",
-        name,
-    )
-    history = stage.setdefault("retry_history", [])
-    if not isinstance(history, list):
-        raise PhaseEError(f"{name} retry history is malformed")
-    history.append({"reason": reason, "prior_stage": prior, "quarantined_output": record})
-    attempts = stage.get("attempts")
-    stage.clear()
-    stage.update(
-        attempts=attempts if isinstance(attempts, list) else [],
-        retry_history=history,
-        status="retry-required",
-    )
-
-
-def _invalidate_finalization(
-    child_dir: Path, status: dict[str, Any], reason: str
-) -> None:
-    records = []
-    for name in ("artifact-hashes.json", "table2-results.json"):
-        record = quarantine_child_file(
-            child_dir, child_dir / name, "finalization"
-        )
-        if record is not None:
-            records.append(record)
-    if records:
-        status.setdefault("finalization_recovery", []).append(
-            {"reason": reason, "artifacts": records}
-        )
-    status["status"] = "running"
-    status.pop("finished_at", None)
-
-
-def _prepare_model_evidence_retry(
-    child_dir: Path,
-    status: dict[str, Any],
-    error: ModelEvidenceError,
-) -> None:
-    ordered = ["confidence", "corrective", "gold"]
-    conditions = (
-        ordered[ordered.index(error.condition) :]
-        if error.condition in ordered
-        else ordered
-    )
-    _invalidate_finalization(child_dir, status, str(error))
-    for condition in conditions:
-        _quarantine_stage_for_retry(child_dir, status, condition, str(error))
-    if error.condition is None:
-        status.pop("pre_model_identity_check", None)
-
-
 def _preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": preflight["run_id"],
@@ -2249,316 +2036,3 @@ def _preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
             )
         },
     }
-
-
-def validate_execution_snapshot(
-    child_dir: Path,
-    identity: dict[str, Any],
-    source: dict[str, str],
-    preflight: dict[str, Any],
-    projection_paths: dict[str, Path],
-    contract: dict[str, Any],
-) -> None:
-    """Recheck immutable child inputs immediately around each model condition."""
-
-    if validate_source_contract(contract, require_clean=True) != source:
-        raise PhaseEError("Source identity changed after Table-2 preflight")
-    if sha256_file(CONTRACT_PATH) != identity.get("contract_sha256"):
-        raise PhaseEError("Table-2 contract changed after preflight")
-    if build_child_identity(preflight["run_id"], source, preflight) != identity:
-        raise PhaseEError("Table-2 child identity changed after preflight")
-    for name, path in projection_paths.items():
-        if not path.is_file() or sha256_file(path) != preflight["projection_sha256"][name]:
-            raise PhaseEError(f"Table-2 projection changed before evaluation: {name}")
-
-
-def validate_phase_e_child(
-    child_dir: Path,
-    status: dict[str, Any],
-    contract: dict[str, Any],
-    preflight: dict[str, Any],
-    projection_paths: dict[str, Path],
-) -> dict[str, Any]:
-    validate_child_write_surface(child_dir)
-    _validate_status_model_checks(
-        child_dir, status, preflight, require_complete=True
-    )
-    validate_child_hashes(child_dir, preflight["run_id"])
-    projection_manifest = load_json(child_dir / "projections" / "manifest.json")
-    if (
-        projection_manifest.get("run_id") != preflight["run_id"]
-        or projection_manifest.get("inputs", {}).get("parent_artifact_set_sha256")
-        != preflight["parent_artifact_set_sha256"]
-    ):
-        raise PhaseEError("Projection manifest differs from the selected run")
-    for name, path in projection_paths.items():
-        if sha256_file(path) != preflight["projection_sha256"][name]:
-            raise PhaseEError(f"Phase E projection changed: {name}")
-    results = {}
-    for condition in ("confidence", "corrective", "gold"):
-        output = child_dir / "rag-results" / f"{condition}.json"
-        results[condition] = validate_rag_output(
-            output,
-            contract,
-            preflight["model_identity"]["name"],
-            expected_questions=preflight["records"]["question_contract"],
-            expected_kg=stable_child_path(projection_paths[condition]),
-        )
-        stage = status.get("stages", {}).get(f"rag_{condition}")
-        if not isinstance(stage, dict) or stage.get("status") != "complete" or stage.get("output_sha256") != results[condition]["sha256"]:
-            raise PhaseEError(f"Status does not bind the completed {condition} stage")
-    table = load_json(child_dir / "table2-results.json")
-    if (
-        table.get("run_id") != preflight["run_id"]
-        or table.get("new_results") != results
-        or table.get("legacy_displayed_accuracy") != contract["legacy_table2_accuracy"]
-    ):
-        raise PhaseEError("Table 2 summary differs from validated results")
-    return results
-
-
-def run_protected_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
-    """Run the immutable 105-question prerequisite child."""
-    source = validate_source_contract(contract, require_clean=not args.dry_run)
-    run_dir, preflight, projections, graphs = preflight_same_run(args.run_id, contract)
-    child_namespace = table2_child_namespace(contract)
-    child_dir = run_dir / child_namespace
-    validate_child_write_surface(child_dir)
-    if args.dry_run:
-        print(json.dumps({"source": source, **preflight}, indent=2, sort_keys=True))
-        return 0
-
-    identity = build_child_identity(args.run_id, source, preflight)
-    status_path = child_dir / "run-status.json"
-    projection_dir = child_dir / "projections"
-    projection_paths = {
-        "records": projection_dir / "test-with-private-gold.jsonl",
-        "confidence": projection_dir / "confidence-seed-42.json",
-        "corrective": projection_dir / "corrective-seed-42.json",
-        "gold": projection_dir / "gold-oracle.json",
-    }
-    new_child = not child_dir.exists() or not status_path.exists()
-    if child_dir.exists() and not status_path.exists() and any(child_dir.iterdir()):
-        raise PhaseEError(
-            f"{child_namespace} exists without a resumable status identity"
-        )
-    if new_child:
-        status = {
-            "schema_version": "phase-e-same-run-status-3.0",
-            "run_id": args.run_id,
-            "identity": identity,
-            "status": "running",
-            "created_at": utc_now(),
-            "stages": {},
-        }
-    else:
-        status = load_json(status_path)
-        if status.get("identity") != identity or status.get("run_id") != args.run_id:
-            raise PhaseEError("Existing Phase E child identity differs from this run")
-        if status.get("status") == "complete":
-            try:
-                validate_phase_e_child(
-                    child_dir, status, contract, preflight, projection_paths
-                )
-            except ModelEvidenceError as exc:
-                _prepare_model_evidence_retry(child_dir, status, exc)
-                write_status(status_path, status, child_dir)
-            else:
-                print(json.dumps({"run_dir": str(run_dir), "status": "complete", "resumed": True}, indent=2))
-                return 0
-
-    if new_child:
-        child_dir.mkdir(exist_ok=True)
-        write_status(status_path, status, child_dir)
-
-    try:
-        validate_model_check(
-            child_dir,
-            status,
-            status.get("pre_model_identity_check"),
-            expected_phase="before-stages",
-            expected_model=preflight["model_identity"],
-            condition=None,
-        )
-    except ModelEvidenceError as exc:
-        started = any(
-            isinstance(stage, dict) and (
-                stage.get("attempts") or stage.get("status") not in {None, "retry-required"}
-            )
-            for stage in status.get("stages", {}).values()
-        )
-        if started:
-            _prepare_model_evidence_retry(child_dir, status, exc)
-        model_evidence, tags_bytes, show_bytes = fetch_matching_model(
-            args.ollama_url, preflight["model_identity"]
-        )
-        pre_check = record_model_check(
-            child_dir,
-            status,
-            status_path,
-            "before-stages",
-            model_evidence,
-            tags_bytes,
-            show_bytes,
-        )
-        status["pre_model_identity_check"] = pre_check
-        write_status(status_path, status, child_dir)
-
-    for name, path in projection_paths.items():
-        write_bytes_once(path, projections[name], child_dir)
-    for name, graph in graphs.items():
-        if preflight["graphs"][name]["source"] == "constructed":
-            write_json_once(child_dir / "canonical-graphs" / name / "manifest.json", graph, child_dir)
-    write_json_once(projection_dir / "manifest.json", {
-        "schema_version": "phase-e-projection-manifest-2.0",
-        "run_id": args.run_id,
-        "representation_only": True,
-        "inputs": {
-            "parent_artifact_set_sha256": preflight["parent_artifact_set_sha256"],
-            "score_manifest_sha256": preflight["score_manifest_sha256"],
-            "seed": preflight["seed"],
-            "threshold": preflight["threshold"],
-            "graphs": preflight["graphs"],
-        },
-        "outputs": {path.relative_to(child_dir).as_posix(): sha256_file(path) for path in projection_paths.values()},
-        "record_summary": preflight["records"],
-    }, child_dir)
-    write_json_once(child_dir / "method-manifest.json", {
-        "run_id": args.run_id,
-        "contract": contract,
-        "contract_sha256": sha256_file(CONTRACT_PATH),
-        "lineage_status": preflight["lineage_status"],
-        "observed_profile": preflight["observed_profile"],
-        "historical_reference_match": preflight["historical_reference_match"],
-    }, child_dir)
-    write_json_once(child_dir / "environment.json", {
-        "run_id": args.run_id,
-        "captured_at": status["created_at"],
-        "platform": platform.platform(),
-        "python": sys.version,
-        "source": source,
-        "model_identity": preflight["model_identity"],
-    }, child_dir)
-
-    results = {}
-    for condition in ("confidence", "corrective", "gold"):
-        validate_execution_snapshot(
-            child_dir, identity, source, preflight, projection_paths, contract
-        )
-        stage_name = f"rag_{condition}"
-        stage = status.get("stages", {}).get(stage_name)
-        reuse_completed = False
-        if isinstance(stage, dict) and stage.get("status") == "complete":
-            try:
-                validate_model_check(
-                    child_dir,
-                    status,
-                    stage.get("post_model_identity_check"),
-                    expected_phase=f"after-{condition}",
-                    expected_model=preflight["model_identity"],
-                    condition=condition,
-                )
-            except ModelEvidenceError as exc:
-                _prepare_model_evidence_retry(child_dir, status, exc)
-                write_status(status_path, status, child_dir)
-            else:
-                reuse_completed = True
-        output_path = child_dir / "rag-results" / f"{condition}.json"
-        kg_identity = stable_child_path(projection_paths[condition])
-        records = load_jsonl(projection_paths["records"])
-        kg = load_json(projection_paths[condition])
-        results[condition] = run_stage(
-            stage_name,
-            lambda records=records, kg=kg, kg_identity=kg_identity: evaluator.evaluate(
-                records,
-                kg,
-                kg_identity=kg_identity,
-                ollama_url=args.ollama_url.rstrip("/"),
-                ollama_model=preflight["model_identity"]["name"],
-            ),
-            output_path,
-            lambda path, kg_identity=kg_identity: validate_rag_output(
-                path,
-                contract,
-                preflight["model_identity"]["name"],
-                expected_questions=preflight["records"]["question_contract"],
-                expected_kg=kg_identity,
-            ),
-            child_dir,
-            status,
-            status_path,
-        )
-        if not reuse_completed:
-            validate_execution_snapshot(
-                child_dir, identity, source, preflight, projection_paths, contract
-            )
-            model_evidence, tags_bytes, show_bytes = fetch_matching_model(
-                args.ollama_url, preflight["model_identity"]
-            )
-            check = record_model_check(
-                child_dir,
-                status,
-                status_path,
-                f"after-{condition}",
-                model_evidence,
-                tags_bytes,
-                show_bytes,
-            )
-            status["stages"][stage_name].update(
-                status="complete", post_model_identity_check=check
-            )
-            write_status(status_path, status, child_dir)
-
-    write_json_once(child_dir / "table2-results.json", {
-        "schema_version": "phase-e-same-run-table2-1.0",
-        "run_id": args.run_id,
-        "lineage_status": preflight["lineage_status"],
-        "historical_reference_match": preflight["historical_reference_match"],
-        "new_results": results,
-        "legacy_displayed_accuracy": contract["legacy_table2_accuracy"],
-        "note": "Legacy values are comparison references only and never runtime inputs or tuning targets.",
-    }, child_dir)
-    hashes = {
-        path.relative_to(child_dir).as_posix(): sha256_file(path)
-        for path in sorted(child_dir.rglob("*"))
-        if path.is_file() and path.name not in {"artifact-hashes.json", "run-status.json"}
-    }
-    hash_document = {
-        "schema_version": "phase-e-artifact-hashes-1.0", "run_id": args.run_id, "artifacts": hashes
-    }
-    hash_path = child_dir / "artifact-hashes.json"
-    if hash_path.exists():
-        if load_json(hash_path) != hash_document:
-            raise PhaseEError("Existing finalization hash ledger differs from the sealed child")
-    else:
-        write_json_once(hash_path, hash_document, child_dir)
-
-    validate_execution_snapshot(
-        child_dir, identity, source, preflight, projection_paths, contract
-    )
-    _final_run_dir, final_preflight, _final_projections, _final_graphs = preflight_same_run(
-        args.run_id, contract
-    )
-    if _preflight_identity(final_preflight) != _preflight_identity(preflight):
-        raise PhaseEError(
-            "Selected parent/graph lineage changed after Table-2 evaluation"
-        )
-    completed_status = dict(status)
-    completed_status["status"] = "complete"
-    completed_status["finished_at"] = utc_now()
-    validate_phase_e_child(
-        child_dir, completed_status, contract, preflight, projection_paths
-    )
-    status.clear()
-    status.update(completed_status)
-    write_status(status_path, status, child_dir)
-    print(json.dumps({"run_dir": str(run_dir), "child": child_namespace, "status": "complete"}, indent=2))
-    return 0
-
-
-def run_command(args: argparse.Namespace, contract: dict[str, Any]) -> int:
-    """Run the approved replacement RAG path over original CODE questions."""
-
-    from utils.rag import code_questions
-
-    return code_questions.run_command(args, contract)

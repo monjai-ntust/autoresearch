@@ -1,196 +1,101 @@
-# Table-production workflow
+# Fresh-run workflow contract
 
-`pipeline.py` is the repository's only canonical table-production entry point.
-It is a thin CLI dispatcher over the internal functions in `stages/`; each
-stage owns its validation, resume/recovery, and execution coordination. The
-separate `encoder_comparison.py` entry point is confined to Phase G Table-1
-encoder comparisons and cannot dispatch verifier, evaluation, graph, or RAG
-work. Run either entry point from the root of a clean standalone source
-checkout. All runtime writes are confined to the ignored
-`output/<run-id>/` tree.
+Use the three commands in [README](../README.md) from the standalone source
+checkout. `pipeline.py` owns encoder/verifier evaluation, `encoder_comparison.py`
+owns the isolated four-arm matrix, and `rag.py` owns downstream Graph RAG.
+Private worker actions enforce the same prerequisites as their coordinator.
 
-## Run identity and same-run lineage
+## One physical run
 
-A run ID is a namespace, not a scientific identity. It contains 1-64 letters,
-digits, `.`, `_`, or `-`, and begins with a letter or digit. Every stage uses
-the same `RunLayout` and derives all paths beneath that run root.
+A run ID begins with a letter or digit and contains at most 64 letters, digits,
+`.`, `_` or `-`. Its physical root is `output/<run-id>/`. Source must be clean
+at the actual recorded full commit. Continuing requires that source and
+configuration identity. A fresh checkout doctor retains configuration bytes
+under `inputs/config/`; it requires no historical ancestry or reference digest.
 
-Manifests bind the selected run to its source checkout, immutable input,
-prepared split, checkpoint, candidates, development threshold, verifier
-environment and verdicts, strict metrics, graphs, and Table-2 results. A valid
-hash from another run is not reusable. Immutable upstream inputs are copied
-into the selected run and authenticated there before consumption.
+Inputs are acquired into that run under immutable byte contracts. Preparation
+authenticates the archive, six annotation files, deterministic repair,
+CODE-SPLIT-1 membership and prepared tree. Encoder cache binds weights,
+tokenizer and revision. Qwen binds actual registry identity and copied weight
+bytes/SHA-256, model details and quantization. Identities must agree at every
+same-run consumer. Numerical software/backend settings are recorded once and
+referenced by encoder products.
 
-The clean source commit is the complete tracked-code identity. Checkout and
-checkpoint manifests therefore do not duplicate per-Python-file or lockfile
-hashes. The selected config retains its own digest because downstream Table-2
-validation reads that exact historical config blob from the recorded commit.
+The canonical command trains seeds 42–49 using development-only checkpoint
+selection, generates development candidates, selects the confidence threshold,
+and runs independent verifier pilot captures. After that gate it generates
+test candidates, performs simple/corrective verification, and scores raw,
+confidence-filtered, simple and corrective conditions.
 
-## Environment
+RAG consumes the completed canonical run. It authenticates every parent
+prerequisite and constructs missing canonical graphs from those inputs without
+training or running the upstream verifier. It derives evaluator projections and
+all eligible CODE questions. Confidence, corrective and gold oracle conditions
+use the frozen five modes. Fresh `part-of` rows support later exact external
+comparison. Historical output is never a live method input. Read-only old-parent
+reader support preserves legacy envelopes without permitting old training,
+admission or repair actions.
 
-Requirements are declared in `pyproject.toml` and locked in `uv.lock`.
+## Continue durable progress
 
-```bash
-uv sync --frozen
-```
+Repeat the exact public command with the same ID. An operating-system lock
+prevents overlapping execution and releases on process exit; the lock file
+stays as evidence and is not deleted to recover a run.
 
-The current environment uses Python 3.10 or newer, Torch 2.9.1 from the CUDA
-13.0 index, Git, `curl`, and a loopback Ollama service. Checkout manifests log
-actual versions and hardware. Hardware identity is comparison metadata, not a
-startup gate.
+Completed producer receipts and input/output hashes are validated before reuse.
+Training loads full restart state at the last saved step, preserving optimizer,
+scheduler, RNG and selection state. Candidate and score finalization reconstruct
+deterministic products from saved evidence; existing products must equal the
+expected bytes. Changed source, inputs, models, saved state or outputs fail.
 
-The reference profile in `resources/contracts/table2.json` records the historical
-hardware, encoder, and Qwen identities for reporting only. The default
-configuration selects that encoder revision, while accepting any immutable
-40-hex revision as the actual input for a new run. Its explicitly named Qwen
-digests are references; the actual Qwen tag/blob digests are discovered at the
-first verifier boundary. Within a run, the encoder revision must be identical
-across training, checkpoints, candidate generation, and downstream consumers.
-The Qwen tag/blob identity must be identical across both verifier modes and
-Table 2. Internal disagreement fails closed.
+Verifier journals retain original attempts and elapsed/token values before
+postprocessing. Warmup, each independent pilot capture and test have separate
+journals. The frozen three-attempt budget survives reinvocation; a terminal
+failure is a completed scientific verdict. Reused original responses retain
+`cache_hit=false` rather than becoming synthetic cache hits.
 
-## Static validation
+RAG saves the exact ordered prompt plan and identifies each occurrence, even
+when prompts are equal. Each answer is followed immediately by hash-bound model
+identity proof. Successful durable answers survive later failure. Empty or
+`ERROR:` answers remain unfinished: a subsequent command retries only those
+occurrences. Missing contemporaneous proof stops continuation; a later query
+cannot prove which model produced an earlier answer.
 
-```bash
-uv run --frozen --no-sync python -I -B pipeline.py validate-table2
-uv run --frozen --no-sync python -B -m unittest discover -s tests -v
-```
+A crash before a response or training step is saved can require that unsaved
+work again. The guarantee starts at validated durable progress; it does not
+claim exactly-once external execution across arbitrary failure.
 
-Validation makes no model call. Table-2 dry-run additionally authenticates one
-completed run and deterministically constructs its prospective graph and record
-projections without writing them:
+## Paper reports and limits
 
-```bash
-uv run --frozen --no-sync python -I -B pipeline.py table2 \
-  --run-id research-run-001 \
-  --dry-run
-```
+Canonical reports are in `metrics/paper-report/`; comparison reports are in
+each arm's `reports/comparison/` and the coordinator's `reports/matrix/`; RAG
+reports are in `table2-code-all/reports/`. Each contains deterministic
+`paper-statistics.json`, `.tsv`, `.md` and a hash-bound manifest. Existing
+publication tables, outcomes and metrics preserve their scientific bytes.
 
-## Full canonical CODE-ACCORD pipeline
+Reports expose per-seed strict quality, tied best seeds as descriptive
+observations, existing Wilcoxon/paired-t raw and Holm-adjusted results,
+verdict diagnostics, corpus/eligibility counts, unique emitted triples,
+actual runtime/model identities and recorded cost. Request cost counts original
+uncached attempts including retries/failures, separating warmup/pilot/test.
+Tokens and timings carry measured coverage. Training sums recorded trainer
+invocation time; unavailable earlier failures remain outside that coverage.
 
-Start the configured Qwen model in Ollama. Then execute:
+Graph reports distinguish canonical entities/relations/triples from evaluator
+nodes/edges. RAG tables carry correct/total/hit-rate denominators for full and
+`part-of` panels. Gold is a nondeployable oracle; answer matching does not
+establish faithful use of retrieved evidence. Condition wall time is available;
+per-call RAG latency/tokens and isolated graph construction time are not.
+Disk weight size is not resident or peak accelerator memory. Energy, monetary
+cost, unexecuted datasets and missing comparison inferential analyses remain
+unavailable. No historical estimate is substituted.
 
-```bash
-uv run --frozen --no-sync python -I -B pipeline.py full \
-  --run-id research-run-001 \
-  --ollama-url http://localhost:11434
-```
+## Existing partial runs
 
-If the blob path reported by Ollama cannot be opened by the pipeline process,
-add `--model-blob-source /absolute/path/to/blob`. That source cannot be located
-inside this checkout's `output/` tree. Its bytes must match the blob reference
-in Ollama's Modelfile.
-
-The command runs or resumes these stages in order:
-
-1. Checkout and environment doctor.
-2. Secondary-evidence reconciliation.
-3. Immutable CODE-ACCORD acquisition.
-4. Leakage-safe CODE-SPLIT-1 preparation.
-5. Eight encoder training runs and development candidate ledgers.
-6. Eight-seed development assembly and threshold selection.
-7. Predeclared development pilot selection and four same-run captures.
-8. Pilot audit; final-test work remains blocked unless this passes.
-9. Eight final-test candidate ledgers and assembly.
-10. Simple and corrective verifier execution.
-11. Strict scoring and publication metrics.
-12. Same-run graph construction/projection and independent 467-question
-    replacement evaluation, including an exported 105-question `part-of` subset.
-
-This route produces the canonical CODE-ACCORD successors to the encoder and
-verifier analyses plus a new same-run Table 2. It does not regenerate the
-paper's historical Table 1 or SciERC Table 3; those remain legacy comparison
-evidence. Table 4 is outside this artifact.
-
-Encoder training remains hosted by `stages/encoder.py`, but the main process starts
-it through the private `pipeline.py _train-encoder` route. `stages/encoder.py` is an
-internal scientific implementation module and is not an executable entry point.
-
-Phase G comparison training is separately hosted by
-`stages/encoder_comparison.py`, with historical-derived lower-level behavior in
-`utils/encoder_comparison/`. It reuses this workflow's preparation and
-run/artifact utilities but does not modify or dispatch the canonical encoder.
-Its approved four-arm Table 1 matrix and statistical protocol are frozen in
-`resources/configs/encoder-comparison.json`. Live execution remains subject to
-the model-cache, storage, accelerator, and G-05 smoke gates documented in
-`docs/encoder-comparison.md`. Each arm uses a distinct run, and full training is
-unreachable until its bounded CUDA smoke has been reviewed and an explicit
-admission decision has been recorded.
-
-## Table-2-only route
-
-For a run that already completed stages 1–11, execute the replacement downstream
-Table 2. No historical RAG child is required:
-
-```bash
-uv run --frozen --no-sync python -I -B pipeline.py table2 \
-  --run-id research-run-001 \
-  --ollama-url http://localhost:11434
-```
-
-This command has no encoder-training, candidate-generation, or verifier route.
-It authenticates those existing outputs and derives the Qwen identity from the
-same run's verifier environment. The live Ollama tag, registry manifest, model
-blob, family, parameter size, and quantization must match that run-local
-identity.
-
-The command freshly evaluates all 467 questions: the 105 historical `part-of`
-questions plus 362 questions from the seven restored original-CODE templates.
-Across five modes and three graph conditions this is 7,005 model calls. Stored
-historical responses are comparison evidence only and are never inserted into
-the new output. The command exports the new 105-question subset for an exact
-post-execution comparison with all 1,575 separately archived historical rows.
-
-Three graphs are used: seed-42 confidence-filtered candidates at the
-development-selected threshold, seed-42 correction-capable verifier emissions,
-and the private-gold oracle. Missing graphs are constructed from the selected
-run's authenticated parents. Existing graph manifests are reused only after
-exact canonical equality with that reconstruction. Representation-only graph
-and record projections feed the frozen evaluator.
-
-## Resume and failure behavior
-
-Completed upstream stages are reused only when their expected manifests,
-identities, stage seals, and transitive input/output hashes still validate.
-Training restart state includes optimizer, scheduler, random generators,
-sampler, adaptive gate, and selection
-state. Interrupted inference ledgers and verifier responses are first
-validated, preserved under `inputs/recovery/`, and bound to the selected run's
-checkout and stage inputs before reuse. Invalid partial files are quarantined
-and never used as caches. Missing seals may be reconstructed only after the
-complete producer manifest and every declared output validate.
-Development-pilot calls never use recovery caches.
-
-Table-2 stages record a run identity before their first write. A validated
-completed stage is reusable. The replacement, its own projections, and its
-recovery evidence use `output/<run-id>/table2-code-all/`. An unverified interrupted result is moved
-under its own child's `recovery/` directory before a new attempt. Cross-run paths,
-symlinks/junctions, changed inputs, mismatched model identities, malformed or
-empty model responses, and output collisions fail closed. Historical `part-of`
-comparison happens outside runtime after both result sets exist.
-
-## Primary artifacts
-
-Important run-relative paths include:
-
-- `manifests/00-checkout-manifest.json`
-- `manifests/03-data-preparation-manifest.json`
-- `data-prepared/{train,development,test}.jsonl`
-- `data-prepared/{development,test}-gold.jsonl`
-- `checkpoints/seed-<seed>/checkpoint-manifest.json`
-- `predictions/dev/threshold-selection.json`
-- `predictions/test/candidates.jsonl`
-- `verifier/{simple,corrective}/environment-manifest.json`
-- `verifier/{simple,corrective}/verdicts.jsonl`
-- `metrics/metrics.json`
-- `manifests/score-manifest.json`
-- `table2-code-all/projections/`
-- `table2-code-all/question-ledger.json`
-- `table2-code-all/rag-results/`
-- `table2-code-all/part-of-results/`
-- `table2-code-all/code-question-results.json`
-- `table2-code-all/artifact-hashes.json`
-
-Generated output is temporary working storage. The parent research repository's
-verified archival process must move a completed run out of `src/output/` before
-final release.
+Fresh commands do not replace pre-refactor G-05 recovery/finalization and
+review. Preserve original IDs, producer manifests and source at
+`fb18028cd21239c0bf913e370149a643081958fe`. Full training/final-test access for
+those partial runs still requires earlier reviewed external admission. Never
+use a launcher that deletes prior run directories. Completed scientific runs
+are not rerun by this refactor; extension requires their unchanged namespace,
+authenticated prerequisites and separately authorized work.

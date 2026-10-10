@@ -9,7 +9,7 @@ import unittest
 import uuid
 from pathlib import Path
 
-from utils.common.config import load_pipeline_config
+from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import CONDITION_IDS, PROTOCOL_ID
 from utils.common.environment import _document_version
 from utils.common.artifact_io import (
@@ -46,7 +46,7 @@ from utils.evaluation.statistics import (
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from utils.verifier.verifier import verifier_identity
+from utils.verifier.requests import verifier_identity
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -166,11 +166,11 @@ class ConfigContractTests(unittest.TestCase):
         self.assertIn("actual=unavailable", uv_check["detail"])
         self.assertIn("not enforced", uv_check["detail"])
 
-    def test_approved_config_and_matrix_resolve_from_source_only(self):
+    def test_approved_config_and_conditions_resolve_from_source_only(self):
         config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         self.assertEqual(config.value["training_seeds"], list(range(42, 50)))
         self.assertEqual(
-            [row["condition_id"] for row in config.matrix["conditions"]],
+            ['VER-RAW', 'VER-CONFIDENCE', 'VER-SIMPLE', 'VER-CORRECTIVE'],
             list(CONDITION_IDS),
         )
         self.assertNotIn("TBD_", json.dumps(config.value, sort_keys=True))

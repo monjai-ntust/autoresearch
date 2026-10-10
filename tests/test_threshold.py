@@ -7,7 +7,7 @@ import unittest
 import uuid
 from pathlib import Path
 
-from utils.common.config import load_pipeline_config
+from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import PROTOCOL_ID, TRAINING_SEEDS
 from utils.common.artifact_io import (
     DataContractError,

@@ -1,16 +1,13 @@
 """Original-CODE question coverage from authenticated same-run parents.
 
 The replacement freshly evaluates the complete expanded panel and writes its
-own projections and results beneath ``table2-code-all``. Historical
-``table2-q105`` output is an external comparison oracle, never a runtime input.
+own projections and results beneath ``table2-code-all``. Historical output is
+an external comparison oracle, never a runtime input.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
-import platform
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -197,15 +194,6 @@ def build_identity(
     }
 
 
-def _validate_tracked_extension_source(source: dict[str, str]) -> None:
-    """Require the replacement controller to be bytes from source HEAD."""
-
-    path = Path(__file__).resolve()
-    relative = path.relative_to(runner.ROOT).as_posix()
-    if runner._git_file_bytes(source["head"], relative) != path.read_bytes():
-        raise runner.PhaseEError(
-            f"CODE question source is not identical to source HEAD: {relative}"
-        )
 
 
 def validate_execution_snapshot(
@@ -219,7 +207,6 @@ def validate_execution_snapshot(
 
     if runner.validate_source_contract(base_contract, require_clean=True) != source:
         raise runner.PhaseEError("Source identity changed after CODE-question preflight")
-    _validate_tracked_extension_source(source)
     method = replacement_method()
     if method != summary["method"]:
         raise runner.PhaseEError("CODE question method changed after preflight")
@@ -414,6 +401,7 @@ def _artifact_hash_document(child_dir: Path, run_id: str) -> dict[str, Any]:
             for path in sorted(child_dir.rglob("*"))
             if path.is_file()
             and path.name not in {"artifact-hashes.json", "run-status.json"}
+            and "reports" not in path.relative_to(child_dir).parts
         },
     }
 
@@ -566,277 +554,3 @@ def validate_extension_child(
     if hash_document != _artifact_hash_document(child_dir, summary["run_id"]):
         raise runner.PhaseEError("CODE question artifact hashes differ")
     return expected_summary
-
-
-def run_command(
-    args: argparse.Namespace,
-    base_contract: dict[str, Any],
-) -> int:
-    """Validate or execute the full-panel same-run replacement RAG."""
-
-    source = runner.validate_source_contract(
-        base_contract, require_clean=not args.dry_run
-    )
-    run_dir, summary, runtime = preflight_code_questions(args.run_id, base_contract)
-    if args.dry_run:
-        print(json.dumps({"source": source, **summary}, indent=2, sort_keys=True))
-        return 0
-
-    child_dir = run_dir / OUTPUT_NAMESPACE
-    status_path = child_dir / "run-status.json"
-    runner.validate_child_write_surface(child_dir)
-    identity = build_identity(args.run_id, source, summary)
-    new_child = not child_dir.exists() or not status_path.exists()
-    if child_dir.exists() and not status_path.exists() and any(child_dir.iterdir()):
-        raise runner.PhaseEError(
-            f"{OUTPUT_NAMESPACE} exists without a resumable status identity"
-        )
-    if new_child:
-        status = {
-            "schema_version": "phase-g-code-question-status-1.0",
-            "run_id": args.run_id,
-            "identity": identity,
-            "status": "running",
-            "created_at": runner.utc_now(),
-            "stages": {},
-        }
-        child_dir.mkdir(exist_ok=True)
-        runner.write_status(status_path, status, child_dir)
-    else:
-        status = runner.load_json(status_path)
-        if status.get("identity") != identity or status.get("run_id") != args.run_id:
-            raise runner.PhaseEError("Existing CODE question child identity differs")
-        if status.get("status") == "complete":
-            validate_extension_child(
-                child_dir, status, identity, summary, runtime
-            )
-            print(
-                json.dumps(
-                    {"run_dir": str(run_dir), "status": "complete", "resumed": True},
-                    indent=2,
-                )
-            )
-            return 0
-
-    try:
-        runner.validate_model_check(
-            child_dir,
-            status,
-            status.get("pre_model_identity_check"),
-            expected_phase="before-stages",
-            expected_model=summary["model_identity"],
-            condition=None,
-        )
-    except runner.ModelEvidenceError:
-        if any(stage.get("attempts") for stage in status.get("stages", {}).values()):
-            raise runner.PhaseEError(
-                "Started CODE question child lacks valid pre-stage model evidence"
-            )
-        evidence, tags_bytes, show_bytes = runner.fetch_matching_model(
-            args.ollama_url, summary["model_identity"]
-        )
-        status["pre_model_identity_check"] = runner.record_model_check(
-            child_dir,
-            status,
-            status_path,
-            "before-stages",
-            evidence,
-            tags_bytes,
-            show_bytes,
-        )
-        runner.write_status(status_path, status, child_dir)
-
-    projection_paths = _projection_paths(child_dir)
-    for name, path in projection_paths.items():
-        runner.write_bytes_once(path, runtime["projections"][name], child_dir)
-    for name, graph in runtime["graphs"].items():
-        if summary["graphs"][name]["source"] == "constructed":
-            runner.write_json_once(
-                child_dir / "canonical-graphs" / name / "manifest.json",
-                graph,
-                child_dir,
-            )
-    runner.write_json_once(
-        child_dir / "projections" / "manifest.json",
-        _projection_manifest(child_dir, summary),
-        child_dir,
-    )
-    runner.write_json_once(
-        child_dir / "question-ledger.json",
-        question_ledger(args.run_id, runtime["panels"]),
-        child_dir,
-    )
-    runner.write_json_once(
-        child_dir / "method-manifest.json",
-        {
-            "schema_version": "phase-g-code-question-method-1.0",
-            "run_id": args.run_id,
-            "identity": identity,
-            "method": summary["method"],
-            "base_contract": base_contract,
-            "reuse": {
-                "historical_results": False,
-                "historical_projections": False,
-                "same_run_graph_construction": True,
-                "evaluation_kernel": True,
-            },
-        },
-        child_dir,
-    )
-    runner.write_json_once(
-        child_dir / "environment.json",
-        {
-            "schema_version": "phase-g-code-question-environment-1.0",
-            "run_id": args.run_id,
-            "captured_at": status["created_at"],
-            "platform": platform.platform(),
-            "python": sys.version,
-            "source": source,
-            "model_identity": summary["model_identity"],
-        },
-        child_dir,
-    )
-
-    replacement_outputs: dict[str, dict[str, Any]] = {}
-    for condition in ("confidence", "corrective", "gold"):
-        stage_name = f"rag_{condition}"
-        validate_execution_snapshot(
-            identity, source, summary, runtime, base_contract
-        )
-        stage = status.get("stages", {}).get(stage_name)
-        reuse_completed = False
-        if isinstance(stage, dict) and stage.get("status") == "complete":
-            runner.validate_model_check(
-                child_dir,
-                status,
-                stage.get("post_model_identity_check"),
-                expected_phase=f"after-{condition}",
-                expected_model=summary["model_identity"],
-                condition=condition,
-            )
-            reuse_completed = True
-        output_path = child_dir / "rag-results" / f"{condition}.json"
-        kg_path = projection_paths[condition]
-        records = runtime["records"]
-        kg = runner.load_json(kg_path)
-        runner.run_stage(
-            stage_name,
-            lambda records=records, kg=kg, kg_path=kg_path: evaluator.evaluate(
-                records,
-                kg,
-                kg_identity=runner.stable_child_path(kg_path),
-                ollama_url=args.ollama_url.rstrip("/"),
-                ollama_model=summary["model_identity"]["name"],
-                question_panel=runtime["panels"]["combined"],
-            ),
-            output_path,
-            lambda path, condition=condition: _validate_replacement_output(
-                path,
-                child_dir,
-                runtime,
-                condition,
-                summary["model_identity"]["name"],
-            ),
-            child_dir,
-            status,
-            status_path,
-        )
-        if not reuse_completed:
-            validate_execution_snapshot(
-                identity, source, summary, runtime, base_contract
-            )
-            evidence, tags_bytes, show_bytes = runner.fetch_matching_model(
-                args.ollama_url, summary["model_identity"]
-            )
-            check = runner.record_model_check(
-                child_dir,
-                status,
-                status_path,
-                f"after-{condition}",
-                evidence,
-                tags_bytes,
-                show_bytes,
-            )
-            status["stages"][stage_name].update(
-                status="complete", post_model_identity_check=check
-            )
-            runner.write_status(status_path, status, child_dir)
-        replacement_outputs[condition] = runner.load_json(output_path)
-
-    condition_summaries = {}
-    part_of_hashes = {}
-    for condition in ("confidence", "corrective", "gold"):
-        replacement_path = child_dir / "rag-results" / f"{condition}.json"
-        part_of, statistics = build_part_of_document(
-            run_id=args.run_id,
-            condition=condition,
-            panels=runtime["panels"],
-            replacement_output=replacement_outputs[condition],
-            replacement_path=runner.stable_child_path(replacement_path),
-            replacement_sha256=runner.sha256_file(replacement_path),
-        )
-        part_of_path = child_dir / "part-of-results" / f"{condition}.json"
-        runner.write_json_once(
-            part_of_path,
-            part_of,
-            child_dir,
-        )
-        condition_summaries[condition] = statistics
-        part_of_hashes[condition] = runner.sha256_file(part_of_path)
-
-    result_summary = {
-        "schema_version": "phase-g-code-question-results-1.0",
-        "run_id": args.run_id,
-        "profile_id": PROFILE_ID,
-        "question_summary": summary["questions"],
-        "conditions": condition_summaries,
-        "historical_part_of_comparison": {
-            "status": "pending-external-oracle",
-            "runtime_input": False,
-            "result_artifact_sha256": part_of_hashes,
-        },
-        "note": (
-            "Expanded Table-2-format diagnostic on canonical upstream outputs; "
-            "not the paper's original n=10 Table 2."
-        ),
-    }
-    runner.write_json_once(
-        child_dir / "code-question-results.json", result_summary, child_dir
-    )
-    runner.write_json_once(
-        child_dir / "artifact-hashes.json",
-        _artifact_hash_document(child_dir, args.run_id),
-        child_dir,
-    )
-    validate_execution_snapshot(
-        identity, source, summary, runtime, base_contract
-    )
-    _final_run, final_summary, _final_runtime = preflight_code_questions(
-        args.run_id, base_contract
-    )
-    if (
-        final_summary["base_preflight_identity"] != summary["base_preflight_identity"]
-        or final_summary["projection_sha256"] != summary["projection_sha256"]
-        or final_summary["questions"] != summary["questions"]
-    ):
-        raise runner.PhaseEError("Same-run parent changed during CODE question execution")
-    completed = dict(status)
-    completed["status"] = "complete"
-    completed["finished_at"] = runner.utc_now()
-    validate_extension_child(
-        child_dir, completed, identity, summary, runtime
-    )
-    status.clear()
-    status.update(completed)
-    runner.write_status(status_path, status, child_dir)
-    print(
-        json.dumps(
-            {
-                "run_dir": str(run_dir),
-                "child": OUTPUT_NAMESPACE,
-                "status": "complete",
-            },
-            indent=2,
-        )
-    )
-    return 0

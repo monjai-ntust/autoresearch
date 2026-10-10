@@ -1,131 +1,41 @@
-"""Separate root entry point for Phase G historical encoder comparisons."""
-
+"""Run or continue the four-arm matched encoder comparison."""
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-_ENTRY_ROOT = Path(__file__).resolve().parent
-if str(_ENTRY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ENTRY_ROOT))
+_ROOT = Path(__file__).resolve().parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-from stages.encoder_comparison import (
-    describe,
-    generate,
-    plan_training,
-    prepare,
-    recover_checkout,
-    record_admission,
-    run_private,
-    run_smoke,
-    run_training,
-)
 from utils.common.artifact_io import DataContractError
 from utils.common.paths import PathContractError, RunLayout, discover_source_root
 from utils.encoder_comparison.config import DEFAULT_CONFIG, load_comparison_config
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python encoder_comparison.py",
-        description="Historical-derived, canonical-data encoder comparison path.",
-    )
-    parser.add_argument("--source-root")
-    parser.add_argument("--config", default=DEFAULT_CONFIG)
-    subparsers = parser.add_subparsers(dest="action", required=True)
-    validate = subparsers.add_parser("validate-profile")
-    validate_arm = subparsers.add_parser("validate-arm")
-    prepare_parser = subparsers.add_parser("prepare")
-    recover = subparsers.add_parser("recover-checkout")
-    smoke = subparsers.add_parser("smoke")
-    admit = subparsers.add_parser("record-admission")
-    plan = subparsers.add_parser("plan-training")
-    train = subparsers.add_parser("train")
-    predict = subparsers.add_parser("generate")
-    validate.add_argument("--profile", required=True)
-    for command in (validate_arm, prepare_parser, recover, smoke, admit, plan, train, predict):
-        command.add_argument("--arm", required=True)
-    for command in (prepare_parser, recover, smoke, admit, plan, train, predict):
-        command.add_argument("--run-id", required=True)
-    for command in (smoke, plan, train, predict):
-        command.add_argument("--training-seed", required=True, type=int)
-    admit.add_argument("--decision", choices=("admit", "reject"), required=True)
-    admit.add_argument("--reason", required=True)
-    predict.add_argument("--split", choices=("development", "test"), required=True)
-    return parser
-
-
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {
-        "_train-encoder", "_predict-encoder", "_smoke-encoder"
-    }:
-        action = arguments[0].removeprefix("_").removesuffix("-encoder")
-        try:
-            return run_private(
-                arguments[1:], action=action, default_config=DEFAULT_CONFIG
-            )
-        except (DataContractError, PathContractError, OSError, ValueError) as exc:
-            print(f"encoder_comparison: error: {exc}", file=sys.stderr)
-            return 2
-    args = _parser().parse_args(arguments)
     try:
-        source_root = discover_source_root(
-            Path(args.source_root) if args.source_root else None
-        )
-        config = load_comparison_config(source_root, args.config)
-        if args.action == "validate-profile":
-            try:
-                profile = config.profiles[args.profile]
-            except KeyError as exc:
-                raise DataContractError(
-                    f"unknown encoder comparison profile: {args.profile!r}"
-                ) from exc
-            print(json.dumps(profile.manifest(), indent=2))
+        if arguments and arguments[0] in {"_train-encoder", "_predict-encoder", "_smoke-encoder"}:
+            from stages.encoder_comparison import run_private
+            return run_private(arguments[1:], action=arguments[0][1:-8], default_config=DEFAULT_CONFIG)
+        parser = argparse.ArgumentParser(description=__doc__)
+        commands = parser.add_subparsers(dest="action", required=True)
+        run = commands.add_parser("run")
+        run.add_argument("--matrix-id", required=True)
+        commands.add_parser("validate", help="Inspect the frozen matrix without model access")
+        args = parser.parse_args(arguments)
+        root = discover_source_root(_ROOT)
+        config = load_comparison_config(root)
+        if args.action == "validate":
+            print(json.dumps({arm: config.select_arm(arm).manifest() for arm in config.arms}, indent=2))
             return 0
-        selection = config.select_arm(args.arm)
-        if args.action == "validate-arm":
-            print(json.dumps(describe(selection), indent=2))
-            return 0
-        layout = RunLayout(source_root=source_root, run_id=args.run_id)
-        if args.action == "prepare":
-            prepare(layout, selection)
-        elif args.action == "recover-checkout":
-            print(json.dumps(recover_checkout(layout, selection), indent=2))
-        elif args.action == "smoke":
-            print(json.dumps(run_smoke(layout, selection, args.training_seed), indent=2))
-        elif args.action == "record-admission":
-            print(
-                json.dumps(
-                    record_admission(
-                        layout,
-                        selection,
-                        decision=args.decision,
-                        reason=args.reason,
-                    ),
-                    indent=2,
-                )
-            )
-        elif args.action == "plan-training":
-            print(json.dumps(plan_training(layout, selection, args.training_seed), indent=2))
-        elif args.action == "train":
-            print(json.dumps(run_training(layout, selection, args.training_seed), indent=2))
-        elif args.action == "generate":
-            print(
-                json.dumps(
-                    generate(
-                        layout,
-                        selection,
-                        args.training_seed,
-                        args.split,
-                    ),
-                    indent=2,
-                )
-            )
-        return 0
-    except (DataContractError, PathContractError, OSError, ValueError) as exc:
+        from stages.comparison_matrix import run_matrix
+        return run_matrix(RunLayout(root, args.matrix_id), config)
+    except (DataContractError, PathContractError, OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f"encoder_comparison: error: {exc}", file=sys.stderr)
         return 2
 

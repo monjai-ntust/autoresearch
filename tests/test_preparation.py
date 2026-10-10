@@ -9,25 +9,17 @@ import tempfile
 import unittest
 import uuid
 import zipfile
+from dataclasses import replace
+from unittest import mock
 from pathlib import Path
 
 from utils.preparation.acquisition import ArchiveContract, download_verified_archive
 from utils.common.constants import CODE_ACCORD_COUNTS, CODE_ACCORD_REPAIRED_UUID
 from utils.common.artifact_io import DataContractError, sha256_file
-from utils.common.paths import discover_source_root
-from utils.preparation.preparation import (
-    DatasetContract,
-    EntityRecord,
-    _alignment_choice,
-    _load_entities,
-    _load_relations_all,
-    _locate_annotation_files,
-    _materialize_dataset,
-    _parse_markers,
-    _prepare_corpus,
-    _tree_inventory,
-    extract_zip_safely,
-)
+from utils.common.paths import discover_source_root, RunLayout
+from utils.preparation.preparation import _locate_annotation_files, _prepare_corpus, extract_zip_safely
+from utils.preparation.materialization import _materialize_dataset, _tree_inventory
+from utils.preparation.annotations import DatasetContract, EntityRecord, _alignment_choice, _load_entities, _load_relations_all, _parse_markers
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -289,6 +281,31 @@ class ExtractionTests(unittest.TestCase):
 
 
 class PreparationTests(unittest.TestCase):
+    def test_missing_preparation_manifest_finalizes_without_changing_prepared_bytes(self):
+        from stages import preparation as controller
+        from utils.common.artifact_io import atomic_write_json
+        with _temporary_output_directory() as temporary:
+            root=Path(temporary)
+            originals=root/'annotation-fixture'
+            contract=_build_official_shape_fixture(originals)
+            layout=RunLayout(root,'preparation-fault')
+            layout.create()
+            archive=layout.resolve('inputs/dataset.zip')
+            with zipfile.ZipFile(archive,'w') as bundle:
+                for relative in contract.annotation_files:
+                    bundle.write(originals/'CODE-ACCORD-v1.0.0'/relative,arcname=relative)
+            contract=replace(contract,archive_bytes=archive.stat().st_size,
+                archive_md5=hashlib.md5(archive.read_bytes()).hexdigest())
+            atomic_write_json(layout.resolve('manifests/02-input-acquisition-manifest.json'),{'archive':{
+                'path':'inputs/dataset.zip','bytes':archive.stat().st_size,
+                'md5':contract.archive_md5,'sha256':sha256_file(archive)}})
+            with mock.patch.object(controller,'dataset_contract_from_config',return_value=contract):
+                with mock.patch.object(controller,'atomic_write_json',side_effect=RuntimeError('manifest interrupted')):
+                    with self.assertRaises(RuntimeError): controller.prepare_run(layout,None)
+                before=_tree_inventory(layout.resolve('data-prepared'))
+                controller.prepare_run(layout,None)
+                self.assertEqual(_tree_inventory(layout.resolve('data-prepared')),before)
+
     def test_marker_contained_in_one_typed_span_resolves_to_full_bio_span(self):
         words = ("A", "suitable", "for", "powering", "the", "lifting", "device")
         entity = EntityRecord(
@@ -399,7 +416,7 @@ class PreparationTests(unittest.TestCase):
 
             first = root / "first"
             second = root / "second"
-            for destination in (first, second):
+            for destination in (first, second, first):
                 _materialize_dataset(
                     destination,
                     contract=contract,

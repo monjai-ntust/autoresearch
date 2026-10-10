@@ -10,7 +10,10 @@ adapters to the current artifact contract.
 
 from __future__ import annotations
 
-import argparse
+from utils.encoder.runtime import record_runtime
+
+from utils.encoder_comparison.options import ComparisonOptions
+
 import json
 import os
 import platform
@@ -30,91 +33,11 @@ from utils.encoder_comparison import data as code_accord
 from utils.encoder_comparison.network import HistoricalKGExtractor
 
 
-HISTORICAL_SOURCE_COMMIT = "9feafa4029e65ab48ecfb2f452f4b0fabbff0826"
-HISTORICAL_TRAINER_BLOB = "104ca6e4afcb5122228fff5c73227c6b3b3edb40"
 CONFIDENCE_PRECISION = 6
 
 
-def parse_args(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--mode", choices=("train", "predict"), required=True)
-    parser.add_argument("--prepared-dir", required=True)
-    parser.add_argument("--model-name", required=True)
-    parser.add_argument("--model-revision", required=True)
-    parser.add_argument("--expected-hidden-size", type=int, required=True)
-    parser.add_argument("--model-cache-dir", required=True)
-    parser.add_argument("--model-local-files-only", action="store_true")
-    parser.add_argument("--batch-size", type=int, required=True)
-    parser.add_argument("--max-length", type=int, required=True)
-    parser.add_argument("--max-span-width", type=int, required=True)
-    parser.add_argument("--context-between-spans", action="store_true")
-    parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--lr", type=float)
-    parser.add_argument("--max-steps", type=int)
-    parser.add_argument("--warmup-steps", type=int)
-    parser.add_argument("--re-weight", type=float)
-    parser.add_argument("--re-no-rel-weight", type=float)
-    parser.add_argument("--neg-sample-ratio", type=float)
-    parser.add_argument("--focal-gamma", type=float)
-    parser.add_argument("--bio-loss-weight", type=float)
-    parser.add_argument("--label-smoothing", type=float)
-    parser.add_argument("--eval-every", type=int)
-    parser.add_argument(
-        "--comparison-boost-schedule",
-        choices=("disabled", "pipeline-a20"),
-    )
-    parser.add_argument("--re-comparison-boost", type=float)
-    parser.add_argument("--re-boost-adaptive-steps", type=int)
-    parser.add_argument("--re-boost-adaptive-threshold", type=float)
-    parser.add_argument("--re-boost-adaptive-threshold2", type=float)
-    parser.add_argument("--re-boost-mid", type=float)
-    parser.add_argument("--re-boost-end", type=float)
-    parser.add_argument("--save-best-to")
-    parser.add_argument("--save-last-to")
-    parser.add_argument("--progress-log")
-    parser.add_argument("--run-summary-out")
-    parser.add_argument("--resume-from")
-    parser.add_argument("--checkpoint")
-    parser.add_argument("--sentences")
-    parser.add_argument("--prediction-ledger-out")
-    args = parser.parse_args(argv)
-    required_by_mode = {
-        "train": (
-            "lr",
-            "max_steps",
-            "warmup_steps",
-            "re_weight",
-            "re_no_rel_weight",
-            "neg_sample_ratio",
-            "focal_gamma",
-            "bio_loss_weight",
-            "label_smoothing",
-            "eval_every",
-            "comparison_boost_schedule",
-            "re_comparison_boost",
-            "re_boost_adaptive_steps",
-            "re_boost_adaptive_threshold",
-            "re_boost_adaptive_threshold2",
-            "re_boost_mid",
-            "re_boost_end",
-            "save_best_to",
-            "save_last_to",
-            "progress_log",
-            "run_summary_out",
-        ),
-        "predict": ("checkpoint", "sentences", "prediction_ledger_out"),
-    }
-    missing = [name for name in required_by_mode[args.mode] if getattr(args, name) is None]
-    if missing:
-        parser.error(f"{args.mode} mode requires: {', '.join(missing)}")
-    return args
 
 
-def _total_memory_bytes():
-    try:
-        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except (AttributeError, OSError, ValueError):
-        return None
 
 
 def _atomic_torch_save(value, path: str | Path) -> None:
@@ -571,6 +494,7 @@ def pipeline_comparison_boost(
 
 
 def train(args):
+    runtime_reference = record_runtime(args.prepared_dir)
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     if torch.cuda.is_available():
@@ -751,8 +675,6 @@ def train(args):
     summary = {
         "schema_version": "phase-g-historical-trainer-summary-1.0",
         "status": "completed",
-        "historical_source_commit": HISTORICAL_SOURCE_COMMIT,
-        "historical_trainer_blob": HISTORICAL_TRAINER_BLOB,
         "seed": args.seed,
         "model_name": args.model_name,
         "model_revision": args.model_revision,
@@ -763,21 +685,7 @@ def train(args):
         "test_evaluated": False,
         "resumed_from": resumed_from,
         "elapsed_seconds": time.time() - started,
-        "environment": {
-            "python": sys.version.split()[0],
-            "platform": platform.platform(),
-            "machine": platform.machine(),
-            "cpu_count": os.cpu_count(),
-            "total_memory_bytes": _total_memory_bytes(),
-            "torch": torch.__version__,
-            "cuda_runtime": torch.version.cuda,
-            "cuda_available": torch.cuda.is_available(),
-            "cuda_device": (
-                torch.cuda.get_device_name(torch.cuda.current_device())
-                if torch.cuda.is_available()
-                else None
-            ),
-        },
+        "runtime_environment": runtime_reference,
     }
     _atomic_json_write(summary, args.run_summary_out)
     return summary
@@ -901,8 +809,10 @@ def predict(args):
     return records
 
 
-def main(argv: list[str] | None = None):
-    args = parse_args(argv)
+def main(argv: ComparisonOptions):
+    args = argv
+    if not isinstance(args, ComparisonOptions):
+        raise TypeError("worker requires typed options")
     prepared_root = Path(args.prepared_dir).resolve()
     cache_root = Path(args.model_cache_dir).resolve()
     if cache_root != prepared_root.parent / "inputs" / "huggingface":

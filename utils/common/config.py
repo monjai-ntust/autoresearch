@@ -15,10 +15,7 @@ from utils.common.constants import (
     CODE_ACCORD_REPAIRED_UUID,
     CONDITION_IDS,
     MATCHER_ID,
-    MATRIX_REVISION,
     PROTOCOL_ID,
-    SECTION5_CLAIM_IDS,
-    SECTION5_EVIDENCE_REVISION,
     TRAINING_SEEDS,
     WORKFLOW_ID,
 )
@@ -55,10 +52,6 @@ def _find_tbd(value: Any, location: str = "config") -> list[str]:
 class PipelineConfig:
     path: Path
     value: dict[str, Any]
-    matrix_path: Path
-    matrix: dict[str, Any]
-    section5_evidence_path: Path
-    section5_evidence: dict[str, Any]
 
     @property
     def paths(self) -> dict[str, str]:
@@ -227,15 +220,6 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
     for field, expected in expected_verifier.items():
         if verifier.get(field) != expected:
             raise DataContractError(f"config.verifier.{field} differs from the approved protocol")
-    for field in (
-        "reference_registry_manifest_sha256",
-        "reference_model_blob_sha256",
-    ):
-        digest = verifier.get(field)
-        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise DataContractError(
-                f"config.verifier.{field} must be a historical SHA-256 reference"
-            )
     verifier_resources = {
         "system_prompt": "system_prompt_sha256",
         "simple_prompt": "simple_prompt_sha256",
@@ -249,14 +233,6 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
             raise DataContractError(
                 f"config.verifier.{hash_field} does not match {verifier[path_field]}"
             )
-    # These aliases are runtime slots. A full run replaces them with the
-    # authenticated model it actually discovers; the tracked values remain
-    # explicitly named historical references in the JSON configuration.
-    verifier["registry_manifest_sha256"] = verifier[
-        "reference_registry_manifest_sha256"
-    ]
-    verifier["model_blob_sha256"] = verifier["reference_model_blob_sha256"]
-
     environment = _object(
         _required(value, "environment", "config"), "config.environment"
     )
@@ -292,105 +268,4 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
                 f"config.runtime_paths.{field} must be a nonempty run-relative path"
             )
 
-    matrix_raw = _required(value, "experiment_matrix", "config")
-    if not isinstance(matrix_raw, str):
-        raise DataContractError("config.experiment_matrix must be a tracked relative path")
-    matrix_path = resolve_tracked_path(source_root, matrix_raw)
-    matrix = _object(load_json(matrix_path), "experiment matrix")
-    _validate_matrix(matrix)
-
-    evidence_raw = _required(value, "section5_evidence_register", "config")
-    if not isinstance(evidence_raw, str):
-        raise DataContractError(
-            "config.section5_evidence_register must be a tracked relative path"
-        )
-    evidence_path = resolve_tracked_path(source_root, evidence_raw)
-    evidence = _object(load_json(evidence_path), "Section 5 evidence register")
-    _validate_section5_evidence_identity(evidence)
-    return PipelineConfig(
-        path=path,
-        value=value,
-        matrix_path=matrix_path,
-        matrix=matrix,
-        section5_evidence_path=evidence_path,
-        section5_evidence=evidence,
-    )
-
-
-def _validate_section5_evidence_identity(evidence: dict[str, Any]) -> None:
-    expected = {
-        "register_revision": SECTION5_EVIDENCE_REVISION,
-        "protocol_id": PROTOCOL_ID,
-        "workflow_id": WORKFLOW_ID,
-        "authority": "secondary_only",
-        "canonical_publication_eligible": False,
-    }
-    for field, expected_value in expected.items():
-        if evidence.get(field) != expected_value:
-            raise DataContractError(
-                f"Section 5 evidence register {field} must be {expected_value!r}"
-            )
-    claims = evidence.get("claim_families")
-    if not isinstance(claims, list):
-        raise DataContractError("Section 5 evidence register claim_families must be an array")
-    ids = [claim.get("claim_id") for claim in claims if isinstance(claim, dict)]
-    if ids != list(SECTION5_CLAIM_IDS):
-        raise DataContractError(
-            "Section 5 evidence register claim families must be ordered exactly as "
-            f"{list(SECTION5_CLAIM_IDS)}"
-        )
-
-
-def _validate_matrix(matrix: dict[str, Any]) -> None:
-    expected = {
-        "matrix_revision": MATRIX_REVISION,
-        "protocol_id": PROTOCOL_ID,
-        "workflow_id": WORKFLOW_ID,
-        "matcher_id": MATCHER_ID,
-    }
-    for field, expected_value in expected.items():
-        if matrix.get(field) != expected_value:
-            raise DataContractError(
-                f"experiment matrix {field} must be {expected_value!r}"
-            )
-    if matrix.get("training_seeds") != list(TRAINING_SEEDS):
-        raise DataContractError("experiment matrix seed list differs from protocol")
-    rows = matrix.get("conditions")
-    if not isinstance(rows, list):
-        raise DataContractError("experiment matrix conditions must be an array")
-    ids = [row.get("condition_id") for row in rows if isinstance(row, dict)]
-    if ids != list(CONDITION_IDS):
-        raise DataContractError(
-            f"experiment matrix conditions must be ordered exactly as {list(CONDITION_IDS)}"
-        )
-    for row in rows:
-        for field in (
-            "condition_id",
-            "status",
-            "baseline_id",
-            "verifier_mode",
-            "candidate_decision",
-            "end_to_end_emission",
-            "claim_ids",
-            "publication_targets",
-        ):
-            if field not in row:
-                raise DataContractError(
-                    f"experiment matrix row {row.get('condition_id')} lacks {field}"
-                )
-    expected_modes = {
-        "VER-RAW": ("PRIMARY_REFERENCE", None, "none"),
-        "VER-CONFIDENCE": ("PRIMARY", "VER-RAW", "none"),
-        "VER-SIMPLE": ("PRIMARY", "VER-RAW", "simple"),
-        "VER-CORRECTIVE": ("PRIMARY", "VER-RAW", "corrective"),
-    }
-    for row in rows:
-        expected_status, expected_baseline, expected_mode = expected_modes[row["condition_id"]]
-        if (
-            row["status"] != expected_status
-            or row["baseline_id"] != expected_baseline
-            or row["verifier_mode"] != expected_mode
-        ):
-            raise DataContractError(
-                f"experiment matrix row {row['condition_id']} changes its frozen role"
-            )
+    return PipelineConfig(path=path, value=value)

@@ -6,22 +6,7 @@
   "split_id": "CODE-SPLIT-1",
   "canonical_pipeline_config": {
     "path": "resources/configs/pipeline.json",
-    "sha256": "2130818a88a11f0d0778e029e2134aa7101d874b0736c56496263f1103c9fe87"
-  },
-  "historical_source": {
-    "commit": "9feafa4029e65ab48ecfb2f452f4b0fabbff0826",
-    "trainer": {
-      "path": "train_span.py",
-      "git_blob_sha1": "104ca6e4afcb5122228fff5c73227c6b3b3edb40"
-    },
-    "network": {
-      "path": "models/bert_kg_encoder.py",
-      "git_blob_sha1": "d05678f00097cb11176dacef6fade0b1b3f557de"
-    },
-    "data_adapter": {
-      "path": "data/code_accord.py",
-      "git_blob_sha1": "0b11fc6bf2f16512864b4dbf77e7a610d8fa8fdb"
-    }
+    "sha256": "131364740c0513ec7d172bacbd0add7a76eee07a7a1712c31e78584a6f2bb55a"
   },
   "encoder_profiles": [
     {
@@ -29,7 +14,11 @@
       "model": "bert-base-uncased",
       "revision": "86b5e0934494bd15c9632b12f734a8a67f723594",
       "hidden_size": 768,
-      "tokenizer_files": ["tokenizer_config.json", "tokenizer.json", "vocab.txt"],
+      "tokenizer_files": [
+        "tokenizer_config.json",
+        "tokenizer.json",
+        "vocab.txt"
+      ],
       "weight": {
         "path": "pytorch_model.bin",
         "bytes": 440473133,
@@ -44,7 +33,11 @@
       "model": "microsoft/deberta-base",
       "revision": "0d1b43ccf21b5acd9f4e5f7b077fa698f05cf195",
       "hidden_size": 768,
-      "tokenizer_files": ["tokenizer_config.json", "vocab.json", "merges.txt"],
+      "tokenizer_files": [
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt"
+      ],
       "weight": {
         "path": "pytorch_model.bin",
         "bytes": 558614189,
@@ -59,7 +52,11 @@
       "model": "microsoft/deberta-large",
       "revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b",
       "hidden_size": 1024,
-      "tokenizer_files": ["tokenizer_config.json", "vocab.json", "merges.txt"],
+      "tokenizer_files": [
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt"
+      ],
       "weight": {
         "path": "pytorch_model.bin",
         "bytes": 1627222675,
@@ -79,7 +76,7 @@
       "batch_size": 16,
       "max_length": 128,
       "max_span_width": 8,
-      "learning_rate": 0.00003,
+      "learning_rate": 3e-05,
       "warmup_steps": 250,
       "ner_negative_ratio": 3.0,
       "ner_focal_gamma": 2.0,
@@ -106,7 +103,7 @@
       "batch_size": 16,
       "max_length": 128,
       "max_span_width": 8,
-      "learning_rate": 0.00003,
+      "learning_rate": 3e-05,
       "warmup_steps": 250,
       "ner_negative_ratio": 3.0,
       "ner_focal_gamma": 2.0,
@@ -132,48 +129,28 @@
       "row_label": "BERT-base",
       "claim_role": "backbone_capacity",
       "profile_id": "bert-base-uncased",
-      "recipe_id": "historical-common-base",
-      "historical_reported_development": {
-        "mean_f1": 0.3294,
-        "sample_sd": 0.0276,
-        "best_f1": null
-      }
+      "recipe_id": "historical-common-base"
     },
     {
       "arm_id": "deberta-base-common",
       "row_label": "DeBERTa-base",
       "claim_role": "backbone_capacity",
       "profile_id": "deberta-base-v1",
-      "recipe_id": "historical-common-base",
-      "historical_reported_development": {
-        "mean_f1": 0.3639,
-        "sample_sd": 0.0245,
-        "best_f1": null
-      }
+      "recipe_id": "historical-common-base"
     },
     {
       "arm_id": "deberta-large-common",
       "row_label": "DeBERTa-large",
       "claim_role": "backbone_capacity_and_recipe_reference",
       "profile_id": "deberta-large-v1",
-      "recipe_id": "historical-common-base",
-      "historical_reported_development": {
-        "mean_f1": 0.3797,
-        "sample_sd": 0.0346,
-        "best_f1": 0.4288
-      }
+      "recipe_id": "historical-common-base"
     },
     {
       "arm_id": "deberta-large-a20-a21-a12",
       "row_label": "DeBERTa-large + comparison-weight schedule + span-NER label smoothing + inter-span context",
       "claim_role": "recipe_method",
       "profile_id": "deberta-large-v1",
-      "recipe_id": "historical-a20-a21-a12",
-      "historical_reported_development": {
-        "mean_f1": 0.4097,
-        "sample_sd": 0.0356,
-        "best_f1": 0.4746
-      }
+      "recipe_id": "historical-a20-a21-a12"
     }
   ],
   "statistical_protocol": {
@@ -200,10 +177,22 @@
       "pooled_f1"
     ],
     "paired_contrasts": [
-      ["deberta-base-common", "bert-base-common"],
-      ["deberta-large-common", "bert-base-common"],
-      ["deberta-large-common", "deberta-base-common"],
-      ["deberta-large-a20-a21-a12", "deberta-large-common"]
+      [
+        "deberta-base-common",
+        "bert-base-common"
+      ],
+      [
+        "deberta-large-common",
+        "bert-base-common"
+      ],
+      [
+        "deberta-large-common",
+        "deberta-base-common"
+      ],
+      [
+        "deberta-large-a20-a21-a12",
+        "deberta-large-common"
+      ]
     ],
     "missing_run_policy": "retain every outcome; do not replace a failed seed; an arm missing any seed is incomplete and excluded from confirmatory contrasts",
     "historical_statistics_role": "provenance_only"
@@ -214,5 +203,14 @@
     "stop_on_first_nonrecoverable_arm_failure": true,
     "final_test_access": "only after all four arms pass smoke validation and all development runs are complete or dispositioned"
   },
-  "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49]
+  "training_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49
+  ]
 }

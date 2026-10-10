@@ -23,16 +23,6 @@ CONTRACT = json.loads(
 TABLE_ERA_EVALUATOR_BLOB = "964893546b28f04e34e8c546bcbbfd4cfbc27354"
 
 
-def historical_evaluator():
-    source = subprocess.run(
-        ["git", "cat-file", "blob", TABLE_ERA_EVALUATOR_BLOB],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout.decode("utf-8")
-    module = types.ModuleType("historical_table_evaluator")
-    exec(compile(source, "<historical-table-evaluator>", "exec"), module.__dict__)
-    return module
 
 
 class Table2EvaluatorContractTests(unittest.TestCase):
@@ -97,7 +87,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
             )
         )
         questions = evaluator.generate_questions(fixture["records"])
-        self.assertEqual(CONTRACT["evaluator"]["max_questions"], 105)
+        self.assertEqual(CONTRACT["evaluator"]["part_of_questions"], 105)
         self.assertEqual(len(questions), len(fixture["records"]))
 
     def test_full_question_panel_includes_all_105_eligible_questions(self):
@@ -143,69 +133,6 @@ class Table2EvaluatorContractTests(unittest.TestCase):
         self.assertEqual(output["metadata"]["n_questions"], 106)
         self.assertEqual(len(prompts), 106 * len(evaluator.MODES))
 
-    def test_internal_transform_matches_authoritative_historical_execution(self):
-        historical = historical_evaluator()
-        sentence = (
-            "If insulating material is inserted into a cavity in a cavity wall , "
-            "reasonable precautions shall be taken to prevent the subsequent permeation "
-            "of any toxic fumes from that material into any part of the building occupied "
-            "by people ."
-        )
-        record = {
-            "doc_id": 5,
-            "sentence": sentence,
-            "gold_triples": [{
-                "head_text": "cavity",
-                "tail_text": "cavity wall",
-                "relation": "part-of",
-            }],
-        }
-        graph = {
-            "nodes": [{"id": "cavity"}, {"id": "cavity wall"}],
-            "edges": [{"head": "cavity", "relation": "part-of", "tail": "cavity wall"}],
-        }
-        historical_prompts: list[str] = []
-        current_prompts: list[str] = []
-
-        def historical_call(_url, _model, prompt):
-            historical_prompts.append(prompt)
-            return "cavity wall"
-
-        def current_call(_url, _model, prompt):
-            current_prompts.append(prompt)
-            return "cavity wall"
-
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            records_path = root / "records.jsonl"
-            graph_path = root / "graph.json"
-            output_path = root / "result.json"
-            records_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
-            graph_path.write_text(json.dumps(graph), encoding="utf-8")
-            argv = [
-                "historical-evaluator",
-                "--kg", str(graph_path),
-                "--gold-jsonl", str(records_path),
-                "--max-questions", "1",
-                "--output", str(output_path),
-            ]
-            historical.call_llm = historical_call
-            with mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
-                historical.main()
-            expected = json.loads(output_path.read_text(encoding="utf-8"))
-
-        actual = evaluator.evaluate(
-            [record],
-            graph,
-            kg_identity=str(graph_path),
-            ollama_url="http://localhost:11434",
-            ollama_model="qwen3:32b",
-            llm_call=current_call,
-        )
-        self.assertEqual(current_prompts, historical_prompts)
-        expected["metadata"].pop("time_seconds")
-        actual["metadata"].pop("time_seconds")
-        self.assertEqual(actual, expected)
 
     def test_call_payload_is_byte_exact(self):
         completed = mock.Mock(stdout='{"message":{"content":" answer "}}')

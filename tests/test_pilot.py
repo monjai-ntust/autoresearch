@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from utils.common.config import load_pipeline_config
+from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import PROTOCOL_ID
 from utils.common.artifact_io import (
     DataContractError,
@@ -20,12 +20,8 @@ from utils.common.artifact_io import (
 from utils.common.paths import RunLayout, discover_source_root
 from utils.verifier.pilot import PilotInputs, _load_capture_index, run_verifier_pilot
 from utils.common.records import StrictTriple, candidate_id_for
-from utils.verifier.verifier import (
-    _load_candidates,
-    _load_sentences,
-    _verdict_from_response,
-    run_verifier,
-)
+from utils.verifier.verifier import _verdict_from_response, run_verifier
+from utils.verifier.requests import _load_candidates, _load_sentences
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))

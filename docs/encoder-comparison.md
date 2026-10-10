@@ -1,218 +1,77 @@
-# Historical-derived encoder comparison contract
+# Matched Table-1 encoder comparison
 
-`encoder_comparison.py` is the isolated Phase G entry point for the approved
-four-row Table-1-only encoder comparison. Model acquisition and live execution
-remain gated by the smoke, accelerator, storage, and final-test rules below.
+The fresh command coordinates four isolated scientific arms:
 
-## Historical implementation boundary
+| Arm | Backbone | Recipe | Claim role |
+|---|---|---|---|
+| `bert-base-common` | BERT-base uncased | Historical common | Backbone sensitivity |
+| `deberta-base-common` | DeBERTa-base | Historical common | Backbone sensitivity |
+| `deberta-large-common` | DeBERTa-large | Historical common | Backbone/recipe reference |
+| `deberta-large-a20-a21-a12` | DeBERTa-large | A20+A21+A12 | Same-backbone recipe comparison |
 
-The active span/relation model and trainer behavior are bounded transplants
-from source commit `9feafa4029e65ab48ecfb2f452f4b0fabbff0826`:
-
-| Historical authority | Git blob | Current host |
-| --- | --- | --- |
-| `train_span.py` | `104ca6e4afcb5122228fff5c73227c6b3b3edb40` | `utils/encoder_comparison/trainer.py` |
-| `models/bert_kg_encoder.py` | `d05678f00097cb11176dacef6fade0b1b3f557de` | `utils/encoder_comparison/network.py` |
-| `data/code_accord.py` label/batch contract | `0b11fc6bf2f16512864b4dbf77e7a610d8fa8fdb` | comparison-only adapter in `utils/encoder_comparison/data.py` |
-
-Inactive historical experimental branches are not restored. Two recipes are
-retained because they correspond to populated draft rows. The common base uses
-BIO weight `0.1`, negative ratio `3.0`, no label smoothing, no inter-span
-context, and no comparison boost. The method recipe preserves A12 inter-span
-context, A21 label smoothing, `NO_REL=1.0`, and the effective A20 behavior in
-the current canonical pipeline: linear `5x -> 2x` decay plus a one-time
-development gate. A middle-threshold result applies `3.5x` for exactly the gate
-batch, then the switched state uses `2x`.
-
-## Current utility reuse boundary
-
-The comparison controller calls `stages.preparation.run` directly, so dataset
-acquisition, relation reconstruction, `CODE-SPLIT-1`, and prepared JSONL are
-identical to the canonical path. It also reuses:
-
-- `utils.encoder.data` unchanged for prepared-record loading, canonical item/
-  batch construction, and the resumable sampler; the comparison-only adapter
-  appends historical first-subword BIO labels, words, and example IDs;
-- `utils.encoder.cache` for the run-local Hugging Face cache manifest;
-- `utils.encoder.model.generate_candidates` for deterministic prediction-
-  ledger replay into the canonical candidate contract; and
-- `utils.common` for configuration, path containment, hashes, manifests, and
-  record identities.
-
-Historical-derived code owns encoder construction, loss, optimizer, schedule,
-development checkpoint selection, and raw prediction-ledger production.
-Current shared code owns the corrected data boundary and artifact lineage.
-
-## Profile and run contract
-
-`resources/configs/encoder-comparison.json` is a finite registry and the
-machine-readable experiment/statistics contract. Each profile
-pins a model name, immutable 40-hex model-repository revision, expected hidden
-size, tokenizer assets, weight byte count/SHA-256, license, and source. The
-exact base-parameter count is derived at G-05 by summing every tensor element
-in the pinned `pytorch_model.bin` state dict after digest verification. Recipe
-selection is independent from backbone selection, but runtime commands accept
-only one of the four approved profile/recipe arms. Model construction
-explicitly loads the pinned `pytorch_model.bin` form rather than allowing a
-repository's optional safetensors preference to select different bytes.
-
-| Arm ID | Table 1 role |
-| --- | --- |
-| `bert-base-common` | BERT-base backbone control |
-| `deberta-base-common` | DeBERTa-base backbone control |
-| `deberta-large-common` | DeBERTa-large backbone and recipe reference |
-| `deberta-large-a20-a21-a12` | DeBERTa-large method row |
-
-The old draft values are stored only as provenance. They are not inputs,
-acceptance thresholds, or values to tune toward. Augmentation, external-system,
-local-Qwen, Cui/focal, and optional-modern-encoder placeholders are outside the
-approved matrix because they do not have an eligible populated Table 1 result.
-
-One run binds to exactly one approved arm in
-`manifests/encoder-comparison-selection.json`. Every model cache, checkpoint,
-restart state, prediction ledger, and candidate file stays below that physical
-run. A different profile, run ID, revision, or model digest fails closed.
-
-Offline validation does not acquire a model or create a run:
+The bounded historical trainer/network remains separate from the canonical
+trainer. Both consume canonical preparation and compatible shared utilities.
+Frozen profile revisions, exact weight sizes/SHA-256, tokenizer files, recipes,
+seeds and statistical declarations live once in
+[`encoder-comparison.json`](../resources/configs/encoder-comparison.json).
+Historical development statistics are not new fixed-test results.
 
 ```bash
-uv run --frozen --no-sync python -I -B encoder_comparison.py \
-  validate-profile --profile bert-base-uncased
-
-uv run --frozen --no-sync python -I -B encoder_comparison.py \
-  validate-arm --arm bert-base-common
+uv run --frozen --no-sync python -I -B encoder_comparison.py validate
+uv run --frozen --no-sync python -I -B encoder_comparison.py run --matrix-id comparison-001
 ```
 
-The implemented lifecycle commands are `recover-checkout`, `prepare`, `smoke`,
-`record-admission`, `plan-training`, `train`, and `generate`; each takes
-`--arm`. The four arms and statistical protocol are frozen. `pipeline.py` has
-no import or dispatch route to this comparison path.
+The second command creates `output/comparison-001/` and four member roots named
+`output/comparison-001-<arm>/`. Choose a matrix ID short enough that every derived
+run ID satisfies the 64-character rule. Each arm acquires its own dataset/model
+inputs; imported checkpoints or another run's cache are forbidden. Repeat the
+command unchanged to continue validated durable progress.
 
-### Recover a checkout-only failure
+## Automatic stage barriers
 
-If an earlier `prepare` failed solely because source was dirty, its immutable
-checkout manifest records `status: blocked`. Cleaning the source does not turn
-that old observation into a pass. Do not remove the admission check, edit the
-old status, delete the run, or copy another run's artifacts. A commit is the
-source definition; a checkout manifest is evidence of the actual execution
-environment and admission outcome.
+First all four arms complete authenticated seed-42 smokes: one CUDA step,
+development evaluation, restart-state reload, selected-checkpoint round-trip,
+one-record candidate ledger, frozen cache identity and exact base-parameter
+count. Smoke and full training use separate processes; smoke weights never
+initialize full training. The fresh lifecycle has no manual admission action,
+pause or replacement admission artifact.
 
-For a run containing only that blocked checkout (and any verified evidence from
-earlier recovery attempts), use the explicit same-run retry:
+Then the four arms train seeds 42–49. All 32 development runs and selected
+checkpoints must validate before any member performs final-test inference or
+inspects test outcomes. Preparation may materialize the fixed held-out split.
+The coordinator and private workers enforce identical gates. Matrix membership,
+actual clean source/configuration identity and model hashes cannot change.
 
-```bash
-uv run --frozen --no-sync python -I -B encoder_comparison.py \
-  recover-checkout --arm bert-base-common --run-id g05-bert-base-common
-```
+Each full training/inference invocation requires 200,000,000,000 free storage
+bytes. The matrix enforces the frozen cumulative 48-hour full-execution bound
+using elapsed accelerator-job wall time. Failed and resumed invocations are
+charged; abandoned starts without finishes are conservatively charged through
+reinvocation. This is a policy bound, not measured GPU utilization. Exhaustion
+fails without replacing arms, resetting the budget or deleting evidence.
+Bounded smoke retains its separate frozen policy.
 
-Recovery verifies run/configuration identity and Git ancestry, preserves the
-exact failed bytes in `audit/checkout-recovery/blocked-checkout-<sha256>.json`,
-and invokes the unchanged checkout doctor against current source. Every fresh
-attempt and recovery receipt is content-addressed and hash-verified in that
-same audit namespace. Only after fresh admission and a source recheck pass
-does it atomically install the new checkout manifest, reporting
-`checkout-admitted`. If the fresh doctor fails, the original manifest remains
-unchanged and the new failure is retained. Recovery refuses any acquired,
-prepared, selection, model, checkpoint, smoke, or unknown artifact, as well as
-foreign identities, changed configuration, non-ancestor source, evidence
-tampering, symlinks, and active/interrupted recovery locks.
+## Deliberate scientific details
 
-Recovery does not acquire data or models, run a smoke, admit training, or open
-final test. Run it for all blocked arms before starting any preparation or
-smoke. Then continue with normal `prepare` and `smoke` under the same run IDs.
-Do not update source between recovery, preparation, and smoke: normal resume
-still requires the admitted source commit. Preserve any interrupted lock or
-unexpected artifact for diagnosis instead of forcing or deleting it.
+CODE-SPLIT-1, seeds 42–49, typed strict triples and development-only selection
+are common. `NO_REL=1.0` belongs to historical CODE behavior. A20 uses linear
+5×→2× decay and a one-time adaptive gate; its 3.5× middle value lasts one batch.
+A21 applies span-NER label smoothing; A12 uses inter-span context. Initialized
+heads unused by a recipe remain because changing initialization changes RNG.
 
-After `prepare`, run one bounded seed-42 smoke in the same arm-specific run:
+Parameter counting verifies full pinned weight bytes before loading and sums
+tensor elements. Only the pinned DeBERTa-large embedded `config` dictionary is
+excluded as known metadata; unexpected metadata or tensor-free files fail.
 
-```bash
-uv run --frozen --no-sync python -I -B encoder_comparison.py \
-  smoke --arm bert-base-common --run-id phase-g-bert-base-common \
-  --training-seed 42
-```
+## Reports and execution boundary
 
-The smoke acquires and freezes the pinned model in that run, requires CUDA,
-executes one training step and development evaluation, loads the restart state,
-verifies the selected checkpoint is unchanged, and generates a one-record raw
-prediction ledger. It writes
-`manifests/encoder-comparison-smoke.json` with status
-`smoke-complete-awaiting-admission`; smoke output cannot populate Table 1.
+Each arm writes authenticated per-seed strict P/R/F1/counts, mean, sample SD,
+tied best seeds and recorded training cost under `reports/comparison/`. The
+coordinator references isolated reports under `reports/matrix/`. Predeclared but
+unimplemented/unrecorded inferential measurements are unavailable; Phase I adds
+no experiment or statistical procedure. Other-backbone rows support sensitivity,
+not method-superiority claims.
 
-Review the smoke manifest, log, model digest, tokenizer behavior, memory, and
-candidate row before recording `admit` or `reject` with a nonblank reason:
-
-```bash
-uv run --frozen --no-sync python -I -B encoder_comparison.py \
-  record-admission --arm bert-base-common \
-  --run-id phase-g-bert-base-common --decision admit \
-  --reason "reviewed external G-05 evidence"
-```
-
-`train` fails closed without an admitted decision bound to the exact smoke
-manifest. Admission does not grant final-test access: all admitted development
-runs must complete or receive a retained disposition before the separate
-final-test gate in the frozen protocol.
-
-### Finalize a completed smoke after the parameter-counter failure
-
-The pinned DeBERTa-large checkpoint embeds a `config` dictionary alongside its
-tensors. Parameter counting excludes that known metadata only for the
-DeBERTa-large profile, verifies the complete weight file's size and SHA-256
-before loading, and rejects other non-tensor entries and tensor-free files.
-The pinned revision, model bytes, tensor-count definition, and recipes do not
-change. Microsoft's [checkpoint loader](https://github.com/microsoft/DeBERTa/blob/master/DeBERTa/deberta/cache_utils.py)
-also treats the embedded `config` as configuration metadata.
-
-If a smoke finished its CUDA work and wrote `roundtrip.json` before parameter
-counting failed, repeat only `smoke` under the unchanged arm/run/seed identity.
-The controller validates the retained training/resume summaries, checkpoint
-hash, candidate ledger, and frozen cache before writing the missing manifest.
-It does not invoke the model again in this finalization path. Missing or
-inconsistent evidence fails closed. A completed smoke remains awaiting review;
-this repair does not record admission, train, or access final test.
-
-For the reported `g05-deberta-large-common` failure, run from the standalone
-source checkout, with the existing environment already synchronized:
-
-```bash
-set -euo pipefail
-git pull --ff-only origin publication-refactored-rag
-run_id=g05-deberta-large-common
-test -f "output/$run_id/diagnostics/encoder-comparison-smoke/roundtrip.json"
-test -f "output/$run_id/manifests/huggingface-model-cache.json"
-log="output/$run_id/logs/smoke-finalize-$(date -u +%Y%m%dT%H%M%S%N)-$$.log"
-mkdir -p "output/$run_id/logs"
-{
-  printf 'Repair source: '
-  git rev-parse HEAD
-  PYTHONUNBUFFERED=1 DISABLE_SAFETENSORS_CONVERSION=1 \
-    uv run --frozen --no-sync python -I -B -u encoder_comparison.py \
-      smoke --arm deberta-large-common --run-id "$run_id" --training-seed 42
-} 2>&1 | tee "$log"
-printf 'Return log: %s\nSmoke manifest: output/%s/manifests/encoder-comparison-smoke.json\n' \
-  "$log" "$run_id"
-```
-
-Preserve the original producer manifests and every existing run directory.
-Do not repeat `prepare` or use `recover-checkout` for these already prepared
-runs: checkout-only recovery deliberately refuses downstream artifacts, and
-preparation's original checkout guard remains unchanged. The log records the
-repair source separately from the original producer commit. Return that log
-and the newly finalized smoke manifest for review. Do not reuse the older
-external launcher that deleted run directories. The fourth arm still needs
-its separately reviewed smoke; this command only finalizes the reported arm.
-
-## Validation boundary
-
-Focused tests resolve the historical Git blobs, validate every profile and arm without
-network access, reject unknown/mutable profiles and model digest drift, verify
-hidden-size-dependent heads, preserve the one-batch A20 middle value, exercise
-prepared-data/BIO compatibility, reject profile or run substitution, and prove
-every executable/resource file in the original Phase F pipeline flow remains
-byte-identical to `5db3bce`. The full canonical test suite must also pass. These
-are static and CPU-local
-contracts. The live `smoke` command supplies tokenizer, forward/backward,
-checkpoint, restart, candidate-ledger, and accelerator evidence; its output and
-full-run admission still require external review. Scientific outcomes remain
-later gates.
+Offline tests use source-grounded bytes and synthetic CPU fault fixtures. Live
+CUDA behavior, exact parameter count and fresh full outcomes require external
+execution and review. Existing partial G-05 runs remain on the pinned repair/
+review workflow in [workflow.md](workflow.md); this command cannot adopt them.

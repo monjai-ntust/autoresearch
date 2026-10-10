@@ -9,7 +9,7 @@ from pathlib import Path
 
 from stages.encoder import _validate_candidate_assembly
 from stages.verifier import _validate_pilot_inputs, _validate_threshold
-from utils.common.config import load_pipeline_config
+from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import PROTOCOL_ID, TRAINING_SEEDS
 from utils.common.paths import RunLayout, discover_source_root
 from utils.common.artifact_io import (
@@ -130,6 +130,10 @@ class PublicationAssemblyTests(unittest.TestCase):
                 threshold["development_candidate_index_sha256"], sha256_file(index_path)
             )
             _validate_threshold(layout, self.config)
+            original = layout.resolve("predictions/dev/development-candidates.jsonl").read_bytes()
+            index_path.unlink()
+            assemble_seed_candidates(layout, self.config, split="development")
+            self.assertEqual(layout.resolve("predictions/dev/development-candidates.jsonl").read_bytes(), original)
 
             pilot = prepare_verifier_pilot(layout, self.config)
             self.assertEqual(pilot["candidate_count"], 8)

@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from utils.common.config import load_pipeline_config
+from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import PROTOCOL_ID
 from utils.common.artifact_io import (
     DataContractError,
@@ -139,6 +139,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "invalid-live-cache")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences, candidates = _write_inputs(layout)
             warmup_sentences = layout.resolve("data-prepared/development.jsonl")
             warmup_candidates = layout.resolve(
@@ -181,6 +182,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), f"plan-{mode}")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences, candidates = _write_inputs(layout)
             manifest = run_verifier(
                 layout,
@@ -200,6 +202,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "dry-simple")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences, candidates = _write_inputs(layout)
             manifest = run_verifier(
                 layout,
@@ -241,6 +244,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "prefixed-simple")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences, candidates = _write_inputs(layout)
             manifest = run_verifier(
                 layout,
@@ -263,6 +267,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "replay-simple")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences, candidates = _write_inputs(layout)
             response_path = layout.resolve("inputs/simple-responses.jsonl")
             response = _response_record(
@@ -318,6 +323,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "pilot-cache-rejected")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             placeholder = layout.resolve("inputs/placeholder")
             with self.assertRaisesRegex(
                 DataContractError, "cannot use a response cache ledger"
@@ -405,6 +411,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "replay-corrective")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences, candidates = _write_inputs(layout)
             response_path = layout.resolve("inputs/corrective-responses.jsonl")
             content = json.dumps(
@@ -446,6 +453,7 @@ class VerifierReplayTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "live-simple")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             sentences = layout.resolve("data-prepared/development-pilot.jsonl")
             candidates = layout.resolve("predictions/dev/pilot-candidates.jsonl")
             atomic_write_jsonl(sentences, [_sentence(split="development")])
@@ -585,6 +593,7 @@ class LiveModelIdentityTests(unittest.TestCase):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "model-proof")
             layout.create()
+            atomic_write_json(layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "3"*40}})
             blob = layout.resolve("inputs/ollama/model-blob")
             blob.parent.mkdir(parents=True)
             blob.write_bytes(b"fixture")

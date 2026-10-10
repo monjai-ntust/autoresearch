@@ -29,9 +29,9 @@ class PipelineEntrypointTests(unittest.TestCase):
         self.assertTrue(ENTRYPOINT.is_file())
         self.assertFalse((SOURCE_ROOT / "phase_b.py").exists())
         self.assertFalse((SOURCE_ROOT / "phase_b.sh").exists())
-        self.assertIn('prog="python pipeline.py"', PIPELINE_SOURCE)
-        self.assertIn('"full"', PIPELINE_SOURCE)
-        self.assertIn('"table2"', PIPELINE_SOURCE)
+        self.assertIn('commands.add_parser("run"', PIPELINE_SOURCE)
+        self.assertIn('"run"', PIPELINE_SOURCE)
+        self.assertTrue((SOURCE_ROOT / "rag.py").is_file())
 
     def test_help_is_available_without_data_model_or_network_access(self):
         completed = subprocess.run(
@@ -41,8 +41,8 @@ class PipelineEntrypointTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertIn("full", completed.stdout)
-        self.assertIn("table2", completed.stdout)
+        self.assertIn("run", completed.stdout)
+        self.assertIn("validate", completed.stdout)
         for removed in (
             "doctor",
             "fetch",
@@ -56,17 +56,16 @@ class PipelineEntrypointTests(unittest.TestCase):
 
     def test_full_pipeline_keeps_the_approved_stage_order(self):
         start = PIPELINE_SOURCE.index("def _run_full_pipeline(")
-        end = PIPELINE_SOURCE.index("\ndef _parser(", start)
+        end = PIPELINE_SOURCE.index("\ndef main(", start)
         body = PIPELINE_SOURCE[start:end]
         ordered = (
-            "run_preparation(",
+            "prepare(",
             "train_and_generate_development(",
             "prepare_development_gate(",
-            "run_verifier_pilot(",
+            "run_pilot(",
             "generate_test_candidates(",
-            "run_verifier_test(",
-            "run_evaluation(",
-            "run_rag(",
+            "run_test(",
+            "evaluate(",
         )
         positions = [body.index(token) for token in ordered]
         self.assertEqual(positions, sorted(positions))
@@ -96,7 +95,7 @@ class PipelineEntrypointTests(unittest.TestCase):
         ]
         self.assertEqual(
             definitions,
-            ["_run_full_pipeline", "_parser", "_run_private_trainer", "main"],
+            ["_run_full_pipeline", "main"],
         )
         self.assertLessEqual(len(PIPELINE_SOURCE.splitlines()), 200)
 
@@ -138,7 +137,7 @@ class PipelineEntrypointTests(unittest.TestCase):
                 "_validate_generation_stage",
                 return_value=manifest,
             ) as validate, mock.patch.object(
-                encoder_stage, "_write_same_run_seal"
+                encoder_stage, "write_stage_receipt"
             ) as seal, mock.patch.object(
                 encoder_stage, "generate_candidates"
             ) as generate:
@@ -179,7 +178,7 @@ class PipelineEntrypointTests(unittest.TestCase):
             with mock.patch.object(
                 verifier_stage, "run_verifier", return_value=manifest
             ) as verifier, mock.patch.object(
-                verifier_stage, "_write_same_run_seal"
+                verifier_stage, "write_stage_receipt"
             ), mock.patch.object(
                 verifier_stage, "_validate_verifier_stage", return_value=manifest
             ):
@@ -195,17 +194,16 @@ class PipelineEntrypointTests(unittest.TestCase):
                     ollama_url="http://localhost:11434",
                     artifact_prefix=prefix,
                     pilot_selection=inputs["pilot-selection.json"],
-                    allow_response_cache=False,
                 )
             call = verifier.call_args.kwargs
-            self.assertIsNone(call["cache_ledger_path"])
+            self.assertIsNone(call.get("cache_ledger_path"))
             self.assertEqual(call["artifact_prefix"], prefix)
             self.assertEqual(call["pilot_selection_path"], inputs["pilot-selection.json"])
-            self.assertFalse(request.exists())
+            self.assertTrue(request.exists())
             quarantine = layout.resolve(
                 "inputs/recovery/quarantine/verifier-pilot-simple-repeat-1-simple"
             )
-            self.assertEqual(len(list(quarantine.glob("*-requests.jsonl"))), 1)
+            self.assertFalse(quarantine.exists())
 
     def test_private_trainer_inputs_are_bound_to_preparation_before_import(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -11,7 +11,7 @@ from typing import Any
 
 from utils.common.config import PipelineConfig
 from utils.common.constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from utils.common.artifact_io import atomic_write_json, sha256_file
+from utils.common.artifact_io import atomic_write_json, atomic_write_bytes, sha256_file
 from utils.common.paths import RunLayout
 
 
@@ -138,11 +138,14 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
         )
     )
 
-    layout.create()
+    layout.create(allow_lock_only=True)
     passed = all(item["status"] == "pass" for item in checks)
     config_relative = config.path.relative_to(source_root).as_posix()
+    run_local_config = "inputs/config/pipeline.json"
+    atomic_write_bytes(layout.resolve(run_local_config), config.path.read_bytes())
     manifest = {
         "schema_version": "phase-b-checkout-manifest-2.0",
+        "lifecycle_version": 1,
         "protocol_id": PROTOCOL_ID,
         "workflow_id": WORKFLOW_ID,
         "matcher_id": MATCHER_ID,
@@ -154,6 +157,7 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
             "config": {
                 "path": config_relative,
                 "sha256": sha256_file(config.path),
+                "run_local_path": run_local_config,
             },
         },
         "environment": {

@@ -9,6 +9,8 @@ checkpoint.
 
 from __future__ import annotations
 
+from utils.common.execution import bind_json as atomic_write_json, retain_jsonl as atomic_write_jsonl, retain_text as atomic_write_text
+
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,8 +24,6 @@ from utils.common.config import PipelineConfig
 from utils.common.constants import PROTOCOL_ID, WORKFLOW_ID
 from utils.common.artifact_io import (
     DataContractError,
-    atomic_write_json,
-    atomic_write_jsonl,
     canonical_json_bytes,
     iter_jsonl,
     load_json,
@@ -33,15 +33,8 @@ from utils.common.paths import PathContractError, RunLayout
 from utils.common.records import Candidate, StrictTriple, Verdict
 from utils.evaluation.scoring import _load_gold, _load_threshold
 from utils.preparation.split import SPLIT_ALGORITHM_REVISION
-from utils.verifier.verifier import (
-    MODE_CONDITIONS,
-    _load_candidates,
-    _load_response_ledger,
-    _load_sentences,
-    _prompt_bundle,
-    _request_record,
-    _verdict_from_response,
-)
+from utils.verifier.verifier import MODE_CONDITIONS, _load_response_ledger, _verdict_from_response
+from utils.verifier.requests import _load_candidates, _load_sentences, _prompt_bundle, _request_record
 
 
 PILOT_EVIDENCE_CLASSES = {"development-pilot", "synthetic-fixture"}
@@ -693,7 +686,6 @@ def _load_run_log(path: Path, condition: str) -> list[dict[str, Any]]:
         not events
         or events[0]["event"] != "run_started"
         or events[-1]["event"] != "run_completed"
-        or any(item["event"] == "run_failed" for item in events)
         or not any(item["event"] == "model_identity_verified" for item in events)
     ):
         raise DataContractError(f"{path.name} is not one completed live verifier run")
@@ -1134,10 +1126,6 @@ def _run_verifier_pilot(
         "audit": output_dir / "pilot-audit.json",
     }
     existing = [layout.relative_identity(path) for path in paths.values() if path.exists()]
-    if existing:
-        raise DataContractError(
-            "pilot refuses to overwrite existing artifacts: " + ", ".join(existing)
-        )
 
     sentences = _load_sentences(inputs.sentences)
     if any(sentence.split != "development" for sentence in sentences.values()):

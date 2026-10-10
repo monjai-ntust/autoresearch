@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from utils.common.config import load_pipeline_config
+from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import PROTOCOL_ID
 from utils.encoder.cache import (
     MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE,
@@ -32,7 +32,7 @@ from utils.common.artifact_io import (
 )
 from utils.common.paths import RunLayout, discover_source_root
 from utils.common.records import EntitySpan, StrictTriple, candidate_id_for
-from utils.verifier.verifier import _load_candidates, _load_sentences
+from utils.verifier.requests import _load_candidates, _load_sentences
 
 
 SOURCE_ROOT = discover_source_root(Path(__file__))
@@ -70,7 +70,7 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
     development = layout.resolve("data-prepared/development.jsonl")
     compatibility = layout.resolve("audit/model-training-dataset-compatibility.json")
     return {
-        "schema_version": "phase-b-model-checkpoint-manifest-3.0",
+        "schema_version": "encoder-checkpoint-1",
         "protocol_id": PROTOCOL_ID,
         "split_id": "CODE-SPLIT-1",
         "training_seed": 42,
@@ -110,9 +110,6 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
         "restart_state_sha256": sha256_file(
             layout.resolve("checkpoints/seed-42/restart-state.pt")
         ),
-        "dataset_compatibility_report": "audit/model-training-dataset-compatibility.json",
-        "dataset_compatibility_sha256": sha256_file(compatibility),
-        "historical_comparability": "partial_match_full_legacy_equivalence_unavailable",
     }
 
 
@@ -455,7 +452,7 @@ class ModelAdapterTests(unittest.TestCase):
                     checkpoint_blob_path=checkpoint,
                 )
 
-    def test_replay_refuses_to_overwrite_existing_candidates(self):
+    def test_replay_continues_without_changing_existing_candidates(self):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "no-overwrite")
             layout.create()
@@ -471,8 +468,8 @@ class ModelAdapterTests(unittest.TestCase):
                 candidates_out_path=candidates,
                 prediction_ledger_path=ledger,
             )
-            with self.assertRaises(DataContractError):
-                generate_candidates(
+            before = candidates.read_bytes()
+            generate_candidates(
                     layout,
                     self.config,
                     execution_mode="replay",
@@ -481,6 +478,7 @@ class ModelAdapterTests(unittest.TestCase):
                     candidates_out_path=candidates,
                     prediction_ledger_path=ledger,
                 )
+            self.assertEqual(candidates.read_bytes(), before)
 
     def test_checkpoint_recipe_mismatch_is_rejected(self):
         with _temporary_output_directory() as temporary:
@@ -561,13 +559,6 @@ class ModelTrainTests(unittest.TestCase):
                 "inputs/extracted/CODE-ACCORD-v1.0.0-annotations/"
                 "annotated_data/entities/train.csv"
             )
-            historical = SOURCE_ROOT / "resources/data/code-accord-entities-train.csv"
-            historical_copy = (
-                layout.source_root / "resources/data/code-accord-entities-train.csv"
-            )
-            atomic_write_bytes(
-                historical_copy, historical.read_bytes().replace(b"\r\n", b"\n")
-            )
             atomic_write_bytes(layout.source_root / "stages/encoder.py", b"trainer\n")
             atomic_write_bytes(
                 layout.source_root / "utils/encoder/data.py", b"adapter\n"
@@ -576,7 +567,7 @@ class ModelTrainTests(unittest.TestCase):
                 layout.source_root / "utils/encoder/network.py", b"model\n"
             )
             atomic_write_bytes(
-                extracted, historical.read_bytes().replace(b"\r\n", b"\n")
+                extracted, b"fixture annotation input\n"
             )
             layout.resolve(HF_CACHE_MANIFEST_RELATIVE, must_exist=True).unlink()
             layout.resolve(
@@ -590,7 +581,7 @@ class ModelTrainTests(unittest.TestCase):
                 trainer_command = canonical_trainer_arguments(layout, self.config, 42)
                 observed_trainer_commands.append(trainer_command)
                 restart = Path(
-                    trainer_command[trainer_command.index("--save-last-to") + 1]
+                    trainer_command.save_last_to
                 )
                 atomic_write_bytes(restart, b"partial restart")
                 raise subprocess.CalledProcessError(9, command)
@@ -608,12 +599,12 @@ class ModelTrainTests(unittest.TestCase):
                 observed_commands.append(command)
                 trainer_command = canonical_trainer_arguments(layout, self.config, 42)
                 observed_trainer_commands.append(trainer_command)
-                self.assertIn("--resume-from", trainer_command)
-                checkpoint = Path(trainer_command[trainer_command.index("--save-best-to") + 1])
-                restart = Path(trainer_command[trainer_command.index("--save-last-to") + 1])
-                summary = Path(trainer_command[trainer_command.index("--run-summary-out") + 1])
-                progress = Path(trainer_command[trainer_command.index("--progress-log") + 1])
-                cache_dir = Path(trainer_command[trainer_command.index("--model-cache-dir") + 1])
+                self.assertIsNotNone(trainer_command.resume_from)
+                checkpoint = Path(trainer_command.save_best_to)
+                restart = Path(trainer_command.save_last_to)
+                summary = Path(trainer_command.run_summary_out)
+                progress = Path(trainer_command.progress_log)
+                cache_dir = Path(trainer_command.model_cache_dir)
                 atomic_write_bytes(cache_dir / "models--fixture/blobs/model.bin", b"model\n")
                 atomic_write_bytes(checkpoint, b"checkpoint")
                 atomic_write_bytes(restart, b"restart")
@@ -646,14 +637,10 @@ class ModelTrainTests(unittest.TestCase):
                 command_runner=completed,
             )
             self.assertEqual(manifest["status"], "completed")
-            self.assertEqual(
-                manifest["historical_comparability"],
-                "partial_match_full_legacy_equivalence_unavailable",
-            )
             self.assertTrue(manifest["resume"]["resumed"])
             self.assertEqual(observed_commands[-1][3], "_train-encoder")
             self.assertNotIn("--prepared-dir", observed_commands[-1])
-            self.assertIn("--model-cache-dir", observed_trainer_commands[-1])
+            self.assertIsNotNone(observed_trainer_commands[-1].model_cache_dir)
             checkpoint_manifest = layout.resolve(
                 "checkpoints/seed-42/checkpoint-manifest.json"
             )
@@ -662,19 +649,12 @@ class ModelTrainTests(unittest.TestCase):
             )
             self.assertEqual(
                 checkpoint_value["schema_version"],
-                "phase-b-model-checkpoint-manifest-4.0",
+                "encoder-checkpoint-1",
             )
             self.assertNotIn("trainer_sha256", checkpoint_value)
             self.assertNotIn("data_adapter_sha256", checkpoint_value)
             self.assertNotIn("model_helper_sha256", checkpoint_value)
             self.assertEqual(checkpoint_value["checkpoint_step"], 100)
-            self.assertFalse(
-                json.loads(
-                    layout.resolve(
-                        "audit/model-training-dataset-compatibility.json"
-                    ).read_text(encoding="utf-8")
-                )["historical_statistical_continuity_claim_permitted"]
-            )
             self.assertEqual(
                 _validate_training_stage(
                     layout, self.config, 42, execution_mode="live"
@@ -684,7 +664,7 @@ class ModelTrainTests(unittest.TestCase):
             atomic_write_bytes(
                 layout.resolve("checkpoints/seed-42/checkpoint.pt"), b"tampered"
             )
-            with self.assertRaisesRegex(DataContractError, "checkpoint bytes"):
+            with self.assertRaisesRegex(DataContractError, "producer output changed"):
                 _validate_training_stage(
                     layout, self.config, 42, execution_mode="live"
                 )

@@ -44,6 +44,8 @@ def run(
             ),
         )
     _validate_score(layout, config)
+    from utils.evaluation.reporting import report_canonical
+    report_canonical(layout, config)
 
 
 def _validate_score(layout: RunLayout, config) -> dict:

@@ -26,22 +26,22 @@ The stage has three implemented executions:
 
 from __future__ import annotations
 
-import hashlib
+from utils.encoder.options import EncoderOptions
+
+from utils.encoder.runtime import training_environment
+from utils.encoder.inference import _live_inference_records
+
+from utils.encoder.candidates import PredictionLedgerIdentity, _SPLIT_ID, _exact_keys, _integer, _load_prediction_ledger, _unit_float
+
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from utils.common.config import PipelineConfig
-from utils.common.constants import (
-    ENTITY_TYPES,
-    MATCHER_ID,
-    PROTOCOL_ID,
-    RELATION_TYPES,
-    TRAINING_SEEDS,
-)
+from utils.common.constants import MATCHER_ID, PROTOCOL_ID, TRAINING_SEEDS
 from utils.encoder.cache import (
     CACHE_RELATIVE,
     MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE,
@@ -56,55 +56,15 @@ from utils.common.artifact_io import (
     load_json,
     iter_jsonl,
     sha256_file,
+    canonical_json_bytes,
+    atomic_write_bytes,
 )
-from utils.common.records import Candidate, EntitySpan, StrictTriple, candidate_id_for
-from utils.verifier.verifier import PreparedSentence, _load_sentences, _source_text
+from utils.verifier.requests import PreparedSentence, _load_sentences
 
 EXECUTION_MODES = {"dry-run", "replay", "live"}
 TRAIN_EXECUTION_MODES = {"dry-run", "live"}
-_SPLIT_ID = "CODE-SPLIT-1"
-_CONFIDENCE_PRECISION = 6
-_HISTORICAL_ENTITY_TRAIN_SHA256 = (
-    "c13ad02ab72f0f3a3ddca588c02bcd5d7db1622ae81351d967431623963e4fcd"
-)
-_HISTORICAL_ENTITY_TRAIN_GIT_BLOB = "1b74f4a7d3693a903d93690adffcc2ef4f276bea"
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _exact_keys(
-    value: dict[str, Any], required: set[str], label: str, optional: set[str] | None = None
-) -> None:
-    optional = optional or set()
-    if not isinstance(value, dict):
-        raise DataContractError(f"{label} must be an object")
-    missing = sorted(required - set(value))
-    extra = sorted(set(value) - required - optional)
-    if missing:
-        raise DataContractError(f"{label} is missing required fields: {', '.join(missing)}")
-    if extra:
-        raise DataContractError(f"{label} contains unsupported fields: {', '.join(extra)}")
-
-
-def _integer(value: Any, label: str, *, minimum: int | None = None) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise DataContractError(f"{label} must be an integer")
-    if minimum is not None and value < minimum:
-        raise DataContractError(f"{label} must be >= {minimum}")
-    return value
-
-
-def _unit_float(value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise DataContractError(f"{label} must be numeric")
-    number = float(value)
-    if number != number or number in (float("inf"), float("-inf")):
-        raise DataContractError(f"{label} must be finite")
-    if not 0.0 <= number <= 1.0:
-        raise DataContractError(f"{label} must be in [0, 1]")
-    return number
 
 
 @dataclass(frozen=True)
@@ -125,23 +85,6 @@ class CheckpointIdentity:
     model_cache_tree_sha256: str
     source_commit: str
     restart_state_sha256: str
-    dataset_compatibility_sha256: str
-
-
-@dataclass(frozen=True)
-class ScoredSpan:
-    start: int
-    end: int
-    entity_type: str
-    confidence: float
-
-
-@dataclass(frozen=True)
-class PredictionLedgerIdentity:
-    """Minimal immutable checkpoint identity needed for offline ledger replay."""
-
-    training_seed: int
-    max_span_width: int
 
 
 def _sha256_hex(value: Any, label: str) -> str:
@@ -182,16 +125,12 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             "selected_metric",
             "selected_metric_value",
             "restart_state_sha256",
-            "dataset_compatibility_report",
-            "dataset_compatibility_sha256",
-            "historical_comparability",
         },
         label,
         optional={"trainer_sha256", "data_adapter_sha256", "model_helper_sha256"},
     )
     if value["schema_version"] not in {
-        "phase-b-model-checkpoint-manifest-3.0",
-        "phase-b-model-checkpoint-manifest-4.0",
+        "encoder-checkpoint-1",
     }:
         raise DataContractError(f"{label}.schema_version is unsupported")
     if value["protocol_id"] != PROTOCOL_ID:
@@ -211,12 +150,8 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
     if value["selected_metric"] != "development_strict_triple_f1":
         raise DataContractError(f"{label}.selected_metric is unsupported")
     _unit_float(value["selected_metric_value"], f"{label}.selected_metric_value")
-    if value["dataset_compatibility_report"] != "audit/model-training-dataset-compatibility.json":
-        raise DataContractError(f"{label}.dataset_compatibility_report is unsupported")
     if value["model_cache_manifest"] != HF_CACHE_MANIFEST_RELATIVE:
         raise DataContractError(f"{label}.model_cache_manifest is unsupported")
-    if value["historical_comparability"] != "partial_match_full_legacy_equivalence_unavailable":
-        raise DataContractError(f"{label}.historical_comparability is unsupported")
     source_commit = value["source_commit"]
     if (
         not isinstance(source_commit, str)
@@ -264,395 +199,7 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
         restart_state_sha256=_sha256_hex(
             value["restart_state_sha256"], f"{label}.restart_state_sha256"
         ),
-        dataset_compatibility_sha256=_sha256_hex(
-            value["dataset_compatibility_sha256"],
-            f"{label}.dataset_compatibility_sha256",
-        ),
     )
-
-
-def _scored_span(value: Any, label: str, max_span_width: int) -> ScoredSpan:
-    _exact_keys(value, {"start", "end", "type", "confidence"}, label)
-    start = _integer(value["start"], f"{label}.start", minimum=0)
-    end = _integer(value["end"], f"{label}.end", minimum=0)
-    if end < start:
-        raise DataContractError(f"{label}.end must be >= {label}.start")
-    if end - start + 1 > max_span_width:
-        raise DataContractError(f"{label} width exceeds the recipe max_span_width")
-    entity_type = value["type"]
-    if entity_type not in ENTITY_TYPES:
-        raise DataContractError(f"{label}.type must be one of {list(ENTITY_TYPES)}")
-    return ScoredSpan(
-        start=start,
-        end=end,
-        entity_type=entity_type,
-        confidence=_unit_float(value["confidence"], f"{label}.confidence"),
-    )
-
-
-def _endpoint(value: Any, label: str) -> tuple[int, int]:
-    _exact_keys(value, {"start", "end"}, label)
-    start = _integer(value["start"], f"{label}.start", minimum=0)
-    end = _integer(value["end"], f"{label}.end", minimum=0)
-    if end < start:
-        raise DataContractError(f"{label}.end must be >= {label}.start")
-    return start, end
-
-
-def _select_non_overlapping(spans: list[ScoredSpan]) -> dict[tuple[int, int], ScoredSpan]:
-    """Greedy highest-confidence non-overlapping selection (inference_kg parity).
-
-    ``spans`` is required to be ordered by ``(start, end, type)`` so that the
-    stable descending-confidence sort resolves ties deterministically, matching
-    the historical script's stable ``sort(key=-confidence)`` over an ordered
-    candidate list.
-    """
-
-    ordered = sorted(range(len(spans)), key=lambda index: -spans[index].confidence)
-    taken: list[tuple[int, int]] = []
-    selected: dict[tuple[int, int], ScoredSpan] = {}
-    for index in ordered:
-        span = spans[index]
-        overlaps = any(not (span.end < start or end < span.start) for start, end in taken)
-        if overlaps:
-            continue
-        taken.append((span.start, span.end))
-        selected[(span.start, span.end)] = span
-    return selected
-
-
-def _sentence_candidates(
-    sentence: PreparedSentence,
-    scored_spans: list[ScoredSpan],
-    relations: list[dict[str, Any]],
-    seed: int,
-    input_hashes: dict[str, str],
-    label: str,
-) -> list[dict[str, Any]]:
-    selected = _select_non_overlapping(scored_spans)
-    records: list[dict[str, Any]] = []
-    for index, relation in enumerate(relations):
-        relation_label = f"{label}.predicted_relations[{index}]"
-        _exact_keys(relation, {"head", "tail", "relation", "re_confidence"}, relation_label)
-        head_key = _endpoint(relation["head"], f"{relation_label}.head")
-        tail_key = _endpoint(relation["tail"], f"{relation_label}.tail")
-        if head_key == tail_key:
-            raise DataContractError(f"{relation_label} head and tail are identical spans")
-        relation_type = relation["relation"]
-        if relation_type not in RELATION_TYPES:
-            raise DataContractError(
-                f"{relation_label}.relation must be one of {list(RELATION_TYPES)}"
-            )
-        head_span = selected.get(head_key)
-        tail_span = selected.get(tail_key)
-        if head_span is None or tail_span is None:
-            raise DataContractError(
-                f"{relation_label} references a span that was not a selected entity"
-            )
-        re_confidence = _unit_float(relation["re_confidence"], f"{relation_label}.re_confidence")
-        confidence = round(
-            min(head_span.confidence, tail_span.confidence) * re_confidence,
-            _CONFIDENCE_PRECISION,
-        )
-        head = EntitySpan(
-            head_span.start,
-            head_span.end,
-            head_span.entity_type,
-            _source_text(
-                sentence,
-                EntitySpan(head_span.start, head_span.end, head_span.entity_type),
-                f"{relation_label}.head",
-            ),
-        )
-        tail = EntitySpan(
-            tail_span.start,
-            tail_span.end,
-            tail_span.entity_type,
-            _source_text(
-                sentence,
-                EntitySpan(tail_span.start, tail_span.end, tail_span.entity_type),
-                f"{relation_label}.tail",
-            ),
-        )
-        triple = StrictTriple(sentence.example_id, head, relation_type, tail)
-        record = {
-            "protocol_id": PROTOCOL_ID,
-            "split_id": f"{_SPLIT_ID}:{sentence.split}",
-            "training_seed": seed,
-            "example_id": sentence.example_id,
-            "source_document_id": sentence.source_document_id,
-            "candidate_id": candidate_id_for(seed, triple),
-            "head": head.to_mapping(include_text=True),
-            "relation": relation_type,
-            "tail": tail.to_mapping(include_text=True),
-            "triple_confidence": confidence,
-            "input_hashes": dict(input_hashes),
-        }
-        # Re-validate through the shared contract so the emitted file always
-        # parses under the same rules the verifier and scorer apply.
-        Candidate.from_mapping(record, relation_label)
-        records.append(record)
-    return records
-
-
-def _load_prediction_ledger(
-    path: Path,
-    sentences: dict[str, PreparedSentence],
-    checkpoint: CheckpointIdentity | PredictionLedgerIdentity,
-    input_hashes: dict[str, str],
-) -> tuple[list[dict[str, Any]], int, int, int]:
-    seen: set[str] = set()
-    observed_order: list[str] = []
-    collected: dict[str, dict[str, Any]] = {}
-    duplicate_collapsed = 0
-    selected_total = 0
-    for line_number, value in iter_jsonl(path):
-        label = f"{path.name}:{line_number}"
-        _exact_keys(
-            value,
-            {"protocol_id", "example_id", "training_seed", "predicted_spans", "predicted_relations"},
-            label,
-        )
-        if value["protocol_id"] != PROTOCOL_ID:
-            raise DataContractError(f"{label}.protocol_id differs from {PROTOCOL_ID}")
-        example_id = value["example_id"]
-        if not isinstance(example_id, str) or not example_id:
-            raise DataContractError(f"{label}.example_id must be a nonempty string")
-        if example_id in seen:
-            raise DataContractError(f"{label} duplicates example_id {example_id}")
-        seen.add(example_id)
-        observed_order.append(example_id)
-        sentence = sentences.get(example_id)
-        if sentence is None:
-            raise DataContractError(f"{label} refers to an unknown prepared sentence")
-        seed = _integer(value["training_seed"], f"{label}.training_seed")
-        if seed != checkpoint.training_seed:
-            raise DataContractError(f"{label}.training_seed differs from the checkpoint identity")
-        raw_spans = value["predicted_spans"]
-        if not isinstance(raw_spans, list):
-            raise DataContractError(f"{label}.predicted_spans must be an array")
-        scored_spans = [
-            _scored_span(item, f"{label}.predicted_spans[{index}]", checkpoint.max_span_width)
-            for index, item in enumerate(raw_spans)
-        ]
-        span_order = [(span.start, span.end, span.entity_type) for span in scored_spans]
-        if span_order != sorted(span_order):
-            raise DataContractError(
-                f"{label}.predicted_spans must be sorted by start, end, type"
-            )
-        if len(set(span_order)) != len(span_order):
-            raise DataContractError(f"{label}.predicted_spans contains a duplicate span")
-        for span in scored_spans:
-            _source_text(
-                sentence,
-                EntitySpan(span.start, span.end, span.entity_type),
-                f"{label}.predicted_spans",
-            )
-        raw_relations = value["predicted_relations"]
-        if not isinstance(raw_relations, list):
-            raise DataContractError(f"{label}.predicted_relations must be an array")
-        selected_total += len(_select_non_overlapping(scored_spans))
-        for record in _sentence_candidates(
-            sentence, scored_spans, raw_relations, seed, input_hashes, label
-        ):
-            candidate_id = record["candidate_id"]
-            existing = collected.get(candidate_id)
-            if existing is None:
-                collected[candidate_id] = record
-            else:
-                duplicate_collapsed += 1
-                if record["triple_confidence"] > existing["triple_confidence"]:
-                    collected[candidate_id] = record
-    if observed_order != sorted(observed_order):
-        raise DataContractError(f"{path.name} must be sorted by example_id")
-    if seen != set(sentences):
-        missing = sorted(set(sentences) - seen)
-        extra = sorted(seen - set(sentences))
-        raise DataContractError(
-            "prediction ledger coverage mismatch; "
-            f"missing={len(missing)}, extra={len(extra)}"
-        )
-    candidates = sorted(
-        collected.values(),
-        key=lambda record: (record["training_seed"], record["example_id"], record["candidate_id"]),
-    )
-    return candidates, len(observed_order), selected_total, duplicate_collapsed
-
-
-def _live_inference_records(
-    config: PipelineConfig,
-    checkpoint: CheckpointIdentity,
-    sentences: dict[str, PreparedSentence],
-    checkpoint_blob_path: Path,
-    base_model: str,
-    device_preference: str | None,
-    model_cache_dir: Path,
-) -> list[dict[str, Any]]:
-    """Run the retained encoder over prepared sentences and emit ledger records.
-
-    This is the externally gated `live` execution. It reuses the retained
-    ``utils.encoder.network.BertKGExtractor`` and the exact
-    forward logic established by the retained source history (greedy
-    non-overlapping span selection, then relation extraction over the selected
-    pairs with a softmax-product confidence), but binds the CODE label space and
-    writes the canonical prediction-ledger schema. Torch and the model are
-    imported lazily so the module remains importable without an accelerator
-    stack.
-
-    Assumptions (documented for external verification): the checkpoint was trained
-    with the same CODE label space (``utils.encoder.data``), ``re_context_span``
-    equal to the frozen ``context_between_spans`` recipe flag, and each sentence
-    fits within the recipe ``max_length``. These are enforced by the one retained
-    trainer path.
-    """
-
-    import torch  # lazy: only the externally gated live path needs the accelerator stack
-    from transformers import AutoTokenizer
-
-    from utils.encoder.data import (
-        ENTITY_TYPES as CA_ENTITY_TYPES,
-        ID2REL,
-        NO_REL_ID,
-        NUM_BIO_TAGS,
-        NUM_RELATIONS,
-    )
-    from utils.encoder.network import BertKGExtractor
-
-    training = config.value["training"]
-    max_length = training["max_length"]
-    max_span_width = training["max_span_width"]
-    device = torch.device(device_preference or ("cuda" if torch.cuda.is_available() else "cpu"))
-
-    model_revision = training["base_model_revision"]
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model,
-        revision=model_revision,
-        cache_dir=str(model_cache_dir),
-        local_files_only=True,
-    )
-    model = BertKGExtractor(
-        base_model,
-        num_bio_tags=NUM_BIO_TAGS,
-        num_relations=NUM_RELATIONS,
-        num_entity_types=len(CA_ENTITY_TYPES),
-        max_span_width=max_span_width,
-        model_revision=model_revision,
-        model_cache_dir=str(model_cache_dir),
-        model_local_files_only=True,
-    )
-    # Match stages/encoder.py: enabling re_context_span (the frozen
-    # context_between_spans recipe flag) requires rebuilding re_head with a 3H
-    # input before loading a checkpoint trained with that head.
-    if bool(training["context_between_spans"]):
-        model.re_context_span = True
-        hidden_size = model.backbone.hidden_size
-        model.re_head = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size * 3, hidden_size),
-            torch.nn.GELU(),
-            torch.nn.Dropout(0.1),
-            torch.nn.Linear(hidden_size, NUM_RELATIONS),
-        )
-    model = model.to(device)
-    state = torch.load(str(checkpoint_blob_path), map_location=device)
-    if isinstance(state, dict) and "encoder" in state:
-        model.load_state_dict(state["encoder"])
-    elif isinstance(state, dict) and "discriminator" in state:
-        model.load_state_dict(state["discriminator"])
-    else:
-        model.load_state_dict(state)
-    model.eval()
-
-    id2entity = {index + 1: entity_type for index, entity_type in enumerate(CA_ENTITY_TYPES)}
-    records: list[dict[str, Any]] = []
-    for example_id in sorted(sentences):
-        sentence = sentences[example_id]
-        words = list(sentence.words)
-        encoding = tokenizer(
-            words,
-            is_split_into_words=True,
-            padding=False,
-            truncation=True,
-            max_length=max_length,
-            return_tensors=None,
-        )
-        input_ids = torch.tensor([encoding["input_ids"]], dtype=torch.long, device=device)
-        attention_mask = torch.tensor(
-            [encoding["attention_mask"]], dtype=torch.long, device=device
-        )
-        word_ids = encoding.word_ids()
-        n_words = len(words)
-
-        with torch.no_grad():
-            hidden = model.encode(input_ids=input_ids, attention_mask=attention_mask)
-            span_logits, candidate_spans = model.forward_span_ner(
-                hidden[0], word_ids, n_words, max_span_width
-            )
-
-        predicted_spans: list[dict[str, Any]] = []
-        if candidate_spans:
-            span_probabilities = torch.softmax(span_logits, dim=-1)
-            predicted_types = span_logits.argmax(dim=-1).tolist()
-            predicted_confidences = span_probabilities.max(dim=-1).values.tolist()
-            for (start, end), type_id, confidence in zip(
-                candidate_spans, predicted_types, predicted_confidences
-            ):
-                if type_id > 0 and end < n_words:
-                    predicted_spans.append(
-                        {
-                            "start": int(start),
-                            "end": int(end),
-                            "type": id2entity[type_id],
-                            "confidence": round(float(confidence), _CONFIDENCE_PRECISION),
-                        }
-                    )
-        predicted_spans.sort(key=lambda span: (span["start"], span["end"], span["type"]))
-
-        # Build the greedy-selection input from the sorted predicted spans so the
-        # live tie-break order is identical to the replay path (which reads the
-        # sorted ledger), guaranteeing live candidates equal a replay of the
-        # produced ledger.
-        scored = [
-            ScoredSpan(span["start"], span["end"], span["type"], span["confidence"])
-            for span in predicted_spans
-        ]
-        selected = _select_non_overlapping(scored)
-        selected_coords = [(span.start, span.end) for span in selected.values()]
-        pairs = [(head, tail) for head in selected_coords for tail in selected_coords if head != tail]
-        predicted_relations: list[dict[str, Any]] = []
-        if pairs:
-            with torch.no_grad():
-                relation_logits = model.forward_re(
-                    hidden[0],
-                    word_ids,
-                    [((head[0], head[1]), (tail[0], tail[1])) for head, tail in pairs],
-                )
-            relation_probabilities = torch.softmax(relation_logits, dim=-1)
-            relation_predictions = relation_logits.argmax(dim=-1).tolist()
-            relation_confidences = relation_probabilities.max(dim=-1).values.tolist()
-            for (head, tail), relation_id, relation_confidence in zip(
-                pairs, relation_predictions, relation_confidences
-            ):
-                if relation_id == NO_REL_ID:
-                    continue
-                predicted_relations.append(
-                    {
-                        "head": {"start": head[0], "end": head[1]},
-                        "tail": {"start": tail[0], "end": tail[1]},
-                        "relation": ID2REL[relation_id],
-                        "re_confidence": round(float(relation_confidence), _CONFIDENCE_PRECISION),
-                    }
-                )
-
-        records.append(
-            {
-                "protocol_id": PROTOCOL_ID,
-                "example_id": example_id,
-                "training_seed": checkpoint.training_seed,
-                "predicted_spans": predicted_spans,
-                "predicted_relations": predicted_relations,
-            }
-        )
-    return records
 
 
 def _generation_plan(
@@ -692,9 +239,6 @@ def _validate_checkpoint_run_identity(
     development_path = layout.resolve(
         "data-prepared/development.jsonl", must_exist=True
     )
-    compatibility_path = layout.resolve(
-        "audit/model-training-dataset-compatibility.json", must_exist=True
-    )
     acquisition = load_json(acquisition_path)
     preparation = load_json(preparation_path)
     checkout = load_json(
@@ -723,7 +267,6 @@ def _validate_checkpoint_run_identity(
         "model_cache_tree_sha256": cache_manifest["tree_sha256"],
         "source_commit": checkout.get("source", {}).get("commit"),
         "restart_state_sha256": sha256_file(restart_path),
-        "dataset_compatibility_sha256": sha256_file(compatibility_path),
     }
     if acquisition.get("archive", {}).get("sha256") != expected["archive_sha256"]:
         raise DataContractError("acquisition/preparation archive identities differ")
@@ -792,11 +335,23 @@ def generate_candidates(
     planned_outputs.append(plan_path if execution_mode == "dry-run" else candidates_out_path)
     if execution_mode == "live":
         planned_outputs.append(live_ledger_path)
-    existing = [layout.relative_identity(path) for path in planned_outputs if path.exists()]
-    if existing:
-        raise DataContractError(
-            "model stage refuses to overwrite existing artifacts: " + ", ".join(existing)
-        )
+    if manifest_path.exists():
+        previous = load_json(manifest_path)
+        if (previous.get("execution_mode") != execution_mode
+                or previous.get("training_seed") != checkpoint.training_seed
+                or previous.get("inputs", {}).get("checkpoint_manifest", {}).get("sha256") != sha256_file(checkpoint_manifest_path)
+                or previous.get("inputs", {}).get("prepared_sentences", {}).get("sha256") != sha256_file(sentences_path)):
+            raise DataContractError("candidate producer identity differs")
+        if execution_mode != "dry-run":
+            ledger_binding = previous.get("inputs", {}).get("prediction_ledger", {})
+            ledger = layout.resolve(ledger_binding.get("path", ""), must_exist=True)
+            if sha256_file(ledger) != ledger_binding.get("sha256"):
+                raise DataContractError("prediction ledger differs from its producer")
+            validate_prediction_artifacts(sentences_path=sentences_path, prediction_ledger_path=ledger,
+                candidates_path=candidates_out_path, training_seed=checkpoint.training_seed,
+                max_span_width=checkpoint.max_span_width,
+                input_hashes={k:v["sha256"] for k,v in previous["inputs"].items() if k in {"prepared_sentences","checkpoint_manifest","prediction_ledger"}})
+        return previous
 
     inputs = {
         "prepared_sentences": {
@@ -892,7 +447,15 @@ def generate_candidates(
             raise DataContractError(
                 "run-local Hugging Face cache differs from the checkpoint identity"
             )
+        from utils.common.execution import bind_json
+        work_path = manifest_path.with_name(f"work-{manifest_path.name}")
+        bind_json(work_path, {"run_id": layout.run_id, "inputs": inputs,
+            "checkpoint_sha256": checkpoint.checkpoint_sha256, "config_sha256": sha256_file(config.path)})
         records = recovery_records
+        if live_ledger_path.exists():
+            validate_prediction_cache(layout, config, sentences_path=sentences_path,
+                checkpoint_manifest_path=checkpoint_manifest_path, cache_ledger_path=live_ledger_path)
+            records = [r for _, r in iter_jsonl(live_ledger_path)]
         if records is None:
             records = _live_inference_records(
                 config,
@@ -923,7 +486,11 @@ def generate_candidates(
     candidates, sentence_count, selected_total, duplicate_collapsed = _load_prediction_ledger(
         ledger_path, sentences, checkpoint, input_hashes
     )
-    atomic_write_jsonl(candidates_out_path, candidates)
+    expected = b"".join(canonical_json_bytes(row) for row in candidates)
+    if candidates_out_path.exists() and candidates_out_path.read_bytes() != expected:
+        raise DataContractError("unsealed candidates differ from the deterministic ledger transform")
+    if not candidates_out_path.exists():
+        atomic_write_bytes(candidates_out_path, expected)
     manifest.update(
         {
             "status": "completed",
@@ -935,6 +502,7 @@ def generate_candidates(
             "candidates_output": layout.relative_identity(candidates_out_path),
         }
     )
+    manifest["output_hashes"] = {layout.relative_identity(p): sha256_file(p) for p in (candidates_out_path, live_ledger_path if execution_mode == "live" else prediction_ledger_path) if p is not None and p.exists()}
     atomic_write_json(manifest_path, manifest)
     return manifest
 
@@ -994,26 +562,6 @@ def validate_prediction_artifacts(
         )
 
 
-def _normalized_lf_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-
-
-def _find_extracted_annotation(layout: RunLayout, suffix: str) -> Path:
-    extracted = layout.resolve("inputs/extracted")
-    if not extracted.is_dir():
-        raise DataContractError("live training requires the extracted annotation tree")
-    matches = [
-        path
-        for path in extracted.rglob(Path(suffix).name)
-        if path.is_file() and path.as_posix().endswith(suffix)
-    ]
-    if len(matches) != 1:
-        raise DataContractError(
-            f"expected exactly one extracted {suffix}, found {len(matches)}"
-        )
-    return matches[0]
-
-
 def _required_run_file(layout: RunLayout, relative: str) -> Path:
     path = layout.resolve(relative)
     if not path.is_file():
@@ -1021,151 +569,52 @@ def _required_run_file(layout: RunLayout, relative: str) -> Path:
     return path
 
 
-def _dataset_compatibility_report(
-    layout: RunLayout, config: PipelineConfig, preparation: dict[str, Any]
-) -> tuple[Path, dict[str, Any]]:
-    official_entities = _find_extracted_annotation(
-        layout, "annotated_data/entities/train.csv"
-    )
-    historical_entities = (
-        layout.source_root / "resources/data/code-accord-entities-train.csv"
-    )
-    if not historical_entities.is_file():
-        raise DataContractError("recoverable pre-Phase A entity training CSV is missing")
-    official_sha = sha256_file(official_entities)
-    expected_sha = config.value["dataset"]["annotation_files"][
-        "annotated_data/entities/train.csv"
-    ]["sha256"]
-    historical_normalized_sha = _normalized_lf_sha256(historical_entities)
-    if official_sha != expected_sha:
-        raise DataContractError("freshly extracted entity train CSV hash is not official")
-    if historical_normalized_sha != _HISTORICAL_ENTITY_TRAIN_SHA256:
-        raise DataContractError("tracked pre-Phase A entity train CSV identity changed")
-
-    report = {
-        "schema_version": "phase-b-training-dataset-compatibility-1.0",
-        "status": "partial_match_full_legacy_equivalence_unavailable",
-        "fresh_clone_dataset": {
-            "dataset_id": config.value["dataset"]["dataset_id"],
-            "archive_sha256": preparation["archive_sha256"],
-            "annotation_bundle_sha256": preparation["annotation_bundle_sha256"],
-            "entity_train_sha256": official_sha,
-            "prepared_dataset_tree_sha256": preparation["dataset_tree_sha256"],
-        },
-        "pre_phase_a_baseline": {
-            "source_commit": "9feafa4029e65ab48ecfb2f452f4b0fabbff0826",
-            "tracked_path": "resources/data/code-accord-entities-train.csv",
-            "git_blob_sha1": _HISTORICAL_ENTITY_TRAIN_GIT_BLOB,
-            "normalized_lf_sha256": historical_normalized_sha,
-            "recoverable_files": ["annotated_data/entities/train.csv"],
-            "unavailable_files": [
-                "annotated_data/entities/all.csv",
-                "annotated_data/entities/test.csv",
-                "annotated_data/relations/all.csv",
-                "annotated_data/relations/train.csv",
-                "annotated_data/relations/test.csv",
-            ],
-        },
-        "comparisons": {
-            "entity_train_bytes": "match_after_checkout_line_ending_normalization",
-            "relation_and_test_bytes": "unavailable_in_pre_phase_a_git_history",
-            "legacy_random_train_development_membership": "not_persisted",
-            "canonical_code_split_1_membership": "new_frozen_split",
-        },
-        "historical_statistical_continuity_claim_permitted": False,
-        "conclusion": (
-            "The recoverable entity-training source matches the official download, "
-            "but missing historical relation/test bytes and unpersisted random "
-            "development membership prevent a full dataset or unchanged-statistics claim."
-        ),
-    }
-    path = layout.resolve("audit/model-training-dataset-compatibility.json")
-    if path.exists():
-        if load_json(path) != report:
-            raise DataContractError("existing dataset compatibility audit differs")
-    else:
-        atomic_write_json(path, report)
-    return path, report
-
-
-def canonical_trainer_arguments(
-    layout: RunLayout,
-    config: PipelineConfig,
-    training_seed: int,
-) -> list[str]:
+def canonical_trainer_arguments(layout: RunLayout, config: PipelineConfig, training_seed: int) -> EncoderOptions:
     """Derive every trainer argument from one validated run namespace."""
-
-    if training_seed not in config.value.get("training_seeds", []):
-        raise DataContractError(
-            f"training_seed {training_seed} is not approved by the selected run config"
-        )
-    training = config.value["training"]
-    boost = training["comparison_boost"]
-    checkpoint_dir = layout.resolve(f"checkpoints/seed-{training_seed}")
-    checkpoint_path = checkpoint_dir / "checkpoint.pt"
-    restart_path = checkpoint_dir / "restart-state.pt"
-    progress_path = layout.resolve(f"logs/model-train-seed-{training_seed}.log")
-    summary_path = checkpoint_dir / "training-summary.json"
-    command = [
-        "--prepared-dir",
-        str(layout.resolve("data-prepared", must_exist=True)),
-        "--model-name",
-        training["base_model"],
-        "--model-revision",
-        training["base_model_revision"],
-        "--model-cache-dir",
-        str(layout.resolve(CACHE_RELATIVE)),
-        "--batch-size",
-        str(training["batch_size"]),
-        "--max-length",
-        str(training["max_length"]),
-        "--lr",
-        str(training["learning_rate"]),
-        "--max-steps",
-        str(training["max_steps"]),
-        "--warmup-steps",
-        str(training["warmup_steps"]),
-        "--max-span-width",
-        str(training["max_span_width"]),
-        "--re-weight",
-        str(training["re_loss_weight"]),
-        "--re-no-rel-weight",
-        str(training["re_no_rel_weight"]),
-        "--neg-sample-ratio",
-        str(training["ner_negative_ratio"]),
-        "--focal-gamma",
-        str(training["ner_focal_gamma"]),
-        "--eval-every",
-        str(training["evaluation_every_steps"]),
-        "--seed",
-        str(training_seed),
-        "--label-smoothing",
-        str(training["label_smoothing"]),
-        "--re-comparison-boost",
-        str(boost["initial"]),
-        "--re-boost-adaptive-steps",
-        str(boost["adaptive_step"]),
-        "--re-boost-adaptive-threshold",
-        str(boost["threshold_low"]),
-        "--re-boost-adaptive-threshold2",
-        str(boost["threshold_high"]),
-        "--re-boost-mid",
-        str(boost["middle"]),
-        "--re-boost-end",
-        str(boost["low"]),
-        "--save-best-to",
-        str(checkpoint_path),
-        "--save-last-to",
-        str(restart_path),
-        "--progress-log",
-        str(progress_path),
-        "--run-summary-out",
-        str(summary_path),
-    ]
+    if training_seed not in config.value.get('training_seeds', []):
+        raise DataContractError(f'training_seed {training_seed} is not approved by the selected run config')
+    training = config.value['training']
+    boost = training['comparison_boost']
+    checkpoint_dir = layout.resolve(f'checkpoints/seed-{training_seed}')
+    checkpoint_path = checkpoint_dir / 'checkpoint.pt'
+    restart_path = checkpoint_dir / 'restart-state.pt'
+    progress_path = layout.resolve(f'logs/model-train-seed-{training_seed}.log')
+    summary_path = checkpoint_dir / 'training-summary.json'
+    command = EncoderOptions(
+        prepared_dir=str(layout.resolve('data-prepared', must_exist=True)),
+        model_name=training['base_model'],
+        model_revision=training['base_model_revision'],
+        model_cache_dir=str(layout.resolve(CACHE_RELATIVE)),
+        batch_size=training['batch_size'],
+        max_length=training['max_length'],
+        lr=float(training['learning_rate']),
+        max_steps=training['max_steps'],
+        warmup_steps=training['warmup_steps'],
+        max_span_width=training['max_span_width'],
+        re_weight=float(training['re_loss_weight']),
+        re_no_rel_weight=float(training['re_no_rel_weight']),
+        neg_sample_ratio=float(training['ner_negative_ratio']),
+        focal_gamma=float(training['ner_focal_gamma']),
+        eval_every=training['evaluation_every_steps'],
+        seed=training_seed,
+        label_smoothing=float(training['label_smoothing']),
+        re_comparison_boost=float(boost['initial']),
+        re_boost_adaptive_steps=boost['adaptive_step'],
+        re_boost_adaptive_threshold=float(boost['threshold_low']),
+        re_boost_adaptive_threshold2=float(boost['threshold_high']),
+        re_boost_mid=float(boost['middle']),
+        re_boost_end=float(boost['low']),
+        save_best_to=str(checkpoint_path),
+        save_last_to=str(restart_path),
+        progress_log=str(progress_path),
+        run_summary_out=str(summary_path),
+    )
     if layout.resolve(HF_CACHE_MANIFEST_RELATIVE).is_file():
-        command.append("--model-local-files-only")
-    if restart_path.exists() and not summary_path.exists():
-        command.extend(["--resume-from", str(restart_path)])
+        command.model_local_files_only = True
+    if restart_path.exists() and (not summary_path.exists()):
+        command = replace(command,
+            resume_from=str(restart_path),
+        )
     return command
 
 
@@ -1258,9 +707,6 @@ def plan_training(
     split_path = _required_run_file(layout, "data-prepared/split-manifest.json")
     train_path = _required_run_file(layout, "data-prepared/train.jsonl")
     development_path = _required_run_file(layout, "data-prepared/development.jsonl")
-    compatibility_path, compatibility = _dataset_compatibility_report(
-        layout, config, preparation
-    )
     checkpoint_dir = layout.resolve(f"checkpoints/seed-{training_seed}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = checkpoint_dir / "checkpoint.pt"
@@ -1331,7 +777,7 @@ def plan_training(
         raise DataContractError("canonical trainer summary lacks a selected checkpoint metric")
 
     checkpoint_manifest = {
-        "schema_version": "phase-b-model-checkpoint-manifest-4.0",
+        "schema_version": "encoder-checkpoint-1",
         "protocol_id": PROTOCOL_ID,
         "split_id": _SPLIT_ID,
         "training_seed": training_seed,
@@ -1356,9 +802,6 @@ def plan_training(
         "selected_metric": "development_strict_triple_f1",
         "selected_metric_value": float(selected_value),
         "restart_state_sha256": sha256_file(restart_path),
-        "dataset_compatibility_report": layout.relative_identity(compatibility_path),
-        "dataset_compatibility_sha256": sha256_file(compatibility_path),
-        "historical_comparability": compatibility["status"],
     }
     if checkpoint_manifest_path.exists():
         if load_json(checkpoint_manifest_path) != checkpoint_manifest:
@@ -1382,18 +825,15 @@ def plan_training(
                 "restart_state": layout.relative_identity(restart_path),
                 "training_summary": layout.relative_identity(summary_path),
                 "progress_log": layout.relative_identity(progress_path),
-                "dataset_compatibility_report": layout.relative_identity(
-                    compatibility_path
-                ),
                 "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
             },
             "resume": {
                 "resumed": summary.get("resumed_from") is not None,
                 "restart_state_sha256": sha256_file(restart_path),
             },
-            "environment": summary.get("environment"),
-            "historical_comparability": compatibility["status"],
-        }
+            "environment": summary.get("runtime_environment", summary.get("environment")),
+            "output_hashes": {layout.relative_identity(p): sha256_file(p) for p in (checkpoint_path, checkpoint_manifest_path, restart_path, summary_path, progress_path, cache_manifest_path)},
+            }
     )
     atomic_write_json(manifest_path, manifest)
     return manifest

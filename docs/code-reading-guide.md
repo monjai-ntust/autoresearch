@@ -1,0 +1,205 @@
+# Reading the CODE-ACCORD artifact
+
+Start with the three root commands. They select a scientific workflow and call
+stage controllers; model implementation is below those controllers. A fresh
+clone contains everything needed to read the method and run offline validation.
+The parent research repository is not a runtime or test dependency.
+
+| Read first | Then follow | Scientific implementation |
+|---|---|---|
+| [pipeline.py](../pipeline.py) | [preparation](../stages/preparation.py), [encoder](../stages/encoder.py), [verifier](../stages/verifier.py), [evaluation](../stages/evaluation.py) | Annotation reconstruction, canonical training, requests/verdicts and strict scoring |
+| [encoder_comparison.py](../encoder_comparison.py) | [comparison_matrix.py](../stages/comparison_matrix.py), [encoder_comparison.py](../stages/encoder_comparison.py) | Four historical-derived arms, separate trainer/network |
+| [rag.py](../rag.py) | [stages/rag.py](../stages/rag.py) | Same-run graphs, question panels, retrieval and frozen answer evaluation |
+
+Read [workflow.md](workflow.md) for command/continuation contracts and
+[encoder-comparison.md](encoder-comparison.md) for the four arms. The public
+`validate` actions contact no model. A clean source checkout and matching
+actual input/model identities are required for execution and continuation.
+
+## Follow the scientific data
+
+```mermaid
+flowchart LR
+    A[Verified annotation bytes] --> B[Typed spans and fixed split]
+    B --> C[Seed-specific encoder candidates]
+    C --> D[Development threshold and independent pilot]
+    D --> E[Test simple/corrective verdicts]
+    C --> F[Typed strict scoring]
+    E --> F
+    F --> G[Paper quality and recorded-cost reports]
+    C --> H[Same-run canonical graphs]
+    E --> H
+    B --> H
+    H --> I[Evaluator projection and CODE questions]
+    I --> J[Five retrieval/answer modes]
+    J --> K[Full and part-of answer-hit tables]
+```
+
+1. [acquisition.py](../utils/preparation/acquisition.py) verifies immutable
+   archive bytes. [annotations.py](../utils/preparation/annotations.py) reads
+   entity BIO labels and relation markers, repairs the single audited malformed
+   ID, and aligns arguments to unique typed spans. Unresolved alignment remains
+   in the audit rather than silently becoming strict gold.
+   [split.py](../utils/preparation/split.py) fixes CODE-SPLIT-1.
+   [materialization.py](../utils/preparation/materialization.py) writes scientific
+   sentence/gold rows, split identities, distributions and eligibility evidence.
+2. [network.py](../utils/encoder/network.py) defines canonical model heads.
+   [data.py](../utils/encoder/data.py) defines tokenization, span/pair construction
+   and durable sampling. [trainer.py](../utils/encoder/trainer.py) contains
+   `compute_span_loss`, `evaluate_span` and the unchanged optimizer loop in
+   `main`. Development evaluation selects checkpoints; test quality never selects
+   a checkpoint or threshold. Seeds are 42–49.
+3. [options.py](../utils/encoder/options.py) makes internal worker values
+   explicit. [model.py](../utils/encoder/model.py) owns input/checkpoint/candidate
+   contracts, [inference.py](../utils/encoder/inference.py) runs the model, and
+   [candidates.py](../utils/encoder/candidates.py) converts the raw ledger.
+   Greedy non-overlapping span selection and the confidence product
+   `min(head_probability, tail_probability) * relation_probability` are preserved.
+4. [threshold.py](../utils/verifier/threshold.py) selects from development data.
+   [requests.py](../utils/verifier/requests.py) binds the exact source sentence,
+   candidate, literal prompt/schema and decoding payload.
+   [pilot.py](../utils/verifier/pilot.py) authenticates independent development
+   captures. [interpretation.py](../utils/verifier/interpretation.py) validates
+   response actions and maps corrected spans back to source tokens.
+   [verifier.py](../utils/verifier/verifier.py) owns transport, original attempts,
+   timings and durable response continuation.
+5. [scoring.py](../utils/evaluation/scoring.py) compares typed strict tuples and
+   separates candidate decisions from final emitted triples. Duplicate emitted
+   triples collapse under the existing definition. [metrics.py](../utils/evaluation/metrics.py)
+   computes counts/P/R/F1. [statistics.py](../utils/evaluation/statistics.py)
+   retains the existing uncertainty, exact Wilcoxon, paired-t sensitivity and
+   Holm families. [tables.py](../utils/evaluation/tables.py) renders existing
+   publication products; [reporting.py](../utils/evaluation/reporting.py) exposes
+   additional views of available measurements without model work.
+6. [runner.py](../utils/rag/runner.py) authenticates the completed same-run
+   parent and actual Qwen identity. [graph.py](../utils/rag/graph.py) builds
+   confidence/corrective/gold canonical graphs and `project_graph` converts them
+   into the evaluator view. [code_questions.py](../utils/rag/code_questions.py)
+   defines the seven added templates once and preserves the original `part-of`
+   generator. [evaluator.py](../utils/rag/evaluator.py) is the frozen five-mode
+   kernel: question order, retrieval, literal prompt, non-thinking decoding,
+   normalization and answer matching. [journal.py](../utils/rag/journal.py)
+   saves ordered occurrences and original answers around that kernel.
+
+## Records and one real trace
+
+[records.py](../utils/common/records.py) defines `EntitySpan`, `StrictTriple`,
+`Candidate` and `Verdict`. Span positions are inclusive token indices; strict
+identity includes example, endpoint positions/types and relation. Candidate IDs
+join encoder products to verifier responses. Source text/document anchors and
+functional join IDs remain scientific/provenance content. Canonical graphs use
+typed source-grounded identities; evaluator projection uses surface nodes/edges.
+These are different representations, with the transform explicit in source.
+
+The [reading-trace fixture](../tests/fixtures/reading-trace.json) records one
+returned seed-42 example from run `09-22`, with original source-file hashes and
+precise row locations. It is documentation evidence, never a runtime input.
+
+> The smaller dimension of each panel which can be either the width or height
+> of the panel should be 230mm or less.
+
+| Step | Retained observation | Code to inspect |
+|---|---|---|
+| Prepared sentence | Example `0096a3bf-ac16-4a75-adf9-8c3f4a9b8610`; `dimension` at token 2 is Property, `panel` at token 5 is Object | Annotation alignment and materialization |
+| Candidate | `(dimension, part-of, panel)`, seed 42, confidence `0.47286` | `_sentence_candidates` and `Candidate` |
+| Corrective verdict | `KEEP`, reason `SUPPORTED`, no correction | `_parse_content` and strict scoring |
+| Graph projection | Edge `dimension --part-of--> panel` | `build_table_graphs`, `project_graph` |
+| Returned question/result | `What is dimension part of?`; corrective `kg_1hop` predicts `panel`, gold `panel`, `correct=true` | Question generation and `check_answer` |
+
+The candidate matches retained typed gold and contributes one true positive to
+that seed/condition's strict counts. The returned answer contributes one hit to
+its mode/condition denominator. This worked trace is not an aggregate experiment
+or proof that generation faithfully used its source. Retained text bindings
+were verified; missing binary/cache objects prevent complete local validation
+of the old parent's lineage. The expanded RAG parity discrepancy remains
+unresolved. Neither limitation is repaired by this example.
+
+## Four comparison arms and preserved quirks
+
+The comparison uses its own [network](../utils/encoder_comparison/network.py)
+and [trainer](../utils/encoder_comparison/trainer.py), bounded from the historical
+result-producing implementation. It is not a generalization of canonical
+training. Read the finite [configuration](../resources/configs/encoder-comparison.json)
+for BERT-base/common, DeBERTa-base/common, DeBERTa-large/common and
+DeBERTa-large/A20+A21+A12. Only Table-1 encoder results are in scope.
+
+The frozen CODE behavior uses `NO_REL=1.0`. A20 decays linearly from 5× to 2×;
+its one-time adaptive gate's middle 3.5× value lasts one batch. A21 smooths
+span-NER labels and A12 uses inter-span context. Apparently unused initialized
+heads remain because removing them can alter parameter keys and RNG order.
+Tests check these details rather than silently replacing them with paper prose.
+
+All four one-step CUDA/restart/candidate smokes precede full training. All 32
+development runs precede any final-test outcome access. The coordinator and
+private workers enforce membership and gates, and smoke/full processes are
+isolated. The fresh command directly advances validated prerequisites without
+a manual admission artifact. Earlier partial G-05 runs keep their pinned
+pre-refactor review/finalization procedure and original namespaces.
+
+## Minimum lineage and failure behavior
+
+Read [paths.py](../utils/common/paths.py) for run-bound path refusal,
+[artifact_io.py](../utils/common/artifact_io.py) for canonical bytes/hashes,
+[execution.py](../utils/common/execution.py) for OS locks and failed/resumed
+invocation accounting, and [runtime.py](../utils/encoder/runtime.py) for the
+once-per-run numerical environment. Producer receipts reference actual source,
+input/output hashes, cache/weight/tokenizer identities and durable state.
+Qwen weight SHA-256/byte size, model/quantization settings, Python/Ollama/Torch/
+Transformers and numerical backend settings remain visible. Historical reference
+digests, hardware and branch ancestry are not fresh admission criteria.
+
+Repeat a command unchanged after failure. Complete outputs are authenticated;
+unsaved steps can run again; pure finalization requires identical existing
+bytes. Verifier's original three-attempt budget and terminal failure verdicts
+survive continuation. Independent pilot captures never share answers. RAG
+reuses saved successful occurrences and retries only unfinished empty/error
+answers. Missing contemporaneous model proof fails closed; later queries cannot
+create past proof. Corrupt or foreign progress stops rather than becoming a new
+run. Concurrent execution fails without deleting lock files or evidence.
+
+## Read the automatic paper reports
+
+Canonical reports are `metrics/paper-report/paper-statistics.{json,tsv,md}`;
+comparison reports are each arm's `reports/comparison/` plus coordinator
+`reports/matrix/`; RAG reports are `table2-code-all/reports/`. Each has a manifest
+binding original input hashes and the rendered products. JSON retains full
+precision; TSV/Markdown expose the same values without additional rounding.
+
+Strict quality includes per-seed counts/P/R/F1, descriptive mean/sample SD,
+all tied best seeds and existing raw/Holm-adjusted sensitivity tests. Best
+final-test values do not select a model or change an experiment. Corpus reports
+include split/country/span/relation distributions and alignment eligibility;
+emitted unique triples remain separate from candidate count and graph counts.
+
+Training reports sum recorded final-invocation seconds per seed into wall hours
+and disclose missing earlier-invocation coverage. Request reports count original
+uncached attempts, retries and failures, sum measured seconds/tokens and show
+coverage separately for warmup, pilot and test. No original response is relabelled
+as a cache hit on resume. RAG reports full and `part-of` correct/total/hit rates
+for every mode/condition, canonical versus projected graph scale and retained
+condition wall time. Gold is a nondeployable oracle; these diagnostics are not
+the paper's original ten-question Table 2.
+
+Disk weight bytes are not resident/peak memory. Unmeasured GPU utilization,
+energy/money, per-call RAG timing/tokens, isolated graph construction timing and
+unimplemented comparison inferential analysis remain unavailable. Reports
+neither import historical estimates nor launch a new measurement experiment.
+
+## Verification and its boundary
+
+[test_scientific_bytes.py](../tests/test_scientific_bytes.py) checks independent
+baseline definition/optimizer-loop hashes, immutable scientific module and
+prompt/schema bytes, old parsed worker values, and raw graph/projection/question/
+prompt/result/statistical replay. Fixed Python hash seed preserves characterized
+set iteration order rather than normalizing results. Other tests cover tiny CPU
+tensor/RNG/restart cases, typed scoring, lineage tampering and continuation.
+[test_continuation.py](../tests/test_continuation.py) injects response/model-proof/
+gate/lock/budget failures; [test_reporting.py](../tests/test_reporting.py) verifies
+automatic report authentication, ties, coverage and deterministic reinvocation.
+
+Local validation ran 153 tests successfully before this guide was written.
+Standalone shallow-checkout checks exercise imports, documented commands and
+tests without old producer Git objects. This is local characterization, not
+live CUDA/Qwen or newly trained model equality across machines. Further bounded
+external before/after checks need explicit authorization; no completed `09-22`
+run, old checkpoint or scientific output was rerun by this refactor.

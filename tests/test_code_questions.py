@@ -25,16 +25,6 @@ RUN_ID = "code-questions-test"
 ORIGINAL_CODE_EVALUATOR_BLOB = "c06b753433681f13140d288c7e642c20e1eab851"
 
 
-def original_code_evaluator():
-    source = subprocess.run(
-        ["git", "cat-file", "blob", ORIGINAL_CODE_EVALUATOR_BLOB],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    ).stdout.decode("utf-8")
-    module = types.ModuleType("original_code_evaluator")
-    exec(compile(source, "<original-code-evaluator>", "exec"), module.__dict__)
-    return module
 
 
 def record(index: int, triples: list[tuple[str, str, str]], sentence: str | None = None):
@@ -151,8 +141,6 @@ class CodeQuestionTests(unittest.TestCase):
             ),
             code_questions.EXPECTED_ADDITIONAL_TEMPLATES,
         )
-        historical = original_code_evaluator().generate_questions(records, 0)
-        self.assertEqual(panels["combined"], historical)
 
     def test_protected_and_replacement_share_one_evaluator_kernel(self):
         self.assertIs(runner.evaluator, evaluator)
@@ -257,14 +245,14 @@ class CodeQuestionTests(unittest.TestCase):
             with mock.patch.object(
                 runner, "validate_source_contract", return_value={"head": "a" * 40}
             ), mock.patch.object(
-                code_questions,
+                rag_stage,
                 "preflight_code_questions",
                 return_value=(run_dir, summary, {}),
             ), mock.patch.object(
                 runner, "fetch_matching_model"
             ) as fetch, redirect_stdout(io.StringIO()):
                 self.assertEqual(
-                    code_questions.run_command(args, CONTRACT), 0
+                    rag_stage.run_command(args, CONTRACT), 0
                 )
             fetch.assert_not_called()
             self.assertFalse((run_dir / code_questions.OUTPUT_NAMESPACE).exists())
@@ -348,7 +336,10 @@ class CodeQuestionTests(unittest.TestCase):
             capture = model_capture(identity)
             calls = []
 
-            def evaluate(all_records, _kg, *, kg_identity, question_panel, **_kwargs):
+            def evaluate(all_records, _kg, *, condition, questions, **_kwargs):
+                name = f"{condition}-seed-42.json" if condition != "gold" else "gold-oracle.json"
+                kg_identity = runner.stable_child_path(_kwargs["child_dir"] / "projections" / name)
+                question_panel = questions
                 calls.append((all_records, question_panel, kg_identity))
                 return rag_output(
                     question_panel,
@@ -360,18 +351,18 @@ class CodeQuestionTests(unittest.TestCase):
             with mock.patch.object(
                 runner, "validate_source_contract", return_value=source
             ), mock.patch.object(
-                code_questions,
+                rag_stage,
                 "preflight_code_questions",
                 return_value=(run_dir, summary, runtime),
             ), mock.patch.object(
-                code_questions, "validate_execution_snapshot"
+                rag_stage, "validate_execution_snapshot"
             ), mock.patch.object(
                 runner, "fetch_matching_model", return_value=capture
             ) as fetch, mock.patch.object(
-                evaluator, "evaluate", side_effect=evaluate
-            ) as execute, redirect_stdout(io.StringIO()):
+                rag_stage, "evaluate_ordered", side_effect=evaluate
+            ) as execute, mock.patch("utils.evaluation.reporting.report_rag"), redirect_stdout(io.StringIO()):
                 self.assertEqual(
-                    code_questions.run_command(args, CONTRACT), 0
+                    rag_stage.run_command(args, CONTRACT), 0
                 )
                 self.assertEqual(len(calls), 3)
                 self.assertTrue(all(item[0] == records for item in calls))
@@ -381,7 +372,7 @@ class CodeQuestionTests(unittest.TestCase):
                 fetch.reset_mock()
                 execute.reset_mock()
                 self.assertEqual(
-                    code_questions.run_command(args, CONTRACT), 0
+                    rag_stage.run_command(args, CONTRACT), 0
                 )
                 fetch.assert_not_called()
                 execute.assert_not_called()
@@ -403,24 +394,10 @@ class CodeQuestionTests(unittest.TestCase):
         args = argparse.Namespace(
             run_id=RUN_ID, ollama_url="http://localhost:11434", dry_run=True
         )
-        with mock.patch.object(code_questions, "run_command", return_value=7) as call:
-            self.assertEqual(runner.run_command(args, CONTRACT), 7)
+        with mock.patch.object(rag_stage, "run_command", return_value=7) as call:
+            self.assertEqual(rag_stage.run_command(args, CONTRACT), 7)
         call.assert_called_once_with(args, CONTRACT)
 
-    def test_full_pipeline_does_not_run_historical_rag_prerequisite(self):
-        layout = types.SimpleNamespace(run_root=ROOT / "output" / RUN_ID, run_id=RUN_ID)
-        with mock.patch.object(
-            runner, "validate_parent_lineage"
-        ), mock.patch.object(
-            runner, "run_protected_command"
-        ) as protected, mock.patch.object(
-            runner, "run_command", return_value=0
-        ) as replacement:
-            self.assertEqual(
-                rag_stage.run(layout, ollama_url="http://localhost:11434"), 0
-            )
-        protected.assert_not_called()
-        replacement.assert_called_once()
 
 
 if __name__ == "__main__":

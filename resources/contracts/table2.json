@@ -1,25 +1,29 @@
 {
-  "schema_version": 6,
-  "source_baseline": {
-    "commit": "c01003a875bbb4c36393647c6d5fa1cc84d71d2c",
-    "branch": "publication-refactored-rag"
-  },
+  "schema_version": 7,
   "evaluator": {
-    "max_questions": 105,
-    "output_namespace": "table2-q105"
+    "part_of_questions": 105
   },
   "pipeline": {
     "protocol_id": "B04-PATH-A-1.3",
     "workflow_id": "PATH-A-WORKFLOW-1.3",
     "matcher_id": "CODE-STRICT-1",
     "dataset_id": "CODE-ACCORD-v1.0.0",
-    "training_seeds": [42, 43, 44, 45, 46, 47, 48, 49],
+    "training_seeds": [
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49
+    ],
     "table2_seed": 42,
     "split_seed": 42,
     "test_records": 173,
     "artifacts": {
       "checkout_manifest": "manifests/00-checkout-manifest.json",
-      "full_run_manifest": "manifests/debug-full-run.json",
+      "full_run_manifest": "manifests/pipeline-run.json",
       "preparation_manifest": "manifests/03-data-preparation-manifest.json",
       "prepared_train": "data-prepared/train.jsonl",
       "prepared_development": "data-prepared/development.jsonl",
@@ -40,37 +44,12 @@
       "simple_verdicts": "verifier/simple/verdicts.jsonl",
       "corrective_verdicts": "verifier/corrective/verdicts.jsonl",
       "checkpoint_manifest": "checkpoints/seed-{seed}/checkpoint-manifest.json",
-      "checkpoint_blob": "checkpoints/seed-{seed}/checkpoint.pt",
-      "candidate_generation_manifest": "manifests/model-generate-candidates-live-seed-{seed}-test.json"
+      "checkpoint_blob": "checkpoints/seed-{seed}/checkpoint.pt"
     },
     "existing_graphs": {
       "confidence": "graph-rag/graphs/confidence_filtered/seed-{seed}/manifest.json",
       "corrective": "graph-rag/graphs/corrective_verifier/seed-{seed}/manifest.json",
       "gold": "graph-rag/graphs/gold_graph_oracle/manifest.json"
     }
-  },
-  "reference_profile": {
-    "hardware": {
-      "machine": "aarch64",
-      "platform": "Linux-6.17.0-1014-nvidia-aarch64-with-glibc2.39",
-      "cuda_device": "NVIDIA GB10",
-      "cuda_runtime": "13.0",
-      "torch": "2.9.1+cu130"
-    },
-    "encoder": {
-      "base_model": "microsoft/deberta-large",
-      "base_model_revision": "28c23d9eb93ea6cf11f845501ab7aeb2a497658b"
-    },
-    "qwen": {
-      "name": "qwen3:32b",
-      "tag_digest": "030ee887880fc378860c2dd35101da424377520441ae4bfe7be6deff8ade7840",
-      "blob_sha256": "3291abe70f16ee9682de7bfae08db5373ea9d6497e614aaad63340ad421d6312",
-      "details": {"family": "qwen3", "parameter_size": "32.8B", "quantization_level": "Q4_K_M"}
-    }
-  },
-  "legacy_table2_accuracy": {
-    "confidence": {"llm_only": 0.0, "text_retrieval": 0.2, "kg_1hop": 0.0, "kg_2hop": 0.0, "hybrid": 0.3},
-    "verified": {"llm_only": 0.0, "text_retrieval": 0.2, "kg_1hop": 0.0, "kg_2hop": 0.0, "hybrid": 0.2},
-    "gold": {"llm_only": 0.0, "text_retrieval": 0.2, "kg_1hop": 0.6, "kg_2hop": 0.6, "hybrid": 0.5}
   }
 }

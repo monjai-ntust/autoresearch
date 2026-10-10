@@ -107,7 +107,7 @@ class RunLayout:
     def run_root(self) -> Path:
         return self.output_root / self.run_id
 
-    def create(self) -> Path:
+    def create(self, *, allow_lock_only: bool = False) -> Path:
         """Create a new run atomically enough to reject accidental overwrite."""
 
         self.output_root.mkdir(parents=False, exist_ok=True)
@@ -118,13 +118,16 @@ class RunLayout:
         try:
             self.run_root.mkdir()
         except FileExistsError as exc:
-            raise PathContractError(
-                f"run already exists; choose a new run ID: {self.run_id}"
-            ) from exc
+            files = [p for p in self.run_root.rglob("*") if p.is_file()]
+            permitted = self.run_root / "logs/locks/workflow.lock"
+            if not allow_lock_only or files != [permitted]:
+                raise PathContractError(
+                    f"run already exists; select its validated continuation: {self.run_id}"
+                ) from exc
         if not _same_path(self.run_root.resolve(), self.run_root):
             raise PathContractError("new run root did not resolve to its declared path")
         for relative in RUN_DIRECTORIES:
-            self.resolve(relative).mkdir(parents=True, exist_ok=False)
+            self.resolve(relative).mkdir(parents=True, exist_ok=allow_lock_only)
         return self.run_root
 
     def require_existing(self) -> Path:

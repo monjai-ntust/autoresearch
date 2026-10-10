@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from utils.encoder.runtime import training_environment
+
+from dataclasses import replace
+
+from utils.encoder_comparison.options import ComparisonOptions
+
 import argparse
 import hashlib
 import json
@@ -33,7 +39,6 @@ from utils.encoder.cache import (
     write_cache_manifest,
 )
 from utils.encoder.model import (
-    _dataset_compatibility_report,
     generate_candidates,
 )
 from utils.encoder_comparison.config import (
@@ -44,10 +49,6 @@ from utils.encoder_comparison.config import (
 )
 
 
-def describe(selection: ComparisonSelection) -> dict[str, Any]:
-    """Return the fully validated selection without creating a run."""
-
-    return selection.manifest()
 
 
 def prepare(layout: RunLayout, selection: ComparisonSelection) -> dict[str, Any]:
@@ -58,231 +59,7 @@ def prepare(layout: RunLayout, selection: ComparisonSelection) -> dict[str, Any]
 
 
 _CHECKOUT_RELATIVE = "manifests/00-checkout-manifest.json"
-_CHECKOUT_RECOVERY = "audit/checkout-recovery"
 
-
-def _checkout_only_files(
-    layout: RunLayout,
-    selection: ComparisonSelection,
-    *,
-    transient: tuple[str, ...] = (),
-) -> None:
-    """Admit only checkout evidence, never acquired or downstream artifacts."""
-
-    receipts = []
-    snapshots = set()
-    for path in layout.run_root.rglob("*"):
-        if path.is_symlink():
-            raise DataContractError("checkout recovery refuses symlinked run paths")
-        if not path.is_file():
-            continue
-        relative = path.relative_to(layout.run_root).as_posix()
-        if relative == _CHECKOUT_RELATIVE or relative in transient:
-            continue
-        if relative == f"{_CHECKOUT_RECOVERY}/recovery.lock":
-            raise DataContractError("another checkout recovery is active or interrupted")
-        match = re.fullmatch(
-            rf"{_CHECKOUT_RECOVERY}/(blocked-checkout|checkout-attempt|recovery)-"
-            r"([0-9a-f]{64})\.json",
-            relative,
-        )
-        if match is None:
-            raise DataContractError(
-                f"checkout recovery refuses downstream or unknown artifact: {relative}"
-            )
-        if sha256_file(path) != match[2]:
-            raise DataContractError(f"checkout recovery evidence hash differs: {relative}")
-        document = _load_manifest(path, "checkout recovery evidence")
-        if match[1] == "recovery":
-            _require_fields(
-                document,
-                {
-                    "schema_version": "phase-g-checkout-recovery-1.0",
-                    "run_id": layout.run_id,
-                    "arm_id": selection.arm.arm_id,
-                    "comparison_config_sha256": selection.config.sha256,
-                },
-                "checkout recovery evidence",
-            )
-            if document.get("status") not in {"checkout-admitted", "blocked"}:
-                raise DataContractError("checkout recovery evidence status is unsupported")
-            receipts.append(document)
-        else:
-            _require_fields(
-                document,
-                {
-                    "schema_version": "phase-b-checkout-manifest-2.0",
-                    "protocol_id": selection.config.pipeline.value["protocol_id"],
-                    "workflow_id": selection.config.pipeline.value["workflow_id"],
-                    "matcher_id": selection.config.pipeline.value["matcher_id"],
-                    "run_id": layout.run_id,
-                },
-                "archived checkout evidence",
-            )
-            if document.get("status") not in {"pass", "blocked"}:
-                raise DataContractError("archived checkout status is unsupported")
-            if match[1] == "blocked-checkout" and document["status"] != "blocked":
-                raise DataContractError("failed checkout archive was not blocked")
-            snapshots.add(relative)
-    for receipt in receipts:
-        for key, prefix in (
-            ("previous_checkout", "blocked-checkout"),
-            ("attempt_checkout", "checkout-attempt"),
-        ):
-            binding = receipt.get(key)
-            if (
-                not isinstance(binding, dict)
-                or binding.get("path") not in snapshots
-                or binding["path"]
-                != f"{_CHECKOUT_RECOVERY}/{prefix}-{binding.get('sha256')}.json"
-            ):
-                raise DataContractError("checkout recovery evidence binding differs")
-
-
-def _write_checkout_evidence(layout: RunLayout, kind: str, payload: bytes) -> dict[str, str]:
-    digest = hashlib.sha256(payload).hexdigest()
-    relative = f"{_CHECKOUT_RECOVERY}/{kind}-{digest}.json"
-    path = layout.resolve(relative)
-    if path.exists():
-        if path.read_bytes() != payload:
-            raise DataContractError("immutable checkout recovery evidence differs")
-    else:
-        atomic_write_bytes(path, payload)
-    if sha256_file(path) != digest:
-        raise DataContractError("checkout recovery evidence copy failed hash verification")
-    return {"path": relative, "sha256": digest}
-
-
-def recover_checkout(layout: RunLayout, selection: ComparisonSelection) -> dict[str, Any]:
-    """Re-admit a dirty-checkout-only failure without importing any old input."""
-
-    layout.require_existing()
-    _checkout_only_files(layout, selection)
-    path = layout.resolve(_CHECKOUT_RELATIVE, must_exist=True)
-    previous_bytes = path.read_bytes()
-    previous = _load_manifest(path, "blocked checkout manifest")
-    config = selection.config.pipeline
-    _require_fields(
-        previous,
-        {
-            "schema_version": "phase-b-checkout-manifest-2.0",
-            "protocol_id": config.value["protocol_id"],
-            "workflow_id": config.value["workflow_id"],
-            "matcher_id": config.value["matcher_id"],
-            "run_id": layout.run_id,
-        },
-        "blocked checkout manifest",
-    )
-    if previous.get("status") == "pass":
-        _validate_existing_checkout(layout, config)
-        return {"run_id": layout.run_id, "status": "checkout-already-admitted"}
-    source = previous.get("source")
-    checks = previous.get("checks")
-    if (
-        previous.get("status") != "blocked"
-        or not isinstance(source, dict)
-        or source.get("worktree_clean") is not False
-        or not isinstance(checks, list)
-        or not checks
-        or any(
-            not isinstance(check, dict)
-            or not isinstance(check.get("check_id"), str)
-            or check.get("status") not in {"pass", "fail"}
-            for check in checks
-        )
-        or len({check["check_id"] for check in checks}) != len(checks)
-        or [check.get("check_id") for check in checks if check["status"] == "fail"]
-        != ["clean-tracked-source"]
-    ):
-        raise DataContractError("recovery requires a dirty-checkout-only blocked run")
-    commit = source.get("commit")
-    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
-        raise DataContractError("blocked checkout lacks an immutable source commit")
-    relative_config = config.path.relative_to(layout.source_root).as_posix()
-    if source.get("config") != {
-        "path": relative_config, "sha256": sha256_file(config.path)
-    }:
-        raise DataContractError("blocked checkout configuration differs")
-    ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
-        cwd=layout.source_root, capture_output=True, check=False,
-    )
-    if ancestor.returncode != 0:
-        raise DataContractError("blocked checkout source is not an ancestor of HEAD")
-    original_config = subprocess.run(
-        ["git", "show", f"{commit}:{relative_config}"],
-        cwd=layout.source_root, capture_output=True, check=False,
-    )
-    if (
-        original_config.returncode != 0
-        or hashlib.sha256(original_config.stdout).hexdigest()
-        != source["config"]["sha256"]
-    ):
-        raise DataContractError("blocked checkout configuration is not authenticated by Git")
-
-    attempt_id = uuid.uuid4().hex
-    pending_relative = f"{_CHECKOUT_RECOVERY}/.pending-{attempt_id}.json"
-    lock_relative = f"{_CHECKOUT_RECOVERY}/recovery.lock"
-    lock = layout.resolve(lock_relative)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with lock.open("xb") as stream:
-            stream.write(attempt_id.encode("ascii"))
-    except FileExistsError as exc:
-        raise DataContractError("another checkout recovery is active or interrupted") from exc
-
-    class RetryLayout(RunLayout):
-        def create(self) -> Path:
-            return self.require_existing()
-
-        def resolve(self, relative, *, must_exist=False) -> Path:
-            if Path(relative).as_posix() == _CHECKOUT_RELATIVE:
-                relative = pending_relative
-            return super().resolve(relative, must_exist=must_exist)
-
-    retry = RetryLayout(layout.source_root, layout.run_id)
-    pending = layout.resolve(pending_relative)
-    try:
-        _checkout_only_files(layout, selection, transient=(lock_relative,))
-        archived = _write_checkout_evidence(layout, "blocked-checkout", previous_bytes)
-        manifest, passed = run_doctor(retry, config)
-        fresh_bytes = pending.read_bytes()
-        attempted = _write_checkout_evidence(layout, "checkout-attempt", fresh_bytes)
-        receipt = {
-            "schema_version": "phase-g-checkout-recovery-1.0",
-            "run_id": layout.run_id,
-            "attempt_id": attempt_id,
-            "arm_id": selection.arm.arm_id,
-            "comparison_config_sha256": selection.config.sha256,
-            "previous_checkout": archived,
-            "attempt_checkout": attempted,
-            "status": "blocked",
-        }
-        try:
-            if not passed:
-                raise DataContractError(f"Checkout recovery doctor failed: {manifest}")
-            _validate_existing_checkout(retry, config)
-            _checkout_only_files(
-                layout, selection, transient=(lock_relative, pending_relative)
-            )
-            if path.read_bytes() != previous_bytes:
-                raise DataContractError("blocked checkout changed during recovery")
-            if pending.read_bytes() != fresh_bytes:
-                raise DataContractError("checkout attempt changed during recovery")
-            atomic_write_bytes(path, fresh_bytes)
-            receipt["status"] = "checkout-admitted"
-        except (DataContractError, OSError, ValueError) as exc:
-            receipt["error"] = str(exc)
-            _write_checkout_evidence(layout, "recovery", canonical_json_bytes(receipt))
-            raise
-        receipt_binding = _write_checkout_evidence(
-            layout, "recovery", canonical_json_bytes(receipt)
-        )
-        return {**receipt, "recovery_manifest": receipt_binding}
-    finally:
-        # These are this invocation's transient files, never scientific output.
-        pending.unlink(missing_ok=True)
-        lock.unlink()
 
 
 def _validate_prepared_inputs(layout: RunLayout, selection: ComparisonSelection) -> None:
@@ -381,118 +158,69 @@ def _base_parameter_count(
     return sum(value.numel() for value in tensors)
 
 
-def trainer_arguments(
-    layout: RunLayout,
-    selection: ComparisonSelection,
-    seed: int,
-    *,
-    mode: str,
-    split: str | None = None,
-) -> list[str]:
+def trainer_arguments(layout: RunLayout, selection: ComparisonSelection, seed: int, *, mode: str, split: str | None=None) -> ComparisonOptions:
     """Derive all private trainer paths from one run/profile/seed namespace."""
-
     if seed not in TRAINING_SEEDS:
-        raise DataContractError(f"training seed {seed} is outside seeds 42-49")
+        raise DataContractError(f'training seed {seed} is outside seeds 42-49')
     recipe = selection.recipe.value
-    checkpoint_dir = layout.resolve(f"checkpoints/seed-{seed}")
-    args = [
-        "--mode",
-        mode,
-        "--prepared-dir",
-        str(layout.resolve("data-prepared", must_exist=True)),
-        "--model-name",
-        selection.profile.model,
-        "--model-revision",
-        selection.profile.revision,
-        "--expected-hidden-size",
-        str(selection.profile.hidden_size),
-        "--model-cache-dir",
-        str(layout.resolve(CACHE_RELATIVE)),
-        "--batch-size",
-        str(recipe["batch_size"]),
-        "--max-length",
-        str(recipe["max_length"]),
-        "--max-span-width",
-        str(recipe["max_span_width"]),
-        "--seed",
-        str(seed),
-    ]
-    if recipe["context_between_spans"]:
-        args.append("--context-between-spans")
+    checkpoint_dir = layout.resolve(f'checkpoints/seed-{seed}')
+    args = ComparisonOptions(
+        mode=mode,
+        prepared_dir=str(layout.resolve('data-prepared', must_exist=True)),
+        model_name=selection.profile.model,
+        model_revision=selection.profile.revision,
+        expected_hidden_size=selection.profile.hidden_size,
+        model_cache_dir=str(layout.resolve(CACHE_RELATIVE)),
+        batch_size=recipe['batch_size'],
+        max_length=recipe['max_length'],
+        max_span_width=recipe['max_span_width'],
+        seed=seed,
+    )
+    if recipe['context_between_spans']:
+        args.context_between_spans = True
     if layout.resolve(CACHE_MANIFEST_RELATIVE).is_file():
-        args.append("--model-local-files-only")
-    if mode == "train":
-        boost = recipe["comparison_boost"]
-        args.extend(
-            [
-                "--lr",
-                str(recipe["learning_rate"]),
-                "--max-steps",
-                str(recipe["max_steps"]),
-                "--warmup-steps",
-                str(recipe["warmup_steps"]),
-                "--re-weight",
-                str(recipe["re_loss_weight"]),
-                "--re-no-rel-weight",
-                str(recipe["re_no_rel_weight"]),
-                "--neg-sample-ratio",
-                str(recipe["ner_negative_ratio"]),
-                "--focal-gamma",
-                str(recipe["ner_focal_gamma"]),
-                "--bio-loss-weight",
-                str(recipe["bio_loss_weight"]),
-                "--label-smoothing",
-                str(recipe["label_smoothing"]),
-                "--eval-every",
-                str(recipe["evaluation_every_steps"]),
-                "--comparison-boost-schedule",
-                str(boost["schedule"]),
-                "--re-comparison-boost",
-                str(boost["initial"]),
-                "--re-boost-adaptive-steps",
-                str(boost["adaptive_step"]),
-                "--re-boost-adaptive-threshold",
-                str(boost["threshold_low"]),
-                "--re-boost-adaptive-threshold2",
-                str(boost["threshold_high"]),
-                "--re-boost-mid",
-                str(boost["middle"]),
-                "--re-boost-end",
-                str(boost["end"]),
-                "--save-best-to",
-                str(checkpoint_dir / "checkpoint.pt"),
-                "--save-last-to",
-                str(checkpoint_dir / "restart-state.pt"),
-                "--progress-log",
-                str(layout.resolve(f"logs/encoder-comparison-seed-{seed}.log")),
-                "--run-summary-out",
-                str(checkpoint_dir / "training-summary.json"),
-            ]
+        args.model_local_files_only = True
+    if mode == 'train':
+        boost = recipe['comparison_boost']
+        args = replace(args,
+            lr=float(recipe['learning_rate']),
+            max_steps=recipe['max_steps'],
+            warmup_steps=recipe['warmup_steps'],
+            re_weight=float(recipe['re_loss_weight']),
+            re_no_rel_weight=float(recipe['re_no_rel_weight']),
+            neg_sample_ratio=float(recipe['ner_negative_ratio']),
+            focal_gamma=float(recipe['ner_focal_gamma']),
+            bio_loss_weight=float(recipe['bio_loss_weight']),
+            label_smoothing=float(recipe['label_smoothing']),
+            eval_every=recipe['evaluation_every_steps'],
+            comparison_boost_schedule=str(boost['schedule']),
+            re_comparison_boost=float(boost['initial']),
+            re_boost_adaptive_steps=boost['adaptive_step'],
+            re_boost_adaptive_threshold=float(boost['threshold_low']),
+            re_boost_adaptive_threshold2=float(boost['threshold_high']),
+            re_boost_mid=float(boost['middle']),
+            re_boost_end=float(boost['end']),
+            save_best_to=str(checkpoint_dir / 'checkpoint.pt'),
+            save_last_to=str(checkpoint_dir / 'restart-state.pt'),
+            progress_log=str(layout.resolve(f'logs/encoder-comparison-seed-{seed}.log')),
+            run_summary_out=str(checkpoint_dir / 'training-summary.json'),
         )
-        restart = checkpoint_dir / "restart-state.pt"
-        summary = checkpoint_dir / "training-summary.json"
-        if restart.is_file() and not summary.is_file():
-            args.extend(["--resume-from", str(restart)])
-    elif mode == "predict":
-        if split not in {"development", "test"}:
-            raise DataContractError("prediction split must be development or test")
-        args.extend(
-            [
-                "--checkpoint",
-                str(checkpoint_dir / "checkpoint.pt"),
-                "--sentences",
-                str(layout.resolve(f"data-prepared/{split}.jsonl", must_exist=True)),
-                "--prediction-ledger-out",
-                str(
-                    layout.resolve(
-                        f"predictions/{'dev' if split == 'development' else 'test'}/"
-                        f"seed-{seed}-prediction-ledger.jsonl"
-                    )
-                ),
-            ]
+        restart = checkpoint_dir / 'restart-state.pt'
+        summary = checkpoint_dir / 'training-summary.json'
+        if restart.is_file() and (not summary.is_file()):
+            args = replace(args,
+                resume_from=str(restart),
+            )
+    elif mode == 'predict':
+        if split not in {'development', 'test'}:
+            raise DataContractError('prediction split must be development or test')
+        args = replace(args,
+            checkpoint=str(checkpoint_dir / 'checkpoint.pt'),
+            sentences=str(layout.resolve(f'data-prepared/{split}.jsonl', must_exist=True)),
+            prediction_ledger_out=str(layout.resolve(f"predictions/{('dev' if split == 'development' else 'test')}/seed-{seed}-prediction-ledger.jsonl")),
         )
     else:
-        raise DataContractError(f"unsupported comparison trainer mode: {mode!r}")
+        raise DataContractError(f'unsupported comparison trainer mode: {mode!r}')
     return args
 
 
@@ -504,11 +232,15 @@ def _private_command(
     *,
     split: str | None = None,
 ) -> list[str]:
+    from stages.comparison_matrix import selected_matrix
+    matrix, _identity = selected_matrix(layout, selection)
     command = [
         sys.executable,
         "-B",
         "encoder_comparison.py",
         f"_{action}-encoder",
+        "--matrix-id",
+        matrix.run_id,
         "--run-id",
         layout.run_id,
         "--arm",
@@ -525,15 +257,8 @@ def _private_command(
 
 SMOKE_RELATIVE = "diagnostics/encoder-comparison-smoke"
 SMOKE_MANIFEST_RELATIVE = "manifests/encoder-comparison-smoke.json"
-ADMISSION_RELATIVE = "manifests/encoder-comparison-admission.json"
 
 
-def _replace_argument(arguments: list[str], name: str, value: str) -> None:
-    try:
-        index = arguments.index(name)
-    except ValueError as exc:
-        raise DataContractError(f"private comparison arguments lack {name}") from exc
-    arguments[index + 1] = value
 
 
 def _smoke_paths(layout: RunLayout) -> dict[str, Path]:
@@ -583,8 +308,9 @@ def _smoke_training_arguments(
         "--progress-log": str(paths["progress"]),
         "--run-summary-out": str(paths["training_summary"]),
     }
+    types = {"--max-steps": int, "--eval-every": int}
     for name, value in replacements.items():
-        _replace_argument(arguments, name, value)
+        setattr(arguments, name[2:].replace("-", "_"), types[name](value) if name in types else value)
     return arguments
 
 
@@ -621,10 +347,10 @@ def _validate_smoke_outputs(
             or summary.get("model_revision") != selection.profile.revision
             or summary.get("completed_steps") != 1
             or summary.get("test_evaluated") is not False
-            or summary.get("environment", {}).get("cuda_available") is not True
+            or (training_environment(layout.run_root, summary) or {}).get("cuda_available") is not True
         ):
             raise DataContractError(f"encoder comparison {label} smoke summary differs")
-    if first.get("resumed_from") is not None:
+    if first.get("resumed_from") not in {None, str(paths["restart"])}:
         raise DataContractError("initial encoder smoke unexpectedly resumed")
     if resumed.get("resumed_from") != str(paths["restart"]):
         raise DataContractError("encoder smoke did not round-trip its restart state")
@@ -654,7 +380,7 @@ def _validate_smoke_outputs(
     ):
         raise DataContractError("encoder smoke round-trip evidence is invalid")
     return {
-        "cuda_device": first["environment"]["cuda_device"],
+        "cuda_device": training_environment(layout.run_root, first)["cuda_device"],
         "selected_metrics": first["selected_metrics"],
         "artifacts": {
             layout.relative_identity(path): sha256_file(path)
@@ -671,7 +397,7 @@ def run_smoke(
     *,
     command_runner=subprocess.run,
 ) -> dict[str, Any]:
-    """Run one bounded accelerator smoke and retain an admission boundary."""
+    """Run and authenticate one bounded accelerator smoke."""
 
     _validate_prepared_inputs(layout, selection)
     if seed not in TRAINING_SEEDS:
@@ -718,14 +444,13 @@ def run_smoke(
         evidence = _validate_smoke_outputs(layout, selection, seed)
         manifest = {
             "schema_version": "phase-g-encoder-smoke-1.0",
-            "status": "smoke-complete-awaiting-admission",
+            "status": "completed",
             "run_id": layout.run_id,
             "training_seed": seed,
             "table1_arm": selection.arm.manifest(),
             "identity": identity,
             "cache_identity": cache_identity,
             "evidence": evidence,
-            "full_run_admitted": False,
             "final_test_accessed": False,
         }
         atomic_write_json(manifest_path, manifest)
@@ -736,7 +461,6 @@ def run_smoke(
         or manifest.get("training_seed") != seed
         or manifest.get("table1_arm") != selection.arm.manifest()
         or manifest.get("identity") != identity
-        or manifest.get("full_run_admitted") is not False
         or manifest.get("final_test_accessed") is not False
     ):
         raise DataContractError("encoder comparison smoke manifest differs")
@@ -751,66 +475,6 @@ def run_smoke(
     if manifest.get("evidence") != evidence:
         raise DataContractError("encoder comparison smoke artifacts changed")
     return manifest
-
-
-def record_admission(
-    layout: RunLayout,
-    selection: ComparisonSelection,
-    *,
-    decision: str,
-    reason: str,
-) -> dict[str, Any]:
-    """Record the explicit post-smoke decision needed before full training."""
-
-    if decision not in {"admit", "reject"} or not reason.strip():
-        raise DataContractError("comparison admission needs admit/reject and a reason")
-    smoke_path = layout.resolve(SMOKE_MANIFEST_RELATIVE, must_exist=True)
-    smoke = load_json(smoke_path)
-    selection_manifest = validate_selection(layout, selection)
-    if (
-        smoke.get("status") != "smoke-complete-awaiting-admission"
-        or smoke.get("run_id") != layout.run_id
-        or smoke.get("table1_arm") != selection.arm.manifest()
-    ):
-        raise DataContractError("comparison smoke is not eligible for admission")
-    value = {
-        "schema_version": "phase-g-encoder-admission-1.0",
-        "run_id": layout.run_id,
-        "table1_arm": selection.arm.manifest(),
-        "selection_manifest_sha256": sha256_file(
-            layout.resolve("manifests/encoder-comparison-selection.json", must_exist=True)
-        ),
-        "smoke_manifest_sha256": sha256_file(smoke_path),
-        "decision": decision,
-        "reason": reason.strip(),
-        "final_test_accessed": False,
-        "selection": selection_manifest,
-    }
-    path = layout.resolve(ADMISSION_RELATIVE)
-    if path.is_file():
-        if load_json(path) != value:
-            raise DataContractError("existing comparison admission decision differs")
-    else:
-        atomic_write_json(path, value)
-    return value
-
-
-def _require_admission(
-    layout: RunLayout, selection: ComparisonSelection
-) -> dict[str, Any]:
-    path = layout.resolve(ADMISSION_RELATIVE, must_exist=True)
-    value = load_json(path)
-    smoke_path = layout.resolve(SMOKE_MANIFEST_RELATIVE, must_exist=True)
-    if (
-        value.get("schema_version") != "phase-g-encoder-admission-1.0"
-        or value.get("run_id") != layout.run_id
-        or value.get("table1_arm") != selection.arm.manifest()
-        or value.get("decision") != "admit"
-        or value.get("smoke_manifest_sha256") != sha256_file(smoke_path)
-        or value.get("final_test_accessed") is not False
-    ):
-        raise DataContractError("encoder comparison arm lacks an admitted smoke decision")
-    return value
 
 
 def plan_training(
@@ -845,7 +509,6 @@ def plan_training(
         ),
         "encoder_profile": selection.profile.manifest(),
         "recipe": selection.recipe.value,
-        "historical_source": selection.config.value["historical_source"],
         "final_test_selection_forbidden": True,
     }
     if path.is_file():
@@ -897,11 +560,8 @@ def _checkpoint_manifest(
     )
     acquisition = load_json(acquisition_path)
     preparation = load_json(preparation_path)
-    compatibility_path, compatibility = _dataset_compatibility_report(
-        layout, selection.pipeline_view(), preparation
-    )
     return {
-        "schema_version": "phase-b-model-checkpoint-manifest-4.0",
+        "schema_version": "encoder-checkpoint-1",
         "protocol_id": PROTOCOL_ID,
         "split_id": "CODE-SPLIT-1",
         "training_seed": seed,
@@ -941,9 +601,6 @@ def _checkpoint_manifest(
         "selected_metric": "development_strict_triple_f1",
         "selected_metric_value": float(selected_f1),
         "restart_state_sha256": sha256_file(restart),
-        "dataset_compatibility_report": layout.relative_identity(compatibility_path),
-        "dataset_compatibility_sha256": sha256_file(compatibility_path),
-        "historical_comparability": compatibility["status"],
     }
 
 
@@ -954,7 +611,8 @@ def run_training(
     *,
     command_runner=subprocess.run,
 ) -> dict[str, Any]:
-    _require_admission(layout, selection)
+    from stages.comparison_matrix import require_matrix_progress
+    require_matrix_progress(layout, selection, boundary="training")
     plan = plan_training(layout, selection, seed)
     checkpoint_dir = layout.resolve(f"checkpoints/seed-{seed}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -998,6 +656,7 @@ def run_training(
         "checkpoint_manifest": layout.relative_identity(checkpoint_manifest_path),
         "checkpoint_manifest_sha256": sha256_file(checkpoint_manifest_path),
         "cache_identity": cache_identity,
+        "output_hashes": {layout.relative_identity(p): sha256_file(p) for p in (checkpoint_manifest_path, checkpoint_dir / "training-summary.json", checkpoint_dir / "restart-state.pt", layout.resolve(f"logs/encoder-comparison-seed-{seed}.log"))},
     }
     result_path = layout.resolve(
         f"manifests/encoder-comparison-train-live-seed-{seed}.json"
@@ -1018,6 +677,8 @@ def generate(
     *,
     command_runner=subprocess.run,
 ) -> dict[str, Any]:
+    from stages.comparison_matrix import require_matrix_progress
+    require_matrix_progress(layout, selection, boundary="test" if split == "test" else "training")
     _validate_prepared_inputs(layout, selection)
     if split not in {"development", "test"}:
         raise DataContractError("comparison generation split must be development or test")
@@ -1052,6 +713,7 @@ def generate(
 
 def run_private(arguments: list[str], *, action: str, default_config: str) -> int:
     parser = argparse.ArgumentParser(prog=f"encoder_comparison.py _{action}-encoder")
+    parser.add_argument("--matrix-id", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--arm", required=True)
     parser.add_argument("--training-seed", required=True, type=int)
@@ -1063,6 +725,20 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
     config = load_comparison_config(source_root, args.config)
     selection = config.select_arm(args.arm)
     layout = RunLayout(source_root=source_root, run_id=args.run_id)
+    from stages.comparison_matrix import selected_matrix, require_matrix_progress
+    from utils.common.execution import exclusive_run, require_active_dispatch
+    matrix, _identity = selected_matrix(layout, selection)
+    if args.matrix_id != matrix.run_id:
+        raise DataContractError("private worker names another matrix")
+    require_matrix_progress(layout, selection,
+        boundary="smoke" if action == "smoke" else "test" if action == "predict" and args.split == "test" else "training")
+    if action != "smoke":
+        require_active_dispatch(matrix, [f"_{action}-encoder", *arguments])
+    with exclusive_run(layout, f"{action}-{args.training_seed}"):
+        return _execute_private(layout, selection, args, action)
+
+
+def _execute_private(layout, selection, args, action):
     _validate_prepared_inputs(layout, selection)
     if action == "smoke":
         import torch
@@ -1080,6 +756,8 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
             layout, selection, args.training_seed
         )
         if not paths["training_summary"].is_file():
+            if paths["restart"].is_file():
+                training_arguments.resume_from = str(paths["restart"])
             trainer_main(training_arguments)
         if not paths["checkpoint"].is_file() or not paths["restart"].is_file():
             raise DataContractError("private smoke did not write checkpoint state")
@@ -1096,13 +774,11 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
                 (checkpoint_sha256 + "\n").encode("ascii"),
             )
         if not paths["resume_summary"].is_file():
-            resume_arguments = list(training_arguments)
-            _replace_argument(
-                resume_arguments, "--run-summary-out", str(paths["resume_summary"])
-            )
-            resume_arguments.extend(["--resume-from", str(paths["restart"])])
-            if "--model-local-files-only" not in resume_arguments:
-                resume_arguments.append("--model-local-files-only")
+            resume_arguments = replace(training_arguments)
+            resume_arguments = replace(resume_arguments, run_summary_out=str(paths['resume_summary']))
+            resume_arguments.resume_from = str(paths["restart"])
+            if not resume_arguments.model_local_files_only:
+                resume_arguments.model_local_files_only = True
             trainer_main(resume_arguments)
         if sha256_file(paths["checkpoint"]) != checkpoint_sha256:
             raise DataContractError("smoke resume changed the selected checkpoint")
@@ -1124,19 +800,11 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
                 mode="predict",
                 split="development",
             )
-            _replace_argument(
-                prediction_arguments, "--checkpoint", str(paths["checkpoint"])
-            )
-            _replace_argument(
-                prediction_arguments, "--sentences", str(paths["sentence"])
-            )
-            _replace_argument(
-                prediction_arguments,
-                "--prediction-ledger-out",
-                str(paths["ledger"]),
-            )
-            if "--model-local-files-only" not in prediction_arguments:
-                prediction_arguments.append("--model-local-files-only")
+            prediction_arguments = replace(prediction_arguments, checkpoint=str(paths['checkpoint']))
+            prediction_arguments = replace(prediction_arguments, sentences=str(paths['sentence']))
+            prediction_arguments = replace(prediction_arguments, prediction_ledger_out=str(paths['ledger']))
+            if not prediction_arguments.model_local_files_only:
+                prediction_arguments.model_local_files_only = True
             trainer_main(prediction_arguments)
         ledger = _read_jsonl(paths["ledger"])
         sentence = _read_jsonl(paths["sentence"])

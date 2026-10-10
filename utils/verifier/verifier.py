@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from utils.verifier.interpretation import _parse_content
+
+from utils.verifier.requests import PreparedSentence, _exact_keys, _load_candidates, _load_sentences, _prompt_bundle, _request_record, _sha256_value
+
 import hashlib
 import importlib.metadata
 import json
@@ -19,7 +23,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from utils.common.config import PipelineConfig
-from utils.common.constants import ENTITY_TYPES, PROTOCOL_ID, RELATION_TYPES
+from utils.common.constants import PROTOCOL_ID
 from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
@@ -30,40 +34,14 @@ from utils.common.artifact_io import (
     load_json,
     sha256_file,
 )
-from utils.common.paths import RunLayout, discover_source_root, resolve_tracked_path
-from utils.common.records import Candidate, EntitySpan, StrictTriple, Verdict
+from utils.common.paths import RunLayout
+from utils.common.records import Candidate, Verdict
+from utils.common.execution import bind_json
 
 
-REASON_CODES = {
-    "SUPPORTED",
-    "WRONG_RELATION",
-    "WRONG_HEAD",
-    "WRONG_TAIL",
-    "UNSUPPORTED",
-    "AMBIGUOUS",
-}
-MODE_CONDITIONS = {"simple": "VER-SIMPLE", "corrective": "VER-CORRECTIVE"}
+from utils.verifier.requests import MODE_CONDITIONS
 EXECUTION_MODES = {"dry-run", "live", "replay"}
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
-@dataclass(frozen=True)
-class PreparedSentence:
-    example_id: str
-    source_document_id: str
-    split: str
-    content: str
-    processed_content: str
-    words: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class PromptBundle:
-    mode: str
-    system: str
-    instruction: str
-    response_schema: dict[str, Any]
-    sha256: str
 
 
 @dataclass(frozen=True)
@@ -80,270 +58,16 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _sha256_value(value: Any) -> str:
-    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
-
-
-def _exact_keys(
-    value: dict[str, Any], required: set[str], label: str, optional: set[str] | None = None
-) -> None:
-    optional = optional or set()
-    missing = sorted(required - set(value))
-    extra = sorted(set(value) - required - optional)
-    if missing:
-        raise DataContractError(f"{label} is missing required fields: {', '.join(missing)}")
-    if extra:
-        raise DataContractError(f"{label} contains unsupported fields: {', '.join(extra)}")
-
-
-def _read_utf8(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise DataContractError(f"could not read UTF-8 prompt {path.name}: {exc}") from exc
-
-
-def _prompt_bundle(config: PipelineConfig, mode: str) -> PromptBundle:
-    if mode not in MODE_CONDITIONS:
-        raise DataContractError(f"unsupported verifier mode: {mode!r}")
-    verifier = config.value["verifier"]
-    source_root = discover_source_root(config.path)
-    system_path = resolve_tracked_path(source_root, verifier["system_prompt"])
-    instruction_path = resolve_tracked_path(source_root, verifier[f"{mode}_prompt"])
-    schema_path = resolve_tracked_path(source_root, verifier[f"{mode}_response_schema"])
-    expected_files = {
-        system_path: verifier["system_prompt_sha256"],
-        instruction_path: verifier[f"{mode}_prompt_sha256"],
-        schema_path: verifier[f"{mode}_response_schema_sha256"],
-    }
-    for path, expected in expected_files.items():
-        actual = sha256_file(path)
-        if actual != expected:
-            raise DataContractError(
-                f"tracked verifier resource hash mismatch for {path.name}: {actual}"
-            )
-    system = _read_utf8(system_path)
-    instruction = _read_utf8(instruction_path)
-    schema = load_json(schema_path)
-    if not isinstance(schema, dict):
-        raise DataContractError(f"{schema_path.name} must contain a JSON object")
-    identity = {
-        "protocol_id": PROTOCOL_ID,
-        "prompt_revision": verifier["prompt_revision"],
-        "mode": mode,
-        "system": system,
-        "instruction": instruction,
-        "response_schema": schema,
-    }
-    digest = _sha256_value(identity)
-    if digest != verifier[f"{mode}_bundle_sha256"]:
-        raise DataContractError(f"config verifier {mode} prompt-bundle hash is stale")
-    return PromptBundle(mode, system, instruction, schema, digest)
-
-
-def _load_sentences(path: Path) -> dict[str, PreparedSentence]:
-    required = {
-        "protocol_id",
-        "dataset_id",
-        "example_id",
-        "source_document_id",
-        "source_country",
-        "split",
-        "content",
-        "processed_content",
-        "words",
-        "entities",
-        "relations",
-    }
-    records: dict[str, PreparedSentence] = {}
-    observed_order: list[str] = []
-    for line_number, value in iter_jsonl(path):
-        label = f"{path.name}:{line_number}"
-        _exact_keys(value, required, label)
-        if value["protocol_id"] != PROTOCOL_ID:
-            raise DataContractError(f"{label}.protocol_id differs from {PROTOCOL_ID}")
-        if value["dataset_id"] != "CODE-ACCORD-v1.0.0":
-            raise DataContractError(f"{label}.dataset_id is not CODE-ACCORD-v1.0.0")
-        for field in ("example_id", "source_document_id", "content", "processed_content"):
-            if not isinstance(value[field], str) or not value[field]:
-                raise DataContractError(f"{label}.{field} must be a nonempty string")
-        if value["split"] not in {"development", "test"}:
-            raise DataContractError(f"{label}.split must be development or test")
-        words = value["words"]
-        if not isinstance(words, list) or not words or any(
-            not isinstance(word, str) or not word for word in words
-        ):
-            raise DataContractError(f"{label}.words must be a nonempty string array")
-        if tuple(value["processed_content"].split()) != tuple(words):
-            raise DataContractError(
-                f"{label}.processed_content tokens differ from the words field"
-            )
-        if not isinstance(value["entities"], list) or not isinstance(value["relations"], list):
-            raise DataContractError(f"{label}.entities and relations must be arrays")
-        example_id = value["example_id"]
-        if example_id in records:
-            raise DataContractError(f"{label} duplicates example_id {example_id}")
-        records[example_id] = PreparedSentence(
-            example_id=example_id,
-            source_document_id=value["source_document_id"],
-            split=value["split"],
-            content=value["content"],
-            processed_content=value["processed_content"],
-            words=tuple(words),
-        )
-        observed_order.append(example_id)
-    if not records:
-        raise DataContractError(f"{path.name} contains no prepared sentences")
-    if observed_order != sorted(observed_order):
-        raise DataContractError(f"{path.name} must be sorted by example_id")
-    return records
-
-
-def _source_text(sentence: PreparedSentence, span: EntitySpan, label: str) -> str:
-    if span.end >= len(sentence.words):
-        raise DataContractError(f"{label} span exceeds sentence token boundaries")
-    text = " ".join(sentence.words[span.start : span.end + 1])
-    if span.text is not None and span.text != text:
-        raise DataContractError(f"{label} text differs from the source token span")
-    return text
-
-
-def _load_candidates(
-    path: Path, sentences: dict[str, PreparedSentence]
-) -> list[tuple[Candidate, dict[str, Any], PreparedSentence]]:
-    records: list[tuple[Candidate, dict[str, Any], PreparedSentence]] = []
-    seen: set[str] = set()
-    observed_order: list[tuple[int, str, str]] = []
-    for line_number, value in iter_jsonl(path):
-        label = f"{path.name}:{line_number}"
-        candidate = Candidate.from_mapping(value, label)
-        sentence = sentences.get(candidate.triple.example_id)
-        if sentence is None:
-            raise DataContractError(f"{label} refers to an unknown prepared sentence")
-        if candidate.split_id != f"CODE-SPLIT-1:{sentence.split}":
-            raise DataContractError(f"{label}.split_id differs from its prepared sentence")
-        if candidate.source_document_id != sentence.source_document_id:
-            raise DataContractError(f"{label}.source_document_id differs from its sentence")
-        _source_text(sentence, candidate.triple.head, f"{label}.head")
-        _source_text(sentence, candidate.triple.tail, f"{label}.tail")
-        if candidate.candidate_id in seen:
-            raise DataContractError(f"{label} duplicates candidate_id")
-        seen.add(candidate.candidate_id)
-        records.append((candidate, value, sentence))
-        observed_order.append(candidate.sort_key())
-    if not records:
-        raise DataContractError(f"{path.name} contains no candidates")
-    if observed_order != sorted(observed_order):
-        raise DataContractError(
-            f"{path.name} candidates must be sorted by training_seed, example_id, candidate_id"
-        )
-    return records
-
-
-def _decoding(config: PipelineConfig) -> dict[str, Any]:
-    value = config.value["verifier"]
-    return {
-        "stream": value["stream"],
-        "think": value["think"],
-        "options": {
-            "temperature": value["temperature"],
-            "seed": value["seed"],
-            "top_k": value["top_k"],
-            "top_p": value["top_p"],
-            "min_p": value["min_p"],
-            "repeat_penalty": value["repeat_penalty"],
-            "num_ctx": value["num_ctx"],
-            "num_predict": value["num_predict"],
-        },
-    }
-
-
-def verifier_identity(config: PipelineConfig, mode: str) -> tuple[str, str, str]:
-    """Return the frozen prompt, model-manifest, and decoding identities."""
-
-    bundle = _prompt_bundle(config, mode)
-    return (
-        bundle.sha256,
-        config.value["verifier"]["registry_manifest_sha256"],
-        _sha256_value(_decoding(config)),
-    )
-
-
-def _request_record(
-    candidate: Candidate,
-    candidate_raw: dict[str, Any],
-    sentence: PreparedSentence,
-    bundle: PromptBundle,
-    config: PipelineConfig,
-) -> dict[str, Any]:
-    condition = MODE_CONDITIONS[bundle.mode]
-    head_text = _source_text(sentence, candidate.triple.head, "candidate.head")
-    tail_text = _source_text(sentence, candidate.triple.tail, "candidate.tail")
-    input_record = {
-        "sentence": sentence.content,
-        "sentence_processed": sentence.processed_content,
-        "sentence_tokens": list(sentence.words),
-        "candidate": {
-            "head": {
-                "text": head_text,
-                "type": candidate.triple.head.entity_type,
-                "span": [candidate.triple.head.start, candidate.triple.head.end],
-            },
-            "relation": candidate.triple.relation,
-            "tail": {
-                "text": tail_text,
-                "type": candidate.triple.tail.entity_type,
-                "span": [candidate.triple.tail.start, candidate.triple.tail.end],
-            },
-        },
-    }
-    user_content = (
-        bundle.instruction.rstrip("\n")
-        + "\n\nINPUT_JSON:\n"
-        + canonical_json_bytes(input_record).decode("utf-8").rstrip("\n")
-    )
-    decoding = _decoding(config)
-    payload = {
-        "model": config.value["verifier"]["model"],
-        "messages": [
-            {"role": "system", "content": bundle.system},
-            {"role": "user", "content": user_content},
-        ],
-        "format": bundle.response_schema,
-        **decoding,
-    }
-    candidate_sha256 = _sha256_value(candidate_raw)
-    decoding_sha256 = _sha256_value(decoding)
-    cache_identity = {
-        "model_manifest_sha256": config.value["verifier"]["registry_manifest_sha256"],
-        "prompt_sha256": bundle.sha256,
-        "decoding_sha256": decoding_sha256,
-        "mode": bundle.mode,
-        "candidate_sha256": candidate_sha256,
-    }
-    return {
-        "protocol_id": PROTOCOL_ID,
-        "condition_id": condition,
-        "training_seed": candidate.training_seed,
-        "example_id": candidate.triple.example_id,
-        "source_document_id": candidate.source_document_id,
-        "candidate_id": candidate.candidate_id,
-        "candidate_sha256": candidate_sha256,
-        "cache_key": _sha256_value(cache_identity),
-        "prompt_sha256": bundle.sha256,
-        "model_manifest_sha256": config.value["verifier"]["registry_manifest_sha256"],
-        "decoding_sha256": decoding_sha256,
-        "request_sha256": _sha256_value(payload),
-        "payload": payload,
-    }
-
-
 class _EventLog:
     def __init__(self, path: Path, condition: str, execution_mode: str) -> None:
         self.path = path
         self.condition = condition
         self.execution_mode = execution_mode
-        self.sequence = 0
+        self.events = [row for _, row in iter_jsonl(path)] if path.exists() else []
+        if any(row.get("sequence") != index or row.get("condition_id") != condition
+               for index, row in enumerate(self.events, 1)):
+            raise DataContractError("partial verifier event log is corrupt or foreign")
+        self.sequence = len(self.events)
 
     def append(
         self,
@@ -354,6 +78,11 @@ class _EventLog:
         attempt: int | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
+        if event in {"run_started", "request_planned", "request_attempted", "candidate_completed", "run_completed"}:
+            if any(row.get("event") == event and row.get("candidate_id") == candidate_id
+                   and row.get("attempt") == attempt and row.get("details") == (details or {})
+                   for row in self.events):
+                return
         self.sequence += 1
         record = {
             "protocol_id": PROTOCOL_ID,
@@ -372,6 +101,7 @@ class _EventLog:
             handle.write(canonical_json_bytes(record))
             handle.flush()
             os.fsync(handle.fileno())
+        self.events.append(record)
 
 
 def _command_output(arguments: list[str], timeout: float = 30) -> dict[str, Any]:
@@ -625,105 +355,6 @@ def _verify_live_model(
     }
 
 
-def _token_span(
-    words: tuple[str, ...], text: str, entity_type: str
-) -> tuple[EntitySpan | None, str]:
-    tokens = tuple(text.split())
-    if not tokens or " ".join(tokens) != text:
-        return None, "out_of_source"
-    matches = [
-        start
-        for start in range(len(words) - len(tokens) + 1)
-        if words[start : start + len(tokens)] == tokens
-    ]
-    if not matches:
-        return None, "out_of_source"
-    if len(matches) > 1:
-        return None, "ambiguous"
-    start = matches[0]
-    return EntitySpan(start, start + len(tokens) - 1, entity_type, text), "valid"
-
-
-def _parse_content(
-    mode: str,
-    content: str,
-    candidate: Candidate,
-    sentence: PreparedSentence,
-) -> tuple[str, str | None, str | None, dict[str, Any] | None, str]:
-    try:
-        value = json.loads(content)
-    except json.JSONDecodeError:
-        return "malformed", None, None, None, "not_applicable"
-    if not isinstance(value, dict):
-        return "schema_invalid", None, None, None, "not_applicable"
-    expected = {"action", "reason_code"} if mode == "simple" else {
-        "action",
-        "reason_code",
-        "corrected",
-    }
-    if set(value) != expected:
-        return "schema_invalid", None, None, None, "not_applicable"
-    actions = {"KEEP", "DISCARD", "UNCERTAIN"}
-    if mode == "corrective":
-        actions.add("CORRECT")
-    action = value.get("action")
-    reason_code = value.get("reason_code")
-    if action not in actions or reason_code not in REASON_CODES:
-        return "schema_invalid", None, None, None, "not_applicable"
-    if mode == "simple":
-        return "valid_response", action, reason_code, None, "not_applicable"
-    corrected = value.get("corrected")
-    if action != "CORRECT":
-        if corrected is not None:
-            return "schema_invalid", None, None, None, "not_applicable"
-        return "valid_response", action, reason_code, None, "not_applicable"
-    if not isinstance(corrected, dict):
-        return "schema_invalid", None, None, None, "schema_invalid"
-    fields = {"head_text", "head_type", "relation", "tail_text", "tail_type"}
-    if set(corrected) != fields:
-        return "schema_invalid", None, None, None, "schema_invalid"
-    if (
-        not isinstance(corrected["head_text"], str)
-        or not corrected["head_text"]
-        or not isinstance(corrected["tail_text"], str)
-        or not corrected["tail_text"]
-        or corrected["head_type"] not in ENTITY_TYPES
-        or corrected["tail_type"] not in ENTITY_TYPES
-        or corrected["relation"] not in RELATION_TYPES
-    ):
-        return "schema_invalid", None, None, None, "schema_invalid"
-    head, head_status = _token_span(
-        sentence.words, corrected["head_text"], corrected["head_type"]
-    )
-    tail, tail_status = _token_span(
-        sentence.words, corrected["tail_text"], corrected["tail_type"]
-    )
-    if "ambiguous" in {head_status, tail_status}:
-        return "valid_response", action, reason_code, None, "ambiguous"
-    if "out_of_source" in {head_status, tail_status}:
-        return "valid_response", action, reason_code, None, "out_of_source"
-    assert head is not None and tail is not None
-    triple = StrictTriple(
-        example_id=candidate.triple.example_id,
-        head=head,
-        relation=corrected["relation"],
-        tail=tail,
-    )
-    if triple.key() == candidate.triple.key():
-        return "valid_response", action, reason_code, None, "schema_invalid"
-    return (
-        "valid_response",
-        action,
-        reason_code,
-        {
-            "head": head.to_mapping(),
-            "relation": triple.relation,
-            "tail": tail.to_mapping(),
-        },
-        "valid",
-    )
-
-
 def _attempt_result(
     mode: str,
     attempt: dict[str, Any],
@@ -937,9 +568,28 @@ def _live_response(
     event_log: _EventLog,
     sleep: Callable[[float], None],
 ) -> dict[str, Any]:
-    attempts: list[dict[str, Any]] = []
+    journal = request.get("_journal_path")
+    binding = {"request_sha256": request["request_sha256"], "cache_key": request["cache_key"]}
+    attempts = []
+    if journal is not None and journal.exists():
+        saved = load_json(journal)
+        if saved.get("binding") != binding or set(saved) != {"binding", "attempts"}:
+            raise DataContractError("verifier attempt journal belongs to another request")
+        attempts = [_validate_attempt(a, "saved verifier attempt") for a in saved["attempts"]]
+        if len(attempts) > 3 or [a["attempt"] for a in attempts] != list(range(1, len(attempts)+1)):
+            raise DataContractError("verifier attempt journal exceeds its frozen budget")
     candidate_id = request["candidate_id"]
-    for attempt_number in range(1, config.value["verifier"]["attempts"] + 1):
+    terminal = False
+    for index, saved in enumerate(attempts):
+        if terminal:
+            raise DataContractError("verifier journal continues after a valid response")
+        terminal = _attempt_result(mode, saved, request["_candidate"], request["_sentence"])["response_status"] == "valid_response"
+        event_log.append("request_attempted", saved["transport_status"], candidate_id=candidate_id,
+            attempt=saved["attempt"], details={"http_status": saved["http_status"],
+            "elapsed_seconds": saved["elapsed_seconds"], "journal": str(journal)})
+    if attempts and not terminal and len(attempts) < config.value["verifier"]["attempts"]:
+        sleep(config.value["verifier"]["backoff_seconds"][len(attempts)-1])
+    for attempt_number in ([] if terminal else range(len(attempts)+1, config.value["verifier"]["attempts"]+1)):
         started_at = _utc_now()
         started = time.perf_counter()
         status = "response"
@@ -972,12 +622,14 @@ def _live_response(
             "raw_body_sha256": raw_body_sha256,
         }
         attempts.append(attempt)
+        if journal is not None:
+            atomic_write_json(journal, {"binding": binding, "attempts": attempts})
         event_log.append(
             "request_attempted",
             status,
             candidate_id=candidate_id,
             attempt=attempt_number,
-            details={"http_status": http_status, "elapsed_seconds": elapsed},
+            details={"http_status": http_status, "elapsed_seconds": elapsed, "journal": str(journal)},
         )
         candidate_stub = request["_candidate"]
         sentence_stub = request["_sentence"]
@@ -1176,11 +828,21 @@ def run_verifier(
             ]
         )
     existing = [layout.relative_identity(path) for path in planned if path.exists()]
-    if existing:
-        raise DataContractError(
-            "verifier refuses to overwrite existing artifacts: " + ", ".join(existing)
-        )
-
+    if existing and execution_mode != "live":
+        raise DataContractError("verifier refuses to overwrite existing artifacts: " + ", ".join(existing))
+    progress_path = layout.resolve(f"{base}/progress-identity.json")
+    identity = {"run_id": layout.run_id, "mode": mode, "execution_mode": execution_mode,
+        "config_sha256": sha256_file(config.path), "artifact_prefix": prefix,
+        "sentences_sha256": sha256_file(sentences_path), "candidates_sha256": sha256_file(candidates_path),
+        "model_sha256": sha256_file(model_blob_path) if model_blob_path else None,
+        "model_registry": config.value["verifier"]["registry_manifest_sha256"],
+        "checkout_sha256": sha256_file(layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)) if execution_mode == "live" else None,
+        "pilot_selection_sha256": sha256_file(pilot_selection_path) if pilot_selection_path else None,
+        "warmup_sentences_sha256": sha256_file(warmup_sentences_path) if warmup_sentences_path else None,
+        "warmup_candidates_sha256": sha256_file(warmup_candidates_path) if warmup_candidates_path else None}
+    if existing and not progress_path.exists():
+        raise DataContractError("partial verifier evidence lacks its original progress identity")
+    bind_json(progress_path, identity)
     sentences = _load_sentences(sentences_path)
     candidate_rows = _load_candidates(candidates_path, sentences)
     if pilot_selection_path is not None and any(
@@ -1230,6 +892,11 @@ def run_verifier(
         warmup_runtime["_candidate"] = warmup_candidate
         warmup_runtime["_sentence"] = warmup_sentence
 
+    if execution_mode == "live":
+        for runtime in runtime_requests:
+            runtime["_journal_path"] = layout.resolve(f"{base}/journal/test/{runtime['candidate_id']}.json")
+        if warmup_runtime is not None:
+            warmup_runtime["_journal_path"] = layout.resolve(f"{base}/journal/warmup/{warmup_runtime['candidate_id']}.json")
     event_log = _EventLog(paths["log"], condition, execution_mode)
     event_log.append(
         "run_started",
@@ -1237,7 +904,11 @@ def run_verifier(
         details={"mode": mode, "candidate_count": len(serialized_requests)},
     )
     try:
-        atomic_write_jsonl(paths["requests"], serialized_requests)
+        expected_requests = b"".join(canonical_json_bytes(r) for r in serialized_requests)
+        if paths["requests"].exists() and paths["requests"].read_bytes() != expected_requests:
+            raise DataContractError("saved verifier request plan changed")
+        if not paths["requests"].exists():
+            atomic_write_jsonl(paths["requests"], serialized_requests)
         if warmup_runtime is not None:
             atomic_write_jsonl(
                 paths["warmup_request"],
@@ -1264,6 +935,15 @@ def run_verifier(
         endpoint: str | None = None
         if execution_mode == "live":
             endpoint = _safe_ollama_url(ollama_url)
+            original_environment = load_json(paths["environment"]) if paths["environment"].exists() else None
+            if original_environment is not None:
+                for field in ("python", "platform", "hardware"):
+                    if original_environment.get(field) != environment[field]:
+                        raise DataContractError(f"verifier numerical runtime drift: {field}")
+                if original_environment.get("software", {}).get("packages") != environment["software"]["packages"]:
+                    raise DataContractError("verifier package runtime drift")
+                if original_environment.get("ollama", {}).get("version_command") != environment["ollama"]["version_command"]:
+                    raise DataContractError("verifier Ollama version drift")
             model_evidence = _verify_live_model(
                 layout,
                 config,
@@ -1271,7 +951,7 @@ def run_verifier(
                 endpoint,
                 model_blob_path,
                 active_transport,
-                artifact_base=base,
+                artifact_base=(base if original_environment is None else f"{base}/resume-checks/{event_log.sequence:06d}"),
             )
             environment["model"].update(model_evidence)
             environment["ollama"]["origin"] = endpoint
@@ -1283,7 +963,10 @@ def run_verifier(
                     "model_blob_sha256": model_evidence["blob_sha256"],
                 },
             )
-            atomic_write_json(paths["environment"], environment)
+            if original_environment is None:
+                atomic_write_json(paths["environment"], environment)
+            else:
+                environment = original_environment
             assert warmup_runtime is not None
             warmup_response = _live_response(
                 warmup_runtime,
@@ -1331,11 +1014,11 @@ def run_verifier(
                     f"missing={len(missing)}, extra={len(extra)}"
                 )
         elif execution_mode == "live":
-            with paths["responses"].open("ab") as response_handle:
+            with paths["responses"].open("wb") as response_handle:
                 for runtime in verdict_runtime_requests:
                     candidate_id = runtime["candidate_id"]
                     if candidate_id in cached:
-                        response = {**cached[candidate_id], "cache_hit": True}
+                        response = dict(cached[candidate_id])
                     else:
                         assert endpoint is not None
                         response = _live_response(
@@ -1403,6 +1086,12 @@ def run_verifier(
                     paths["model_modelfile"],
                 ]
             )
+        if execution_mode == "live":
+            output_paths.extend(p for p in layout.resolve(f"{base}/journal").rglob("*.json") if p.is_file())
+            resume_dir = layout.resolve(f"{base}/resume-checks")
+            if resume_dir.exists():
+                output_paths.extend(p for p in resume_dir.rglob("*") if p.is_file())
+        output_paths.append(progress_path)
         manifest = {
             "protocol_id": PROTOCOL_ID,
             "condition_id": condition,

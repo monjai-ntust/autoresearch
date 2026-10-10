@@ -14,7 +14,8 @@ import torch
 
 from utils.encoder.data import ResumableRandomSampler, _load_prepared_examples
 from utils.encoder.network import BertBackbone, BertKGExtractor
-from stages.encoder import _load_restart, parse_args
+from utils.encoder.trainer import _load_restart
+from utils.encoder.options import EncoderOptions
 
 
 def _prepared_record(example_id: str, split: str) -> dict:
@@ -102,7 +103,7 @@ class PreparedAdapterTests(unittest.TestCase):
         next(iter(sampler))
         loader = SimpleNamespace(sampler=sampler)
         state = {
-            "format_version": "train-span-restart-1.0",
+            "format_version": "train-span-restart-2.0",
             "seed": 42,
             "model_name": "microsoft/deberta-large",
             "model_revision": "revision-a",
@@ -119,7 +120,6 @@ class PreparedAdapterTests(unittest.TestCase):
             "train_sampler_state": sampler.state_dict(),
             "boost_adaptive_triggered": False,
             "boost_adaptive_switched": False,
-            "re_head_finetune_active": False,
         }
         args = SimpleNamespace(
             resume_from="restart-state.pt",
@@ -128,8 +128,8 @@ class PreparedAdapterTests(unittest.TestCase):
             model_revision="revision-a",
             max_steps=3500,
         )
-        with patch("stages.encoder.torch.load", return_value=state) as loader_mock:
-            _load_restart(args, Mock(), Mock(), Mock(), loader, torch.device("cuda"))
+        with patch("utils.encoder.trainer.torch.load", return_value=state) as loader_mock:
+            _load_restart(args, Mock(), Mock(), Mock(), loader)
         loader_mock.assert_called_once_with(
             "restart-state.pt", map_location="cpu", weights_only=False
         )
@@ -167,7 +167,7 @@ class TrainerSurfaceTests(unittest.TestCase):
             "run-summary-out": "summary.json",
         }
         argv = [item for key, value in values.items() for item in (f"--{key}", value)]
-        args = parse_args(argv)
+        args = EncoderOptions()
         for removed in (
             "dataset",
             "canonical_mode",

@@ -155,140 +155,25 @@ def _manifest_outputs(layout: RunLayout, manifest: dict) -> dict[str, str]:
     return outputs
 
 
-def _same_run_seal_path(producer_manifest: Path) -> Path:
-    return producer_manifest.with_name(f"same-run-{producer_manifest.name}")
+def write_stage_receipt(layout: RunLayout, producer_manifest: Path, manifest: dict) -> Path:
+    """Keep same-run authentication in the producer, without a duplicate seal."""
+    _manifest_outputs(layout, manifest)
+    checkout = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
+    document = {**manifest, "receipt_version": 1, "run_id": layout.run_id,
+                "checkout_sha256": sha256_file(checkout)}
+    atomic_write_json(producer_manifest, document)
+    return producer_manifest
 
 
-def _write_same_run_seal(
-    layout: RunLayout, producer_manifest: Path, manifest: dict
-) -> Path:
-    outputs = _manifest_outputs(layout, manifest)
-    seal_path = _same_run_seal_path(producer_manifest)
-    document = {
-        "schema_version": "phase-b-same-run-stage-seal-1.0",
-        "run_id": layout.run_id,
-        "producer_manifest": {
-            "path": layout.relative_identity(producer_manifest),
-            "sha256": sha256_file(producer_manifest),
-        },
-        "outputs": outputs,
-    }
-    atomic_write_json(seal_path, document)
-    return seal_path
-
-
-def _validate_same_run_seal(
-    layout: RunLayout, producer_manifest: Path, manifest: dict
-) -> None:
-    outputs = _manifest_outputs(layout, manifest)
-    seal = _load_manifest(
-        _same_run_seal_path(producer_manifest), "same-run stage seal"
-    )
-    expected = {
-        "schema_version": "phase-b-same-run-stage-seal-1.0",
-        "run_id": layout.run_id,
-        "producer_manifest": {
-            "path": layout.relative_identity(producer_manifest),
-            "sha256": sha256_file(producer_manifest),
-        },
-        "outputs": outputs,
-    }
-    if seal != expected:
-        raise DataContractError("stage seal does not authenticate the selected run")
+def validate_stage_receipt(layout: RunLayout, producer_manifest: Path, manifest: dict) -> None:
+    _manifest_outputs(layout, manifest)
+    checkout = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
+    if (manifest.get("receipt_version") != 1 or manifest.get("run_id") != layout.run_id
+            or manifest.get("checkout_sha256") != sha256_file(checkout)):
+        raise DataContractError("stage receipt is not bound to the selected run")
 
 
 def _require_fields(value: dict, expected: dict[str, object], label: str) -> None:
     for field, item in expected.items():
         if value.get(field) != item:
             raise DataContractError(f"{label}.{field} differs from this pipeline run")
-
-
-def _next_recovery_path(layout: RunLayout, category: str, filename: str) -> Path:
-    directory = layout.resolve(f"inputs/recovery/{category}")
-    directory.mkdir(parents=True, exist_ok=True)
-    existing = list(directory.glob(f"*-{filename}"))
-    return directory / f"{len(existing) + 1:03d}-{filename}"
-
-
-def _quarantine_run_artifact(
-    layout: RunLayout, path: Path, category: str
-) -> Path | None:
-    if not path.exists():
-        return None
-    layout.relative_identity(path)
-    if not path.is_file() or path.is_symlink():
-        raise DataContractError(f"recovery target is not a physical file: {path}")
-    destination = _next_recovery_path(layout, f"quarantine/{category}", path.name)
-    os.replace(path, destination)
-    return destination
-
-
-def _write_recovery_provenance(
-    layout: RunLayout,
-    cache: Path,
-    *,
-    kind: str,
-    identity: dict[str, object],
-    bindings: dict[str, Path],
-) -> Path:
-    provenance = cache.with_suffix(cache.suffix + ".manifest.json")
-    checkout = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
-    document = {
-        "schema_version": "phase-b-same-run-recovery-2.0",
-        "run_id": layout.run_id,
-        "kind": kind,
-        "identity": identity,
-        "cache": {
-            "path": layout.relative_identity(cache),
-            "sha256": sha256_file(cache),
-        },
-        "checkout_manifest": {
-            "path": layout.relative_identity(checkout),
-            "sha256": sha256_file(checkout),
-        },
-        "bindings": {
-            name: {
-                "path": layout.relative_identity(path),
-                "sha256": sha256_file(path),
-            }
-            for name, path in sorted(bindings.items())
-        },
-    }
-    atomic_write_json(provenance, document)
-    return provenance
-
-
-def _validate_recovery_provenance(
-    layout: RunLayout,
-    cache: Path,
-    *,
-    kind: str,
-    identity: dict[str, object],
-    bindings: dict[str, Path],
-) -> None:
-    provenance_path = cache.with_suffix(cache.suffix + ".manifest.json")
-    provenance = _load_manifest(provenance_path, "recovery provenance")
-    checkout = layout.resolve("manifests/00-checkout-manifest.json", must_exist=True)
-    expected = {
-        "schema_version": "phase-b-same-run-recovery-2.0",
-        "run_id": layout.run_id,
-        "kind": kind,
-        "identity": identity,
-        "cache": {
-            "path": layout.relative_identity(cache),
-            "sha256": sha256_file(cache),
-        },
-        "checkout_manifest": {
-            "path": layout.relative_identity(checkout),
-            "sha256": sha256_file(checkout),
-        },
-        "bindings": {
-            name: {
-                "path": layout.relative_identity(path),
-                "sha256": sha256_file(path),
-            }
-            for name, path in sorted(bindings.items())
-        },
-    }
-    if provenance != expected:
-        raise DataContractError("recovery cache is not bound to the selected run")

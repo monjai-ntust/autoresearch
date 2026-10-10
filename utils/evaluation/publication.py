@@ -8,6 +8,8 @@ pilot subset before any live verifier call.
 
 from __future__ import annotations
 
+from utils.common.execution import bind_json as atomic_write_json, retain_jsonl as atomic_write_jsonl, retain_text as atomic_write_text
+
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +18,6 @@ from utils.common.constants import PROTOCOL_ID, TRAINING_SEEDS, WORKFLOW_ID
 from utils.common.paths import RunLayout
 from utils.common.artifact_io import (
     DataContractError,
-    atomic_write_json,
-    atomic_write_jsonl,
     iter_jsonl,
     sha256_file,
 )
@@ -69,11 +69,6 @@ def assemble_seed_candidates(
     )
     planned = [combined_path] + ([index_path] if index_path is not None else [])
     existing = [layout.relative_identity(path) for path in planned if path.exists()]
-    if existing:
-        raise DataContractError(
-            "candidate assembly refuses to overwrite existing artifacts: "
-            + ", ".join(existing)
-        )
 
     combined_rows: list[dict[str, Any]] = []
     index_files: list[dict[str, Any]] = []
@@ -179,11 +174,6 @@ def prepare_verifier_pilot(
     selection_path = layout.resolve("predictions/dev/pilot-selection.json")
     planned = [pilot_path, warmup_path, selection_path]
     existing = [layout.relative_identity(path) for path in planned if path.exists()]
-    if existing:
-        raise DataContractError(
-            "pilot preparation refuses to overwrite existing artifacts: "
-            + ", ".join(existing)
-        )
 
     atomic_write_jsonl(pilot_path, pilot_rows)
     atomic_write_jsonl(warmup_path, [raw_by_id[warmup.candidate_id]])

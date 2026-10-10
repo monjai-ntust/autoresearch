@@ -26,18 +26,6 @@ from utils.common.paths import RunLayout, resolve_tracked_path
 SCHEMA_VERSION = "phase-g-encoder-comparison-1.2"
 SELECTION_SCHEMA_VERSION = "phase-g-encoder-selection-1.0"
 DEFAULT_CONFIG = "resources/configs/encoder-comparison.json"
-HISTORICAL_COMMIT = "9feafa4029e65ab48ecfb2f452f4b0fabbff0826"
-HISTORICAL_BLOBS = {
-    "trainer": ("train_span.py", "104ca6e4afcb5122228fff5c73227c6b3b3edb40"),
-    "network": (
-        "models/bert_kg_encoder.py",
-        "d05678f00097cb11176dacef6fade0b1b3f557de",
-    ),
-    "data_adapter": (
-        "data/code_accord.py",
-        "0b11fc6bf2f16512864b4dbf77e7a610d8fa8fdb",
-    ),
-}
 PROFILE_FIELDS = {
     "profile_id",
     "model",
@@ -74,7 +62,6 @@ ARM_FIELDS = {
     "claim_role",
     "profile_id",
     "recipe_id",
-    "historical_reported_development",
 }
 BASE_PARAMETER_COUNT_SOURCE = (
     "sum_numel_from_pinned_pytorch_model_bin_state_dict_after_digest_verification"
@@ -240,7 +227,6 @@ class Table1Arm:
     claim_role: str
     profile_id: str
     recipe_id: str
-    historical_reported_development: dict[str, float | None]
 
     def manifest(self) -> dict[str, Any]:
         return {
@@ -249,9 +235,6 @@ class Table1Arm:
             "claim_role": self.claim_role,
             "profile_id": self.profile_id,
             "recipe_id": self.recipe_id,
-            "historical_reported_development": copy.deepcopy(
-                self.historical_reported_development
-            ),
         }
 
 
@@ -293,18 +276,6 @@ class ComparisonConfig:
             recipe=recipe,
         )
 
-    def select(self, profile_id: str, recipe_id: str) -> "ComparisonSelection":
-        matches = [
-            arm
-            for arm in self.arms.values()
-            if arm.profile_id == profile_id and arm.recipe_id == recipe_id
-        ]
-        if len(matches) != 1:
-            raise DataContractError(
-                "encoder profile/recipe pair is not one approved Table 1 arm"
-            )
-        return self.select_arm(matches[0].arm_id)
-
 
 @dataclass(frozen=True)
 class ComparisonSelection:
@@ -341,10 +312,6 @@ class ComparisonSelection:
         return PipelineConfig(
             path=self.config.path,
             value=value,
-            matrix_path=self.config.pipeline.matrix_path,
-            matrix=self.config.pipeline.matrix,
-            section5_evidence_path=self.config.pipeline.section5_evidence_path,
-            section5_evidence=self.config.pipeline.section5_evidence,
         )
 
     def manifest(self, run_id: str | None = None) -> dict[str, Any]:
@@ -359,9 +326,6 @@ class ComparisonSelection:
                 ).as_posix(),
                 "sha256": self.config.sha256,
             },
-            "historical_source": copy.deepcopy(
-                self.config.value["historical_source"]
-            ),
             "table1_arm": self.arm.manifest(),
             "encoder_profile": self.profile.manifest(),
             "recipe": copy.deepcopy(self.recipe.value),
@@ -484,15 +448,6 @@ def _validate_recipe(value: Any, index: int) -> ComparisonRecipe:
     return ComparisonRecipe(recipe_id=recipe_id, value=copy.deepcopy(recipe))
 
 
-def _optional_metric(value: Any, label: str) -> float | None:
-    if value is None:
-        return None
-    metric = _number(value, label)
-    if metric > 1.0:
-        raise DataContractError(f"{label} must be <= 1.0")
-    return metric
-
-
 def _validate_arm(
     value: Any,
     index: int,
@@ -517,28 +472,12 @@ def _validate_arm(
     recipe_id = _identifier(arm["recipe_id"], f"{label}.recipe_id")
     if profile_id not in profiles or recipe_id not in recipes:
         raise DataContractError(f"{label} references an unknown profile or recipe")
-    reported = _object(
-        arm["historical_reported_development"],
-        f"{label}.historical_reported_development",
-    )
-    _exact_keys(
-        reported,
-        {"mean_f1", "sample_sd", "best_f1"},
-        f"{label}.historical_reported_development",
-    )
-    historical = {
-        key: _optional_metric(
-            reported[key], f"{label}.historical_reported_development.{key}"
-        )
-        for key in ("mean_f1", "sample_sd", "best_f1")
-    }
     return Table1Arm(
         arm_id=arm_id,
         row_label=row_label,
         claim_role=claim_role,
         profile_id=profile_id,
         recipe_id=recipe_id,
-        historical_reported_development=historical,
     )
 
 
@@ -556,7 +495,6 @@ def load_comparison_config(
             "dataset_id",
             "split_id",
             "canonical_pipeline_config",
-            "historical_source",
             "encoder_profiles",
             "recipes",
             "table1_arms",
@@ -578,17 +516,6 @@ def load_comparison_config(
         if value[field] != expected_value:
             raise DataContractError(
                 f"encoder comparison config {field} must be {expected_value!r}"
-            )
-
-    historical = _object(value["historical_source"], "historical_source")
-    _exact_keys(historical, {"commit", *HISTORICAL_BLOBS}, "historical_source")
-    if historical["commit"] != HISTORICAL_COMMIT:
-        raise DataContractError("historical source commit differs from Phase G authority")
-    for name, (source_path, blob) in HISTORICAL_BLOBS.items():
-        record = _object(historical[name], f"historical_source.{name}")
-        if record != {"path": source_path, "git_blob_sha1": blob}:
-            raise DataContractError(
-                f"historical_source.{name} differs from the frozen source crosswalk"
             )
 
     pipeline_record = _object(
