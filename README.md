@@ -133,6 +133,11 @@ closed until a separately recorded post-review admission exists. See
 `docs/encoder-comparison.md` for the source/reuse boundary,
 statistics contract, and command contract.
 
+For the DeBERTa-large `selected encoder state dictionary contains non-tensors`
+failure after completed CUDA smoke work, use the
+[same-run smoke finalization instructions](docs/encoder-comparison.md#finalize-a-completed-smoke-after-the-parameter-counter-failure).
+They retain existing evidence and stop before training admission.
+
 ### Detached full-training and prediction launcher
 
 Run this Bash block from the standalone source checkout, with dependencies

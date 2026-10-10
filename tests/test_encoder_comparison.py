@@ -451,6 +451,82 @@ class EncoderComparisonTests(unittest.TestCase):
                 comparison_stage._base_parameter_count(layout, counted_selection), 14
             )
 
+    def test_parameter_count_accepts_only_large_configuration_metadata(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "parameter-count")
+            layout.create()
+            for arm in self.config.arms:
+                selection = self.config.select_arm(arm)
+                snapshot = layout.resolve(
+                    "inputs/huggingface/models--fixture/snapshots/"
+                    + selection.profile.revision
+                )
+                weight = snapshot / selection.profile.weight_path
+                snapshot.mkdir(parents=True, exist_ok=True)
+                tensors = {"first": torch.zeros(3, 4), "second": torch.zeros(2)}
+                for metadata, error in (
+                    ({}, None),
+                    (
+                        {"config": {"hidden_size": selection.profile.hidden_size}},
+                        None if selection.profile.profile_id == "deberta-large-v1"
+                        else "non-tensors",
+                    ),
+                    ({"config": "invalid metadata"}, "non-tensors"),
+                    ({"unexpected": {"hidden_size": 1024}}, "non-tensors"),
+                ):
+                    with self.subTest(arm=arm, metadata=metadata):
+                        torch.save({**tensors, **metadata}, weight)
+                        pinned = replace(
+                            selection,
+                            profile=replace(
+                                selection.profile,
+                                weight_bytes=weight.stat().st_size,
+                                weight_sha256=sha256_file(weight),
+                            ),
+                        )
+                        if error:
+                            with self.assertRaisesRegex(DataContractError, error):
+                                comparison_stage._base_parameter_count(layout, pinned)
+                        else:
+                            self.assertEqual(
+                                comparison_stage._base_parameter_count(layout, pinned), 14
+                            )
+
+    def test_parameter_count_rejects_metadata_only_and_unverified_weights(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "parameter-integrity")
+            layout.create()
+            selection = self.config.select_arm("deberta-large-common")
+            snapshot = layout.resolve(
+                "inputs/huggingface/models--fixture/snapshots/"
+                + selection.profile.revision
+            )
+            snapshot.mkdir(parents=True, exist_ok=True)
+            weight = snapshot / selection.profile.weight_path
+            for state in ({"config": {"hidden_size": 1024}}, {}, [torch.zeros(2)]):
+                with self.subTest(state=state):
+                    torch.save(state, weight)
+                    pinned = replace(
+                        selection,
+                        profile=replace(
+                            selection.profile,
+                            weight_bytes=weight.stat().st_size,
+                            weight_sha256=sha256_file(weight),
+                        ),
+                    )
+                    with self.assertRaises(DataContractError):
+                        comparison_stage._base_parameter_count(layout, pinned)
+            for profile in (
+                replace(pinned.profile, weight_bytes=weight.stat().st_size + 1),
+                replace(pinned.profile, weight_sha256="0" * 64),
+            ):
+                with self.subTest(profile=profile), mock.patch.object(torch, "load") as load:
+                    with self.assertRaisesRegex(DataContractError, "profile pin"):
+                        comparison_stage._base_parameter_count(
+                            layout, replace(pinned, profile=profile)
+                        )
+                    load.assert_not_called()
+
     def test_checkpoint_summary_substitution_fails_before_manifest_promotion(self):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "checkpoint")
@@ -568,14 +644,60 @@ class EncoderComparisonTests(unittest.TestCase):
             self.assertEqual(evidence["cuda_device"], "fixture")
 
             smoke_path = layout.resolve(comparison_stage.SMOKE_MANIFEST_RELATIVE)
-            atomic_write_json(
-                smoke_path,
-                {
-                    "status": "smoke-complete-awaiting-admission",
-                    "run_id": layout.run_id,
-                    "table1_arm": selection.arm.manifest(),
-                },
-            )
+            atomic_write_json(layout.resolve(comparison_stage.CACHE_MANIFEST_RELATIVE), {})
+            cache_identity = {"weight_sha256": "0" * 64}
+            command_runner = mock.Mock()
+            original_hashes = {
+                path: sha256_file(path)
+                for name, path in paths.items() if name != "root"
+            }
+            with (
+                mock.patch.object(comparison_stage, "_validate_prepared_inputs"),
+                mock.patch.object(comparison_stage, "verify_cache_manifest"),
+                mock.patch.object(
+                    comparison_stage, "_verify_profile_cache", return_value=cache_identity
+                ),
+                mock.patch.object(comparison_stage, "_base_parameter_count", return_value=14),
+            ):
+                # Reuse the completed CUDA evidence after a finalization-only failure.
+                smoke = comparison_stage.run_smoke(
+                    layout, selection, 42, command_runner=command_runner
+                )
+                command_runner.assert_not_called()
+                self.assertEqual(smoke["evidence"], evidence)
+                self.assertEqual(smoke["cache_identity"]["base_parameter_count"], 14)
+                self.assertFalse(smoke["full_run_admitted"])
+                self.assertFalse(smoke["final_test_accessed"])
+                self.assertEqual(
+                    {path: sha256_file(path) for path in original_hashes}, original_hashes
+                )
+                self.assertEqual(
+                    comparison_stage.run_smoke(
+                        layout, selection, 42, command_runner=command_runner
+                    ),
+                    smoke,
+                )
+                # Incomplete or altered retained evidence must never be promoted.
+                smoke_path.unlink()
+                original_resume = paths["resume_summary"].read_bytes()
+                paths["resume_summary"].unlink()
+                with self.assertRaises((DataContractError, OSError)):
+                    comparison_stage.run_smoke(
+                        layout, selection, 42, command_runner=command_runner
+                    )
+                self.assertFalse(smoke_path.exists())
+                atomic_write_bytes(paths["resume_summary"], original_resume)
+                atomic_write_bytes(paths["checkpoint"], b"tampered checkpoint\n")
+                with self.assertRaisesRegex(DataContractError, "round-trip"):
+                    comparison_stage.run_smoke(
+                        layout, selection, 42, command_runner=command_runner
+                    )
+                self.assertFalse(smoke_path.exists())
+                command_runner.assert_not_called()
+                atomic_write_bytes(paths["checkpoint"], b"checkpoint\n")
+                comparison_stage.run_smoke(
+                    layout, selection, 42, command_runner=command_runner
+                )
             admission = comparison_stage.record_admission(
                 layout,
                 selection,

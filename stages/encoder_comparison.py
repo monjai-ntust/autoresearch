@@ -352,12 +352,32 @@ def _base_parameter_count(
     import torch
 
     weight = _cache_snapshot_root(layout, selection) / selection.profile.weight_path
+    if (
+        weight.stat().st_size != selection.profile.weight_bytes
+        or sha256_file(weight) != selection.profile.weight_sha256
+    ):
+        raise DataContractError("selected encoder weight bytes differ from profile pin")
     state = torch.load(weight, map_location="cpu", weights_only=True)
     if not isinstance(state, dict) or not state:
         raise DataContractError("selected encoder weight is not a state dictionary")
-    tensors = list(state.values())
-    if any(not isinstance(value, torch.Tensor) for value in tensors):
-        raise DataContractError("selected encoder state dictionary contains non-tensors")
+    tensors = []
+    for name, value in state.items():
+        if isinstance(value, torch.Tensor):
+            tensors.append(value)
+        elif (
+            name == "config"
+            and selection.profile.profile_id == "deberta-large-v1"
+            and isinstance(value, dict)
+        ):
+            # The pinned 2021 large checkpoint embeds configuration metadata.
+            # It has no parameters; the complete file is still digest-verified.
+            continue
+        else:
+            raise DataContractError(
+                f"selected encoder state dictionary contains non-tensors: {name!r}"
+            )
+    if not tensors:
+        raise DataContractError("selected encoder state dictionary contains no tensors")
     return sum(value.numel() for value in tensors)
 
 
@@ -665,14 +685,19 @@ def run_smoke(
         atomic_write_json(paths["identity"], identity)
     manifest_path = layout.resolve(SMOKE_MANIFEST_RELATIVE)
     if not manifest_path.is_file():
-        command = _private_command(layout, selection, seed, "smoke")
-        try:
-            command_runner(command, cwd=layout.source_root, check=True)
-        except subprocess.CalledProcessError as exc:
-            raise DataContractError(
-                f"encoder comparison smoke failed with exit status {exc.returncode}; "
-                "retain this run and rerun the same command after diagnosis"
-            ) from exc
+        if paths["roundtrip"].is_file():
+            # A smoke can finish its CUDA work before manifest finalization fails.
+            # Authenticate that same-run evidence without executing it again.
+            _validate_smoke_outputs(layout, selection, seed)
+        else:
+            command = _private_command(layout, selection, seed, "smoke")
+            try:
+                command_runner(command, cwd=layout.source_root, check=True)
+            except subprocess.CalledProcessError as exc:
+                raise DataContractError(
+                    f"encoder comparison smoke failed with exit status {exc.returncode}; "
+                    "retain this run and rerun the same command after diagnosis"
+                ) from exc
         if layout.resolve(CACHE_MANIFEST_RELATIVE).is_file():
             verify_cache_manifest(
                 layout,

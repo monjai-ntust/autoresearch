@@ -154,6 +154,55 @@ manifest. Admission does not grant final-test access: all admitted development
 runs must complete or receive a retained disposition before the separate
 final-test gate in the frozen protocol.
 
+### Finalize a completed smoke after the parameter-counter failure
+
+The pinned DeBERTa-large checkpoint embeds a `config` dictionary alongside its
+tensors. Parameter counting excludes that known metadata only for the
+DeBERTa-large profile, verifies the complete weight file's size and SHA-256
+before loading, and rejects other non-tensor entries and tensor-free files.
+The pinned revision, model bytes, tensor-count definition, and recipes do not
+change. Microsoft's [checkpoint loader](https://github.com/microsoft/DeBERTa/blob/master/DeBERTa/deberta/cache_utils.py)
+also treats the embedded `config` as configuration metadata.
+
+If a smoke finished its CUDA work and wrote `roundtrip.json` before parameter
+counting failed, repeat only `smoke` under the unchanged arm/run/seed identity.
+The controller validates the retained training/resume summaries, checkpoint
+hash, candidate ledger, and frozen cache before writing the missing manifest.
+It does not invoke the model again in this finalization path. Missing or
+inconsistent evidence fails closed. A completed smoke remains awaiting review;
+this repair does not record admission, train, or access final test.
+
+For the reported `g05-deberta-large-common` failure, run from the standalone
+source checkout, with the existing environment already synchronized:
+
+```bash
+set -euo pipefail
+git pull --ff-only origin publication-refactored-rag
+run_id=g05-deberta-large-common
+test -f "output/$run_id/diagnostics/encoder-comparison-smoke/roundtrip.json"
+test -f "output/$run_id/manifests/huggingface-model-cache.json"
+log="output/$run_id/logs/smoke-finalize-$(date -u +%Y%m%dT%H%M%S%N)-$$.log"
+mkdir -p "output/$run_id/logs"
+{
+  printf 'Repair source: '
+  git rev-parse HEAD
+  PYTHONUNBUFFERED=1 DISABLE_SAFETENSORS_CONVERSION=1 \
+    uv run --frozen --no-sync python -I -B -u encoder_comparison.py \
+      smoke --arm deberta-large-common --run-id "$run_id" --training-seed 42
+} 2>&1 | tee "$log"
+printf 'Return log: %s\nSmoke manifest: output/%s/manifests/encoder-comparison-smoke.json\n' \
+  "$log" "$run_id"
+```
+
+Preserve the original producer manifests and every existing run directory.
+Do not repeat `prepare` or use `recover-checkout` for these already prepared
+runs: checkout-only recovery deliberately refuses downstream artifacts, and
+preparation's original checkout guard remains unchanged. The log records the
+repair source separately from the original producer commit. Return that log
+and the newly finalized smoke manifest for review. Do not reuse the older
+external launcher that deleted run directories. The fourth arm still needs
+its separately reviewed smoke; this command only finalizes the reported arm.
+
 ## Validation boundary
 
 Focused tests resolve the historical Git blobs, validate every profile and arm without
