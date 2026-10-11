@@ -24,6 +24,9 @@ def run(
 ) -> None:
     """Score the four canonical final-test conditions and validate outputs."""
 
+    if (test_candidates != layout.resolve("predictions/test/candidates.jsonl")
+            or threshold_path != layout.resolve("predictions/dev/threshold-selection.json")):
+        raise DataContractError("score inputs must use the selected run's canonical paths")
     score_manifest = layout.resolve("manifests/score-manifest.json")
     if not score_manifest.is_file():
         score_run(
@@ -63,10 +66,22 @@ def _validate_score(layout: RunLayout, config) -> dict:
         },
         "score manifest",
     )
-    for mapping_name in ("inputs", "outputs"):
+    required = {
+        "inputs": {
+            "data-prepared/test-gold.jsonl", "predictions/test/candidates.jsonl",
+            "verifier/simple/verdicts.jsonl", "verifier/corrective/verdicts.jsonl",
+            "predictions/dev/threshold-selection.json",
+        },
+        "outputs": {
+            "outcomes/candidate-outcomes.jsonl", "outcomes/sentence-outcomes.jsonl",
+            "metrics/metrics.json", "metrics/publication-table.tsv",
+            "metrics/publication-summary.md",
+        },
+    }
+    for mapping_name, paths in required.items():
         mapping = manifest.get(mapping_name)
-        if not isinstance(mapping, dict):
-            raise DataContractError(f"score manifest {mapping_name} are malformed")
+        if not isinstance(mapping, dict) or set(mapping) != paths:
+            raise DataContractError(f"score manifest {mapping_name} lack the canonical product contract")
         for relative, expected in mapping.items():
             if sha256_file(layout.resolve(relative, must_exist=True)) != expected:
                 raise DataContractError(f"score artifact changed: {relative}")

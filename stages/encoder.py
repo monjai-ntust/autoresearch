@@ -157,6 +157,7 @@ def _validate_training_stage(
         manifest,
         {
             "stage": "model-train",
+            "run_id": layout.run_id,
             "execution_mode": execution_mode,
             "status": "planned" if execution_mode == "dry-run" else "completed",
             "protocol_id": config.value["protocol_id"],
@@ -178,17 +179,19 @@ def _validate_training_stage(
         "restart_state": f"checkpoints/seed-{seed}/restart-state.pt",
         "training_summary": f"checkpoints/seed-{seed}/training-summary.json",
         "progress_log": f"logs/model-train-seed-{seed}.log",
+        "model_cache_manifest": "manifests/huggingface-model-cache.json",
     }
     outputs = manifest.get("outputs")
-    if not isinstance(outputs, dict) or any(
-        outputs.get(field) != relative for field, relative in expected_outputs.items()
-    ):
+    if outputs != expected_outputs:
         raise DataContractError(f"seed-{seed} training outputs use unexpected paths")
     for relative in outputs.values():
         if isinstance(relative, str):
             layout.resolve(relative, must_exist=True)
 
-    for relative, expected in manifest.get("output_hashes", {}).items():
+    hashes = manifest.get('output_hashes')
+    if not isinstance(hashes, dict) or set(hashes) != set(expected_outputs.values()):
+        raise DataContractError('training producer output hash coverage is incomplete')
+    for relative, expected in hashes.items():
         if sha256_file(layout.resolve(relative, must_exist=True)) != expected:
             raise DataContractError("training producer output changed")
     checkpoint_path = layout.resolve(checkpoint_relative, must_exist=True)
@@ -224,6 +227,7 @@ def _validate_training_stage(
         "split_manifest_sha256": "data-prepared/split-manifest.json",
         "train_jsonl_sha256": "data-prepared/train.jsonl",
         "development_jsonl_sha256": "data-prepared/development.jsonl",
+        "model_cache_manifest_sha256": "manifests/huggingface-model-cache.json",
     }
     inputs = manifest.get("inputs")
     if not isinstance(inputs, dict):
@@ -249,11 +253,14 @@ def _validate_training_stage(
         layout.resolve(expected_outputs["training_summary"], must_exist=True),
         "training summary",
     )
+    from utils.encoder.runtime import restart_identity
     if (
         summary.get("status") != "completed"
         or summary.get("canonical_mode") is not True
         or summary.get("seed") != seed
         or summary.get("test_evaluated") is not False
+        or summary.get('completed_steps') != config.value['training']['max_steps']
+        or summary.get('run_identity') != restart_identity(layout.resolve('data-prepared'))
     ):
         raise DataContractError(f"seed-{seed} training summary is not publication-safe")
     return manifest
@@ -409,8 +416,12 @@ def run_private_trainer(
             f"training seed {args.training_seed} is not approved by the run config"
         )
 
-    from stages.preparation import _validate_existing_checkout
+    from stages.preparation import _validate_existing_checkout, require_canonical_namespace
+    from utils.common.execution import require_active_dispatch
 
+    require_canonical_namespace(layout)
+    require_active_dispatch(layout, ['_train-encoder', *arguments],
+                            label=f'canonical-train-seed-{args.training_seed}')
     _validate_existing_checkout(layout, config)
     _validate_training_stage(
         layout, config, args.training_seed, execution_mode="dry-run"

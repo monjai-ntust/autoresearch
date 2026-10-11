@@ -51,6 +51,8 @@ def _live_inference_records(
     from utils.encoder.network import BertKGExtractor
 
     training = config.value["training"]
+    from utils.encoder.runtime import record_runtime
+    record_runtime(checkpoint_blob_path.parent.parent.parent / 'data-prepared')
     max_length = training["max_length"]
     max_span_width = training["max_span_width"]
     device = torch.device(device_preference or ("cuda" if torch.cuda.is_available() else "cpu"))

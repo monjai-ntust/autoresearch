@@ -33,6 +33,7 @@ from utils.encoder.inference import _live_inference_records
 
 from utils.encoder.candidates import PredictionLedgerIdentity, _SPLIT_ID, _exact_keys, _integer, _load_prediction_ledger, _unit_float
 
+import math
 import subprocess
 import sys
 from dataclasses import dataclass, replace
@@ -286,7 +287,6 @@ def generate_candidates(
     checkpoint_manifest_path: Path,
     candidates_out_path: Path,
     prediction_ledger_path: Path | None = None,
-    cache_ledger_path: Path | None = None,
     checkpoint_blob_path: Path | None = None,
     base_model: str | None = None,
     device: str | None = None,
@@ -306,8 +306,6 @@ def generate_candidates(
         raise DataContractError("replay requires a run-relative prediction ledger")
     if execution_mode != "replay" and prediction_ledger_path is not None:
         raise DataContractError("a supplied prediction ledger is accepted only by replay execution")
-    if execution_mode != "live" and cache_ledger_path is not None:
-        raise DataContractError("a recovery prediction cache is accepted only by live execution")
     if execution_mode == "live" and checkpoint_blob_path is None:
         raise DataContractError("live execution requires the run-relative checkpoint blob")
     if execution_mode != "live" and checkpoint_blob_path is not None:
@@ -364,35 +362,6 @@ def generate_candidates(
         },
         "prediction_ledger": None,
     }
-    recovery_records: list[dict[str, Any]] | None = None
-    if cache_ledger_path is not None:
-        cache_sha = sha256_file(cache_ledger_path)
-        # Validate the full same-run sentence/seed contract before creating any
-        # new stage artifact or loading the encoder.
-        _load_prediction_ledger(
-            cache_ledger_path,
-            sentences,
-            checkpoint,
-            {
-                "prepared_sentences": inputs["prepared_sentences"]["sha256"],
-                "checkpoint_manifest": inputs["checkpoint_manifest"]["sha256"],
-                "prediction_ledger": cache_sha,
-            },
-        )
-        recovery_records = [value for _, value in iter_jsonl(cache_ledger_path)]
-        inputs["recovery_prediction_ledger"] = {
-            "path": layout.relative_identity(cache_ledger_path),
-            "sha256": cache_sha,
-        }
-        recovery_provenance = cache_ledger_path.with_suffix(
-            cache_ledger_path.suffix + ".manifest.json"
-        )
-        if recovery_provenance.is_file():
-            inputs["recovery_prediction_ledger_provenance"] = {
-                "path": layout.relative_identity(recovery_provenance),
-                "sha256": sha256_file(recovery_provenance),
-            }
-
     manifest: dict[str, Any] = {
         "protocol_id": PROTOCOL_ID,
         "matcher_id": MATCHER_ID,
@@ -449,9 +418,19 @@ def generate_candidates(
             )
         from utils.common.execution import bind_json
         work_path = manifest_path.with_name(f"work-{manifest_path.name}")
-        bind_json(work_path, {"run_id": layout.run_id, "inputs": inputs,
-            "checkpoint_sha256": checkpoint.checkpoint_sha256, "config_sha256": sha256_file(config.path)})
-        records = recovery_records
+        binding = {"run_id": layout.run_id, "inputs": inputs,
+            "checkpoint_sha256": checkpoint.checkpoint_sha256, "config_sha256": sha256_file(config.path)}
+        progress = load_json(work_path) if work_path.exists() else {"binding": binding}
+        if not isinstance(progress, dict) or progress.get('binding') != binding:
+            raise DataContractError('prediction work belongs to different run or inputs')
+        saved_digest = progress.get('prediction_ledger_sha256')
+        if live_ledger_path.exists():
+            if saved_digest != sha256_file(live_ledger_path):
+                raise DataContractError('prediction ledger lacks its original authenticated completion')
+        elif saved_digest is not None:
+            raise DataContractError('completed prediction ledger is missing')
+        bind_json(work_path, progress)
+        records = None
         if live_ledger_path.exists():
             validate_prediction_cache(layout, config, sentences_path=sentences_path,
                 checkpoint_manifest_path=checkpoint_manifest_path, cache_ledger_path=live_ledger_path)
@@ -470,6 +449,8 @@ def generate_candidates(
             live_ledger_path,
             sorted(records, key=lambda record: record["example_id"]),
         )
+        atomic_write_json(work_path, {'binding': binding,
+                                     'prediction_ledger_sha256': sha256_file(live_ledger_path)})
         ledger_path = live_ledger_path
     else:
         ledger_path = prediction_ledger_path
@@ -671,6 +652,7 @@ def plan_training(
         "protocol_id": PROTOCOL_ID,
         "matcher_id": MATCHER_ID,
         "stage": "model-train",
+        "run_id": layout.run_id,
         "execution_mode": execution_mode,
         "status": "planned" if execution_mode == "dry-run" else "completed",
         "created_at_utc": _utc_now(),
@@ -730,7 +712,9 @@ def plan_training(
     command = _training_command(layout, config, training_seed)
     if not summary_path.exists():
         try:
-            command_runner(command, cwd=layout.source_root, check=True)
+            from utils.common.execution import checked_process
+            checked_process(layout, command, label=f'canonical-train-seed-{training_seed}',
+                            command_runner=command_runner)
         except subprocess.CalledProcessError as exc:
             raise DataContractError(
                 f"canonical trainer failed with exit status {exc.returncode}; "
@@ -757,11 +741,14 @@ def plan_training(
                 "canonical trainer did not produce " + layout.relative_identity(required_path)
             )
     summary = load_json(summary_path)
+    from utils.encoder.runtime import restart_identity
     if (
         summary.get("status") != "completed"
         or summary.get("canonical_mode") is not True
         or summary.get("seed") != training_seed
         or summary.get("test_evaluated") is not False
+        or summary.get('completed_steps') != config.value['training']['max_steps']
+        or summary.get('run_identity') != restart_identity(layout.resolve('data-prepared'))
     ):
         raise DataContractError("canonical trainer summary violates the live contract")
     checkpoint_step = summary.get("selected_step")
@@ -771,8 +758,10 @@ def plan_training(
         isinstance(checkpoint_step, bool)
         or not isinstance(checkpoint_step, int)
         or checkpoint_step < 1
+        or checkpoint_step > config.value['training']['max_steps']
         or isinstance(selected_value, bool)
         or not isinstance(selected_value, (int, float))
+        or not math.isfinite(selected_value) or not 0 <= selected_value <= 1
     ):
         raise DataContractError("canonical trainer summary lacks a selected checkpoint metric")
 

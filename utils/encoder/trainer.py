@@ -1,7 +1,7 @@
 """encoder trainer responsibilities."""
 from __future__ import annotations
 
-from utils.encoder.runtime import record_runtime
+from utils.encoder.runtime import record_runtime, restart_identity
 
 from utils.encoder.options import EncoderOptions
 
@@ -29,6 +29,8 @@ def _append_progress(args, message):
 
 def _atomic_torch_save(value, path):
     path = Path(path)
+    if isinstance(value, dict) and value.get('format_version') == 'train-span-restart-2.0':
+        value = {**value, 'run_identity': restart_identity(path.parent.parent.parent / 'data-prepared')}
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".partial")
     torch.save(value, partial)
@@ -113,6 +115,7 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
         "train_sampler_state",
         "boost_adaptive_triggered",
         "boost_adaptive_switched",
+        "run_identity",
     }
     if not isinstance(state, dict):
         raise ValueError("restart state has an invalid field contract")
@@ -120,6 +123,8 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
     required = common
     if version != "train-span-restart-2.0" or set(state) != required:
         raise ValueError("restart state has an invalid field contract")
+    if state['run_identity'] != restart_identity(args.prepared_dir):
+        raise ValueError('restart state belongs to different run/source/input/runtime evidence')
     for field, value in (("seed", args.seed), ("model_name", args.model_name), ("model_revision", args.model_revision), ("max_steps", args.max_steps)):
         if state[field] != value:
             raise ValueError(
@@ -464,6 +469,13 @@ def main(argv: EncoderOptions):
         torch.nn.Linear(hidden_size, code_accord.NUM_RELATIONS),
     ).to(device)
 
+    # Freeze the acquired bytes before saving any resumable scientific state.
+    from utils.common.paths import RunLayout
+    from utils.encoder.cache import write_cache_manifest
+    root = Path(args.prepared_dir).parent
+    write_cache_manifest(RunLayout(root.parent.parent, root.name),
+                         model=args.model_name, revision=args.model_revision)
+
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -647,6 +659,7 @@ def main(argv: EncoderOptions):
         "resumed_from": resumed_from,
         "elapsed_seconds": elapsed_seconds,
         "runtime_environment": runtime_reference,
+        "run_identity": restart_identity(args.prepared_dir),
     }
     _atomic_json_write(summary, args.run_summary_out)
     return summary

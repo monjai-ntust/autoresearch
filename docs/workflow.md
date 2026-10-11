@@ -20,6 +20,9 @@ tokenizer and revision. Qwen binds actual registry identity and copied weight
 bytes/SHA-256, model details and quantization. Identities must agree at every
 same-run consumer. Numerical software/backend settings are recorded once and
 referenced by encoder products.
+Restart states and completed summaries bind these identities before reuse.
+Private workers require an active recorded coordinator dispatch. A canonical
+command rejects a comparison arm or matrix namespace.
 
 The canonical command trains seeds 42–49 using development-only checkpoint
 selection, generates development candidates, selects the confidence threshold,
@@ -47,6 +50,8 @@ Training loads full restart state at the last saved step, preserving optimizer,
 scheduler, RNG and selection state. Candidate and score finalization reconstruct
 deterministic products from saved evidence; existing products must equal the
 expected bytes. Changed source, inputs, models, saved state or outputs fail.
+An existing prediction ledger must have its original producer binding; a copied
+or unsealed ledger cannot become a new same-run input.
 
 Verifier journals retain original attempts and elapsed/token values before
 postprocessing. Warmup, each independent pilot capture and test have separate
@@ -60,6 +65,9 @@ identity proof. Successful durable answers survive later failure. Empty or
 `ERROR:` answers remain unfinished: a subsequent command retries only those
 occurrences. Missing contemporaneous proof stops continuation; a later query
 cannot prove which model produced an earlier answer.
+All saved occurrences are checked before issuing new calls. Deleting or changing
+completed evidence blocks continuation. Completed condition outputs retain their
+original bytes and recorded timing; resumed intervals extend only unfinished work.
 
 A crash before a response or training step is saved can require that unsaved
 work again. The guarantee starts at validated durable progress; it does not
@@ -78,8 +86,11 @@ observations, existing Wilcoxon/paired-t raw and Holm-adjusted results,
 verdict diagnostics, corpus/eligibility counts, unique emitted triples,
 actual runtime/model identities and recorded cost. Request cost counts original
 uncached attempts including retries/failures, separating warmup/pilot/test.
-Tokens and timings carry measured coverage. Training sums recorded trainer
-invocation time; unavailable earlier failures remain outside that coverage.
+Tokens and timings carry measured coverage. Training exposes final trainer-summary
+time and, separately, original recorded process durations including failures.
+These views overlap and must not be summed. Matrix smoke and full execution
+remain separate; missing finish records carry unavailable duration. Conservative
+execution-budget charges are bounds, never reported as measured costs.
 
 Graph reports distinguish canonical entities/relations/triples from evaluator
 nodes/edges. RAG tables carry correct/total/hit-rate denominators for full and

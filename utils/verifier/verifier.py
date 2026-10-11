@@ -78,7 +78,7 @@ class _EventLog:
         attempt: int | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
-        if event in {"run_started", "request_planned", "request_attempted", "candidate_completed", "run_completed"}:
+        if event in {"run_started", "request_planned", "request_attempted", "candidate_completed", "run_completed", "environment_recorded"}:
             if any(row.get("event") == event and row.get("candidate_id") == candidate_id
                    and row.get("attempt") == attempt and row.get("details") == (details or {})
                    for row in self.events):
@@ -559,6 +559,61 @@ def _verdict_from_response(
     }
 
 
+def _attempt_event_details(attempt, journal):
+    return {"http_status": attempt["http_status"],
+            "elapsed_seconds": attempt["elapsed_seconds"], "journal": str(journal),
+            "attempt_sha256": _sha256_value(attempt)}
+
+
+def _saved_attempts(request, mode, event_log):
+    """Validate durable responses against their original event receipts."""
+    journal = request.get("_journal_path")
+    binding = {"request_sha256": request["request_sha256"], "cache_key": request["cache_key"]}
+    attempts = []
+    if journal is not None and journal.exists():
+        saved = load_json(journal)
+        if saved.get("binding") != binding or set(saved) != {"binding", "attempts"}:
+            raise DataContractError("verifier attempt journal belongs to another request")
+        if not isinstance(saved["attempts"], list):
+            raise DataContractError("verifier attempt journal is malformed")
+        attempts = [_validate_attempt(a, "saved verifier attempt") for a in saved["attempts"]]
+        if len(attempts) > 3 or [a["attempt"] for a in attempts] != list(range(1, len(attempts)+1)):
+            raise DataContractError("verifier attempt journal exceeds its frozen budget")
+    for event in event_log.events:
+        if (event.get("event") != "request_attempted"
+                or event.get("candidate_id") != request["candidate_id"]
+                or event.get("details", {}).get("journal") != str(journal)):
+            continue
+        number = event.get("attempt")
+        if not isinstance(number, int) or not 1 <= number <= len(attempts):
+            raise DataContractError("saved verifier attempt evidence is missing")
+        if event["details"] != _attempt_event_details(attempts[number-1], journal):
+            raise DataContractError("saved verifier attempt changed after its event receipt")
+    terminal = False
+    for attempt in attempts:
+        if terminal:
+            raise DataContractError("verifier journal continues after a valid response")
+        terminal = _attempt_result(mode, attempt, request["_candidate"], request["_sentence"])["response_status"] == "valid_response"
+    return attempts, terminal
+
+
+def _write_verified_jsonl(path, rows):
+    expected = b"".join(canonical_json_bytes(row) for row in rows)
+    if path.exists():
+        if path.read_bytes() != expected:
+            raise DataContractError(f"saved verifier artifact differs: {path.name}")
+    else:
+        atomic_write_jsonl(path, rows)
+
+
+def _environment_receipt(paths):
+    evidence_paths = {name: paths[name] for name in
+                      ("environment", "model_tags", "model_show", "model_modelfile")}
+    if any(not path.is_file() for path in evidence_paths.values()):
+        raise DataContractError("saved verifier model environment evidence is missing")
+    return {name: sha256_file(path) for name, path in evidence_paths.items()}
+
+
 def _live_response(
     request: dict[str, Any],
     config: PipelineConfig,
@@ -570,23 +625,11 @@ def _live_response(
 ) -> dict[str, Any]:
     journal = request.get("_journal_path")
     binding = {"request_sha256": request["request_sha256"], "cache_key": request["cache_key"]}
-    attempts = []
-    if journal is not None and journal.exists():
-        saved = load_json(journal)
-        if saved.get("binding") != binding or set(saved) != {"binding", "attempts"}:
-            raise DataContractError("verifier attempt journal belongs to another request")
-        attempts = [_validate_attempt(a, "saved verifier attempt") for a in saved["attempts"]]
-        if len(attempts) > 3 or [a["attempt"] for a in attempts] != list(range(1, len(attempts)+1)):
-            raise DataContractError("verifier attempt journal exceeds its frozen budget")
+    attempts, terminal = _saved_attempts(request, mode, event_log)
     candidate_id = request["candidate_id"]
-    terminal = False
-    for index, saved in enumerate(attempts):
-        if terminal:
-            raise DataContractError("verifier journal continues after a valid response")
-        terminal = _attempt_result(mode, saved, request["_candidate"], request["_sentence"])["response_status"] == "valid_response"
+    for saved in attempts:
         event_log.append("request_attempted", saved["transport_status"], candidate_id=candidate_id,
-            attempt=saved["attempt"], details={"http_status": saved["http_status"],
-            "elapsed_seconds": saved["elapsed_seconds"], "journal": str(journal)})
+            attempt=saved["attempt"], details=_attempt_event_details(saved, journal))
     if attempts and not terminal and len(attempts) < config.value["verifier"]["attempts"]:
         sleep(config.value["verifier"]["backoff_seconds"][len(attempts)-1])
     for attempt_number in ([] if terminal else range(len(attempts)+1, config.value["verifier"]["attempts"]+1)):
@@ -629,7 +672,7 @@ def _live_response(
             status,
             candidate_id=candidate_id,
             attempt=attempt_number,
-            details={"http_status": http_status, "elapsed_seconds": elapsed, "journal": str(journal)},
+            details=_attempt_event_details(attempt, journal),
         )
         candidate_stub = request["_candidate"]
         sentence_stub = request["_sentence"]
@@ -898,6 +941,52 @@ def run_verifier(
         if warmup_runtime is not None:
             warmup_runtime["_journal_path"] = layout.resolve(f"{base}/journal/warmup/{warmup_runtime['candidate_id']}.json")
     event_log = _EventLog(paths["log"], condition, execution_mode)
+    retained_responses = {}
+    if execution_mode == "live":
+        assert warmup_runtime is not None
+        journal_requests = [warmup_runtime, *verdict_runtime_requests]
+        saved_by_path = {}
+        terminal_by_path = {}
+        for runtime in journal_requests:
+            attempts, terminal = _saved_attempts(runtime, mode, event_log)
+            saved_by_path[runtime["_journal_path"]] = attempts
+            terminal_by_path[runtime["_journal_path"]] = terminal
+        environment_events = [event for event in event_log.events
+                              if event.get("event") == "environment_recorded"]
+        if any(saved_by_path.values()) and not environment_events:
+            raise DataContractError("saved verifier calls lack their original model environment receipt")
+        for event in environment_events:
+            if event.get("details") != _environment_receipt(paths):
+                raise DataContractError("saved verifier model environment changed after its receipt")
+        for ledger_path, requests in (
+                (paths["warmup_response"], [warmup_runtime]),
+                (paths["responses"], verdict_runtime_requests)):
+            if not ledger_path.exists():
+                continue
+            ledger = _load_response_ledger(ledger_path, condition,
+                {request["candidate_id"]: request for request in requests})
+            if list(ledger) != [request["candidate_id"] for request in requests[:len(ledger)]]:
+                raise DataContractError("saved verifier response ledger is not its completed prefix")
+            for runtime in requests[:len(ledger)]:
+                response = ledger[runtime["candidate_id"]]
+                journal_path = runtime["_journal_path"]
+                if ledger_path == paths["responses"] and runtime["candidate_id"] in cached:
+                    if response != cached[runtime["candidate_id"]]:
+                        raise DataContractError("saved verifier response ledger differs from its selected cache")
+                elif (response["cache_hit"] or response["attempts"] != saved_by_path[journal_path]
+                      or (not terminal_by_path[journal_path]
+                          and len(response["attempts"]) != config.value["verifier"]["attempts"])):
+                    raise DataContractError("saved verifier response ledger differs from its journal")
+            if ledger_path == paths["responses"]:
+                retained_responses = ledger
+        if paths["verdicts"].exists():
+            if set(retained_responses) != set(requests_by_id):
+                raise DataContractError("saved verifier verdicts lack their complete response ledger")
+            expected_verdicts = [_verdict_from_response(mode,
+                retained_responses[runtime["candidate_id"]], runtime,
+                runtime["_candidate"], runtime["_sentence"])
+                for runtime in verdict_runtime_requests]
+            _write_verified_jsonl(paths["verdicts"], expected_verdicts)
     event_log.append(
         "run_started",
         "started",
@@ -910,7 +999,7 @@ def run_verifier(
         if not paths["requests"].exists():
             atomic_write_jsonl(paths["requests"], serialized_requests)
         if warmup_runtime is not None:
-            atomic_write_jsonl(
+            _write_verified_jsonl(
                 paths["warmup_request"],
                 [{key: value for key, value in warmup_runtime.items() if not key.startswith("_")}],
             )
@@ -967,6 +1056,7 @@ def run_verifier(
                 atomic_write_json(paths["environment"], environment)
             else:
                 environment = original_environment
+            event_log.append("environment_recorded", "verified", details=_environment_receipt(paths))
             assert warmup_runtime is not None
             warmup_response = _live_response(
                 warmup_runtime,
@@ -977,7 +1067,7 @@ def run_verifier(
                 event_log,
                 sleep,
             )
-            atomic_write_jsonl(paths["warmup_response"], [warmup_response])
+            _write_verified_jsonl(paths["warmup_response"], [warmup_response])
             warmup_verdict = _verdict_from_response(
                 mode,
                 warmup_response,
@@ -1014,7 +1104,7 @@ def run_verifier(
                     f"missing={len(missing)}, extra={len(extra)}"
                 )
         elif execution_mode == "live":
-            with paths["responses"].open("wb") as response_handle:
+            with paths["responses"].open("ab") as response_handle:
                 for runtime in verdict_runtime_requests:
                     candidate_id = runtime["candidate_id"]
                     if candidate_id in cached:
@@ -1031,9 +1121,13 @@ def run_verifier(
                             sleep,
                         )
                     responses[candidate_id] = response
-                    response_handle.write(canonical_json_bytes(response))
-                    response_handle.flush()
-                    os.fsync(response_handle.fileno())
+                    if candidate_id in retained_responses:
+                        if retained_responses[candidate_id] != response:
+                            raise DataContractError("saved verifier response changed during continuation")
+                    else:
+                        response_handle.write(canonical_json_bytes(response))
+                        response_handle.flush()
+                        os.fsync(response_handle.fileno())
             response_input_hash = sha256_file(paths["responses"])
 
         if execution_mode != "dry-run":
@@ -1061,7 +1155,7 @@ def run_verifier(
                         "cache_hit": verdict["telemetry"]["cache_hit"],
                     },
                 )
-            atomic_write_jsonl(paths["verdicts"], verdicts)
+            _write_verified_jsonl(paths["verdicts"], verdicts)
 
         status = "planned" if execution_mode == "dry-run" else "completed"
         event_log.append(

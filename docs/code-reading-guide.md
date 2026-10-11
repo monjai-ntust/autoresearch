@@ -144,6 +144,9 @@ Read [paths.py](../utils/common/paths.py) for run-bound path refusal,
 invocation accounting, and [runtime.py](../utils/encoder/runtime.py) for the
 once-per-run numerical environment. Producer receipts reference actual source,
 input/output hashes, cache/weight/tokenizer identities and durable state.
+Restart states and completion summaries bind the run, source, prepared inputs,
+recipe/cache and numerical runtime. Private workers require their coordinator's
+active recorded dispatch; canonical and comparison namespaces stay separate.
 Qwen weight SHA-256/byte size, model/quantization settings, Python/Ollama/Torch/
 Transformers and numerical backend settings remain visible. Historical reference
 digests, hardware and branch ancestry are not fresh admission criteria.
@@ -156,6 +159,11 @@ reuses saved successful occurrences and retries only unfinished empty/error
 answers. Missing contemporaneous model proof fails closed; later queries cannot
 create past proof. Corrupt or foreign progress stops rather than becoming a new
 run. Concurrent execution fails without deleting lock files or evidence.
+Saved response hashes and original model evidence are checked before new calls.
+Missing completed journals, changed outputs or a prediction ledger without its
+original producer receipt require explicit disposition; they are never silently
+adopted or recreated. RAG continuation keeps recorded condition time across
+segments and leaves completed output bytes unchanged.
 
 ## Read the automatic paper reports
 
@@ -172,7 +180,10 @@ include split/country/span/relation distributions and alignment eligibility;
 emitted unique triples remain separate from candidate count and graph counts.
 
 Training reports sum recorded final-invocation seconds per seed into wall hours
-and disclose missing earlier-invocation coverage. Request reports count original
+and separately expose original finished process timings, including failed
+attempts and earlier invocations where retained. These views overlap and must
+not be added. Matrix smoke and full execution costs are separate; starts with
+no finish have unavailable durations. Request reports count original
 uncached attempts, retries and failures, sum measured seconds/tokens and show
 coverage separately for warmup, pilot and test. No original response is relabelled
 as a cache hit on resume. RAG reports full and `part-of` correct/total/hit rates
@@ -196,8 +207,12 @@ tensor/RNG/restart cases, typed scoring, lineage tampering and continuation.
 [test_continuation.py](../tests/test_continuation.py) injects response/model-proof/
 gate/lock/budget failures; [test_reporting.py](../tests/test_reporting.py) verifies
 automatic report authentication, ties, coverage and deterministic reinvocation.
+Additional [canonical](../tests/test_canonical_continuation.py),
+[comparison](../tests/test_comparison_continuation.py) and
+[scoring](../tests/test_evaluation_continuation.py) tests cover dispatch,
+foreign state, incomplete receipts and finalization failures.
 
-Local validation ran 153 tests successfully before this guide was written.
+The local suite includes scientific characterization and fault regressions.
 Standalone shallow-checkout checks exercise imports, documented commands and
 tests without old producer Git objects. This is local characterization, not
 live CUDA/Qwen or newly trained model equality across machines. Further bounded

@@ -49,6 +49,14 @@ def initialize(layout: RunLayout, config: PipelineConfig) -> None:
             raise DataContractError(f"Checkout doctor failed: {manifest}")
 
 
+def require_canonical_namespace(layout: RunLayout) -> None:
+    for relative in ('manifests/comparison-matrix.json',
+                     'manifests/comparison-matrix-link.json',
+                     'manifests/encoder-comparison-selection.json'):
+        if layout.resolve(relative).exists():
+            raise DataContractError('canonical workflow cannot consume a comparison namespace')
+
+
 
 def _validate_existing_checkout(layout: RunLayout, config) -> dict:
     """Authenticate an existing run namespace before any downstream work."""
@@ -139,9 +147,17 @@ def prepare_run(layout: RunLayout, config: PipelineConfig) -> dict[str, Any]:
     data_root = layout.resolve("data-prepared")
     if manifest_path.exists():
         manifest = load_json(manifest_path)
-        _, actual_tree_hash = _tree_inventory(data_root)
-        if manifest.get("dataset_tree_sha256") != actual_tree_hash:
+        actual_rows, actual_tree_hash = _tree_inventory(data_root)
+        if (manifest.get("dataset_tree_sha256") != actual_tree_hash
+                or manifest.get('artifacts') != actual_rows):
             raise DataContractError("existing prepared dataset tree hash mismatch")
+        if (manifest.get('protocol_id') != PROTOCOL_ID
+                or manifest.get('dataset_id') != contract.dataset_id
+                or manifest.get('archive_sha256') != sha256_file(archive_path)
+                or manifest.get('acquisition_manifest_sha256') != sha256_file(acquisition_path)
+                or manifest.get('annotation_bundle_sha256') != _annotation_bundle_sha256(contract)
+                or manifest.get('byte_identical_independent_materializations') is not True):
+            raise DataContractError('existing preparation is not bound to its authenticated inputs')
         return manifest
 
     extracted = extract_zip_safely(

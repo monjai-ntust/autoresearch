@@ -1975,7 +1975,7 @@ def run_stage(
     status_path: Path,
 ) -> dict[str, Any]:
     stage = status.setdefault("stages", {}).setdefault(name, {"attempts": []})
-    if stage.get("status") == "complete":
+    if stage.get("status") in {"complete", "output-validated"}:
         if not output_path.is_file() or sha256_file(output_path) != stage.get("output_sha256"):
             raise PhaseEError(f"Completed stage output no longer matches: {name}")
         return validator(output_path)

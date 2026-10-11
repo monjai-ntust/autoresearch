@@ -30,6 +30,9 @@ def _cache_files(cache_dir: Path) -> list[dict[str, Any]]:
         if relative == ".locks" or relative.startswith(".locks/"):
             continue
         if path.is_symlink():
+            target = path.resolve(strict=True)
+            if not target.is_file() or not target.is_relative_to(cache_dir.resolve()):
+                raise DataContractError('model cache link points outside its physical run-local cache')
             records.append(
                 {
                     "path": relative,
@@ -37,6 +40,8 @@ def _cache_files(cache_dir: Path) -> list[dict[str, Any]]:
                     "target": os.readlink(path),
                 }
             )
+        elif path.resolve() != path.absolute():
+            raise DataContractError('model cache entry is reached through a junction')
         elif path.is_file():
             records.append(
                 {

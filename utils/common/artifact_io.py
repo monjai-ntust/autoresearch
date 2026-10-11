@@ -130,6 +130,16 @@ def _manifest_outputs(layout: RunLayout, manifest: dict) -> dict[str, str]:
     declared = manifest.get("outputs")
     if isinstance(declared, dict):
         outputs = declared
+    elif (manifest.get('stage') == 'model-generate-candidates'
+          and manifest.get('execution_mode') == 'live'):
+        ledger = manifest.get('inputs', {}).get('prediction_ledger', {})
+        expected_paths = {manifest.get('candidates_output'), ledger.get('path')}
+        outputs = manifest.get('output_hashes')
+        if (not isinstance(outputs, dict) or None in expected_paths
+                or set(outputs) != expected_paths):
+            raise DataContractError('candidate producer output hash coverage is incomplete')
+        if outputs.get(ledger['path']) != ledger.get('sha256'):
+            raise DataContractError('prediction ledger hash differs from producer inputs')
     else:
         outputs = {}
         for field in ("generation_plan_output", "candidates_output"):

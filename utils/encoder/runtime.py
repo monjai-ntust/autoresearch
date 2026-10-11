@@ -11,6 +11,32 @@ from utils.common.artifact_io import DataContractError, load_json, sha256_file
 from utils.common.execution import bind_json
 
 
+def restart_identity(prepared_dir):
+    """Bind saved state to the actual run, source, inputs, recipe, and runtime."""
+    from utils.common.paths import RunLayout
+    root = Path(prepared_dir).absolute().parent
+    layout = RunLayout(root.parent.parent, root.name)
+    layout.require_existing()
+    paths = [
+        'manifests/00-checkout-manifest.json',
+        'manifests/02-input-acquisition-manifest.json',
+        'manifests/huggingface-model-cache.json',
+        'inputs/config/pipeline.json',
+        'manifests/03-data-preparation-manifest.json',
+        'data-prepared/split-manifest.json',
+        'data-prepared/train.jsonl',
+        'data-prepared/development.jsonl',
+        'manifests/encoder-runtime.json',
+    ]
+    for relative in ('manifests/encoder-comparison-selection.json',
+                     'manifests/comparison-matrix-link.json'):
+        if layout.resolve(relative).exists():
+            paths.append(relative)
+    return {'run_id': layout.run_id, 'inputs': {
+        relative: sha256_file(layout.resolve(relative, must_exist=True))
+        for relative in paths}}
+
+
 def record_runtime(prepared_dir):
     import torch
     root = Path(prepared_dir).resolve().parent

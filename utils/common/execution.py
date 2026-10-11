@@ -125,13 +125,15 @@ def checked_process(layout: RunLayout, command: list[str], *, label: str,
             "elapsed_seconds": time.monotonic() - started})
 
 
-def require_active_dispatch(layout: RunLayout, arguments: list[str]) -> None:
-    starts = sorted(layout.resolve("logs/invocations/comparison-full").glob("*-start.json"))
+def require_active_dispatch(layout: RunLayout, arguments: list[str], *,
+                            label: str = "comparison-full") -> None:
+    starts = sorted(layout.resolve(f"logs/invocations/{label}").glob("*-start.json"))
     if not starts:
-        raise DataContractError("full comparison workers require an accounted matrix dispatch")
+        raise DataContractError("comparison workers require an accounted matrix dispatch")
     path = starts[-1]
     start = load_json(path)
     finish = path.with_name(path.name.replace("-start", "-finish"))
-    if (finish.exists() or start.get("owner_pid") != os.getppid()
+    if (finish.exists() or start.get("run_id") != layout.run_id
+            or start.get("label") != label or start.get("owner_pid") != os.getppid()
             or start.get("command", [])[3:] != arguments):
         raise DataContractError("private worker is outside its active matrix dispatch")

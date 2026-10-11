@@ -114,6 +114,8 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
 
 
 def _prepare_run_identities(layout: RunLayout, *, compatibility=True):
+    atomic_write_json(layout.resolve('inputs/config/pipeline.json'), {})
+    atomic_write_json(layout.resolve('manifests/encoder-runtime.json'), {})
     atomic_write_json(
         layout.resolve("manifests/00-checkout-manifest.json"),
         {"status": "pass", "source": {"commit": "3" * 40}},
@@ -305,7 +307,7 @@ class ModelAdapterTests(unittest.TestCase):
                     input_hashes=emitted[0]["input_hashes"],
                 )
 
-    def test_valid_live_recovery_cache_skips_encoder_execution(self):
+    def test_live_prediction_rejects_imported_ledger_without_a_producer(self):
         with _temporary_output_directory() as temporary:
             layout = RunLayout(Path(temporary), "live-cache")
             layout.create()
@@ -315,27 +317,60 @@ class ModelAdapterTests(unittest.TestCase):
             checkpoint_document = json.loads(checkpoint.read_text(encoding="utf-8"))
             checkpoint_document["checkpoint_sha256"] = sha256_file(checkpoint_blob)
             atomic_write_json(checkpoint, checkpoint_document)
-            cache = layout.resolve("inputs/recovery/prediction-ledger.jsonl")
+            cache = layout.resolve("predictions/test/seed-42-prediction-ledger.jsonl")
             atomic_write_jsonl(cache, [_ledger_record()])
             with mock.patch(
                 "utils.encoder.model._live_inference_records"
             ) as inference:
-                manifest = generate_candidates(
-                    layout,
-                    self.config,
-                    execution_mode="live",
-                    sentences_path=sentences,
-                    checkpoint_manifest_path=checkpoint,
-                    candidates_out_path=candidates,
-                    cache_ledger_path=cache,
-                    checkpoint_blob_path=checkpoint_blob,
-                )
+                with self.assertRaisesRegex(DataContractError, 'authenticated completion'):
+                    generate_candidates(
+                        layout, self.config, execution_mode="live",
+                        sentences_path=sentences, checkpoint_manifest_path=checkpoint,
+                        candidates_out_path=candidates, checkpoint_blob_path=checkpoint_blob,
+                    )
             inference.assert_not_called()
-            self.assertEqual(manifest["status"], "completed")
-            self.assertEqual(
-                manifest["inputs"]["recovery_prediction_ledger"]["sha256"],
-                sha256_file(cache),
-            )
+
+    def test_live_prediction_resume_authenticates_original_ledger_before_reuse(self):
+        from utils.encoder import model as implementation
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), 'prediction-resume')
+            layout.create()
+            sentences, checkpoint, candidates = self._prepare(layout)
+            blob = layout.resolve('checkpoints/seed-42/checkpoint.pt')
+            atomic_write_bytes(blob, b'fixture')
+            document = json.loads(checkpoint.read_text())
+            document['checkpoint_sha256'] = sha256_file(blob)
+            atomic_write_json(checkpoint, document)
+            manifest_path = layout.resolve('manifests/model-generate-candidates-live-seed-42-test.json')
+            arguments = dict(execution_mode='live', sentences_path=sentences,
+                checkpoint_manifest_path=checkpoint, candidates_out_path=candidates,
+                checkpoint_blob_path=blob)
+            def interrupt(path, value):
+                if path == manifest_path:
+                    raise RuntimeError('final receipt interrupted')
+                atomic_write_json(path, value)
+            with (mock.patch.object(implementation, '_live_inference_records', return_value=[_ledger_record()]) as inference,
+                  mock.patch.object(implementation, 'atomic_write_json', side_effect=interrupt)):
+                with self.assertRaisesRegex(RuntimeError, 'receipt interrupted'):
+                    generate_candidates(layout, self.config, **arguments)
+                inference.assert_called_once()
+            ledger = layout.resolve('predictions/test/seed-42-prediction-ledger.jsonl')
+            original = ledger.read_bytes()
+            with mock.patch.object(implementation, '_live_inference_records') as inference:
+                generate_candidates(layout, self.config, **arguments)
+                inference.assert_not_called()
+            self.assertEqual(ledger.read_bytes(), original)
+            manifest_path.unlink()
+            ledger.write_bytes(original.replace(b'0.9', b'0.8'))
+            with mock.patch.object(implementation, '_live_inference_records') as inference:
+                with self.assertRaisesRegex(DataContractError, 'authenticated completion'):
+                    generate_candidates(layout, self.config, **arguments)
+                inference.assert_not_called()
+            ledger.unlink()
+            with mock.patch.object(implementation, '_live_inference_records') as inference:
+                with self.assertRaisesRegex(DataContractError, 'completed prediction ledger is missing'):
+                    generate_candidates(layout, self.config, **arguments)
+                inference.assert_not_called()
 
     def test_replay_rejects_relation_over_unselected_span(self):
         with _temporary_output_directory() as temporary:
@@ -606,6 +641,9 @@ class ModelTrainTests(unittest.TestCase):
                 progress = Path(trainer_command.progress_log)
                 cache_dir = Path(trainer_command.model_cache_dir)
                 atomic_write_bytes(cache_dir / "models--fixture/blobs/model.bin", b"model\n")
+                write_cache_manifest(layout, model=self.config.value['training']['base_model'],
+                                     revision=self.config.value['training']['base_model_revision'])
+                from utils.encoder.runtime import restart_identity
                 atomic_write_bytes(checkpoint, b"checkpoint")
                 atomic_write_bytes(restart, b"restart")
                 atomic_write_bytes(progress, b"completed\n")
@@ -617,6 +655,8 @@ class ModelTrainTests(unittest.TestCase):
                         "seed": 42,
                         "test_evaluated": False,
                         "selected_step": 100,
+                        "completed_steps": self.config.value['training']['max_steps'],
+                        "run_identity": restart_identity(layout.resolve('data-prepared')),
                         "selected_metrics": {"ner_f1": 0.5, "triple_f1": 0.4},
                         "resumed_from": str(restart),
                         "environment": {

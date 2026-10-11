@@ -120,6 +120,7 @@ class PreparedAdapterTests(unittest.TestCase):
             "train_sampler_state": sampler.state_dict(),
             "boost_adaptive_triggered": False,
             "boost_adaptive_switched": False,
+            "run_identity": {"run_id": "fixture"},
         }
         args = SimpleNamespace(
             resume_from="restart-state.pt",
@@ -127,8 +128,10 @@ class PreparedAdapterTests(unittest.TestCase):
             model_name="microsoft/deberta-large",
             model_revision="revision-a",
             max_steps=3500,
+            prepared_dir="fixture/data-prepared",
         )
-        with patch("utils.encoder.trainer.torch.load", return_value=state) as loader_mock:
+        with (patch("utils.encoder.trainer.torch.load", return_value=state) as loader_mock,
+              patch("utils.encoder.trainer.restart_identity", return_value={"run_id": "fixture"})):
             _load_restart(args, Mock(), Mock(), Mock(), loader)
         loader_mock.assert_called_once_with(
             "restart-state.pt", map_location="cpu", weights_only=False

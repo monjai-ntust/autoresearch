@@ -98,6 +98,14 @@ class RunLayout:
         if not _is_within(resolved_output, root):
             raise PathContractError("source output/ resolves outside the source checkout")
         object.__setattr__(self, "source_root", root)
+        self._physical_run_root()
+
+    def _physical_run_root(self) -> Path:
+        """Reject redirected namespaces before reads, locks, or directory writes."""
+        root = self.run_root.resolve(strict=False)
+        if not _same_path(root, self.run_root):
+            raise PathContractError("run root is a symlink, junction, or escaped path")
+        return root
 
     @property
     def output_root(self) -> Path:
@@ -147,7 +155,7 @@ class RunLayout:
             raise PathContractError(f"run path must be relative and traversal-free: {relative}")
         candidate = self.run_root / raw
         resolved = candidate.resolve(strict=must_exist)
-        root = self.run_root.resolve(strict=False)
+        root = self._physical_run_root()
         if not _is_within(resolved, root):
             raise PathContractError(f"run path resolves outside selected run: {relative}")
         if must_exist and not resolved.exists():
@@ -156,7 +164,7 @@ class RunLayout:
 
     def relative_identity(self, path: Path) -> str:
         resolved = path.resolve(strict=False)
-        run_root = self.run_root.resolve(strict=False)
+        run_root = self._physical_run_root()
         if not _is_within(resolved, run_root):
             raise PathContractError("cannot serialize a path outside the selected run")
         return resolved.relative_to(run_root).as_posix()

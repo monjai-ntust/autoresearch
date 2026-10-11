@@ -6,6 +6,7 @@ resampling procedure or significance test.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import math
 import statistics
@@ -45,13 +46,54 @@ def response_statistics(rows: list[dict]) -> dict:
 
 def training_statistics(summaries: list[dict], expected_seeds: list[int]) -> dict:
     measured = [s for s in summaries if isinstance(s.get('elapsed_seconds'), (float, int))
+                and not isinstance(s['elapsed_seconds'], bool)
                 and math.isfinite(s['elapsed_seconds']) and s['elapsed_seconds'] >= 0]
-    return {'per_seed': [{'seed': s.get('seed'), 'recorded_seconds': s.get('elapsed_seconds'),
+    return {'per_seed': [{'seed': s.get('seed'), 'recorded_seconds': s.get('elapsed_seconds') if s in measured else None,
                           'resumed': s.get('resumed_from') is not None} for s in summaries],
         'recorded_wall_hours': sum(s['elapsed_seconds'] for s in measured)/3600 if measured else None,
         'seeds_with_measurement': len(measured), 'expected_seeds': expected_seeds,
         'coverage': 'final recorded trainer invocation per seed; earlier failed invocations may be absent',
         'measured_gpu_hours': None, 'peak_resident_memory_bytes': None}
+
+
+def _invocation_cost(evidence, label):
+    """Read original process timings; unfinished starts have no measured cost."""
+    directory = evidence.layout.resolve(f'logs/invocations/{label}')
+    starts = sorted(directory.glob('*-start.json'))
+    finishes = set(directory.glob('*-finish.json'))
+    rows = []
+    for index, path in enumerate(starts, 1):
+        if path.name != f'{index:04d}-start.json':
+            raise DataContractError('report invocation accounting is not contiguous')
+        relative = evidence.layout.relative_identity(path)
+        start = load_json(evidence.file(relative))
+        if start.get('run_id') != evidence.layout.run_id or start.get('label') != label:
+            raise DataContractError('report invocation accounting belongs to another run')
+        finish_path = path.with_name(path.name.replace('-start', '-finish'))
+        row = {'ordinal': index, 'status': 'missing_finish', 'recorded_seconds': None}
+        if finish_path in finishes:
+            finishes.remove(finish_path)
+            finish = load_json(evidence.file(evidence.layout.relative_identity(finish_path)))
+            if finish.get('start_sha256') != evidence.hashes[relative]:
+                raise DataContractError('report invocation accounting hash differs')
+            elapsed = finish.get('elapsed_seconds')
+            if (not isinstance(elapsed, (int, float)) or isinstance(elapsed, bool)
+                    or not math.isfinite(elapsed) or elapsed < 0
+                    or finish.get('status') not in {'completed', 'failed'}):
+                raise DataContractError('report invocation timing is malformed')
+            row.update(status=finish['status'], recorded_seconds=elapsed)
+        rows.append(row)
+    if finishes:
+        raise DataContractError('report invocation finish has no start')
+    measured = [row['recorded_seconds'] for row in rows if row['recorded_seconds'] is not None]
+    seconds = sum(measured) if measured else None
+    return {'per_invocation': rows, 'recorded_seconds': seconds,
+        'recorded_wall_hours': seconds/3600 if seconds is not None else None,
+        'retained_starts': len(rows), 'invocations_with_measurement': len(measured),
+        'completed_invocations': sum(row['status'] == 'completed' for row in rows),
+        'failed_invocations': sum(row['status'] == 'failed' for row in rows),
+        'invocations_without_finish': len(rows)-len(measured),
+        'coverage': 'original finished process timings only, including failures; missing finishes and unrecorded invocations are unavailable; no current-time or conservative budget charge is a measurement'}
 
 
 def quality_summary(per_seed):
@@ -89,11 +131,12 @@ class Evidence:
         for key in ('inputs', 'outputs', 'output_hashes'):
             for path, identity in value.get(key, {}).items():
                 if isinstance(identity, str):
-                    if (('/' in path or '.' in path) and len(identity) == 64
-                            and all(c in '0123456789abcdef' for c in identity)):
+                    if '/' in path or '.' in path:
                         self.file(path, identity)
                 elif isinstance(identity, dict) and isinstance(identity.get('path'), str):
-                    self.file(identity['path'], identity.get('sha256'))
+                    if not isinstance(identity.get('sha256'), str):
+                        raise DataContractError('paper report evidence reference lacks its hash')
+                    self.file(identity['path'], identity['sha256'])
         return value
 
 
@@ -104,8 +147,10 @@ def _write(evidence, directory, observations):
         'definitions': {
             'quality': 'typed strict triples; per-seed counts and F1; sample SD uses n-1',
             'best_seed': 'all tied final-test maxima; descriptive, never a selection input',
+            'paired_statistics': 'Wilcoxon is primary; paired t is sensitivity; p_value is raw and holm_adjusted_p_value is adjusted within its existing family',
             'request_cost': 'original uncached attempts, including retries and failures; workload paths remain separate',
-            'training_cost': 'recorded final trainer invocation per seed; missing earlier invocations remain outside coverage',
+            'training_cost': 'final trainer-summary invocation per seed; separate invocation_cost includes retained process timings and earlier failures where available; these views overlap',
+            'invocation_cost': 'original elapsed time of hash-bound process finishes, including failures; overlaps trainer summaries and must not be added to them; unfinished starts have unavailable duration',
             'precision': 'full recorded numerical precision; no rounding in JSON/TSV/Markdown',
             'missingness': 'null means unavailable; token/timing totals carry measured coverage',
         },
@@ -134,6 +179,14 @@ def _write(evidence, directory, observations):
     lines += ['', *document['limits'], '']
     products['paper-statistics.md'] = '\n'.join(lines).encode('utf-8')
     # Check all existing products before writing any; receipt finalization is pure.
+    receipt = {'run_id': layout.run_id, 'inputs': document['inputs'],
+        'outputs': {f'{directory}/{name}': hashlib.sha256(raw).hexdigest()
+                    for name, raw in products.items()}}
+    receipt_path = layout.resolve(f'{directory}/manifest.json')
+    if receipt_path.exists() and receipt_path.read_bytes() != canonical_json_bytes(receipt):
+        raise DataContractError('existing paper report receipt differs')
+    for relative, digest in document['inputs'].items():
+        evidence.file(relative, digest)
     for name, raw in products.items():
         path = layout.resolve(f'{directory}/{name}')
         if path.exists() and path.read_bytes() != raw:
@@ -141,9 +194,7 @@ def _write(evidence, directory, observations):
     for name, raw in products.items():
         path = layout.resolve(f'{directory}/{name}')
         if not path.exists(): atomic_write_bytes(path, raw)
-    bind_json(layout.resolve(f'{directory}/manifest.json'), {
-        'run_id': layout.run_id, 'inputs': document['inputs'],
-        'outputs': {f'{directory}/{name}': sha256_file(layout.resolve(f'{directory}/{name}')) for name in products}})
+    bind_json(receipt_path, receipt)
     return document
 
 
@@ -183,6 +234,15 @@ def _cost(evidence, seeds, comparison=False):
         evidence.file(checkpoint['model_cache_manifest'], checkpoint['model_cache_manifest_sha256'])
     result = training_statistics(summaries, list(seeds))
     result['environments'] = environments
+    if not comparison:
+        per_seed = {str(seed): _invocation_cost(evidence, f'canonical-train-seed-{seed}')
+                    for seed in seeds}
+        measured = [value['recorded_seconds'] for value in per_seed.values()
+                    if value['recorded_seconds'] is not None]
+        result['invocations'] = {'per_seed': per_seed,
+            'recorded_wall_hours': sum(measured)/3600 if measured else None,
+            'seeds_with_measurement': len(measured), 'expected_seeds': list(seeds),
+            'scope': 'canonical trainer processes, including startup and failed attempts; overlaps final trainer summaries above'}
     return result
 
 
@@ -209,6 +269,11 @@ def report_canonical(layout, config):
     metrics = load_json(evidence.file(metrics_relative))
     observations = {'source': checkout.get('source'),
                     'training': _cost(evidence, config.value['training_seeds']),
+                    'coverage': {key: metrics.get(key) for key in (
+                        'protocol_id', 'matcher_id', 'evaluation_split_id', 'n_gold_examples',
+                        'observed_training_seeds', 'required_training_seeds',
+                        'publication_seed_coverage_complete', 'publication_data_coverage_complete',
+                        'nonpublication_smoke', 'uncertainty_status')},
                     'quality': metrics.get('conditions'),
                     'paired_statistics': metrics.get('statistics'),
                     'corpus': _corpus(evidence),
@@ -216,6 +281,12 @@ def report_canonical(layout, config):
                     'verdict_diagnostics': {key: value.get('diagnostics')
                                             for key, value in metrics.get('conditions', {}).items()},
                     'verifier': {}}
+    for mode in ('simple', 'corrective'):
+        manifest = evidence.manifest(f'manifests/verifier-{mode}-live.json')
+        required = {f'verifier/{mode}/{name}' for name in (
+            'responses.jsonl', 'warmup-response.jsonl', 'environment-manifest.json')}
+        if not required <= set(manifest.get('outputs', {})):
+            raise DataContractError(f'paper report lacks authenticated {mode} verifier measurements')
     for path in sorted(layout.resolve('manifests').glob('verifier-*-live.json')):
         relative = layout.relative_identity(path)
         manifest = evidence.manifest(relative)
@@ -287,7 +358,9 @@ def report_comparison(layout, selection):
 def report_matrix(layout, config, identity):
     from utils.common.paths import RunLayout
     evidence = Evidence(layout)
-    evidence.file('manifests/comparison-matrix.json')
+    recorded_identity = load_json(evidence.file('manifests/comparison-matrix.json'))
+    if recorded_identity != identity or identity.get('matrix_id') != layout.run_id:
+        raise DataContractError('matrix report identity differs')
     members = {}
     for arm, run_id in identity['members'].items():
         member = RunLayout(layout.source_root, run_id)
@@ -301,8 +374,13 @@ def report_matrix(layout, config, identity):
             raise DataContractError('matrix report member identity differs')
         # This coordinator references isolated authenticated reports; no model or cache is shared.
         members[arm] = {'run_id': run_id, 'report_sha256': sha256_file(report),
-                        'quality': document['observations']['quality']}
+                        'quality': document['observations']['quality'],
+                        'training': document['observations']['training']}
     return _write(evidence, 'reports/matrix', {'members': members,
+        'recorded_execution': {
+            'smoke': _invocation_cost(evidence, 'comparison-smoke'),
+            'full': _invocation_cost(evidence, 'comparison-full'),
+            'scope': 'smoke is separate from full training and candidate-generation processes; full execution includes failed/resumed attempts and overlaps member training summaries'},
         'predeclared_statistics': config.value['statistical_protocol'],
         'unrecorded_paired_or_bootstrap_measurements': None,
         'scope': 'descriptive same-protocol Table-1 comparison; no new statistical procedure in Phase I'})
@@ -312,13 +390,28 @@ def report_rag(layout, summary, runtime, child_dir):
     evidence = Evidence(layout)
     relative = layout.relative_identity(child_dir/'artifact-hashes.json')
     hashes = load_json(evidence.file(relative))
+    if hashes.get('run_id') != layout.run_id:
+        raise DataContractError('RAG paper report evidence belongs to another run')
     entries = hashes.get('files', hashes.get('artifacts', []))
     if isinstance(entries, dict): entries = [{'path': k, 'sha256': v} for k, v in entries.items()]
     for item in entries:
         path = item['path']
         path = layout.relative_identity(child_dir/path)
         evidence.file(path, item['sha256'])
+    required = ['environment.json', *(f'{directory}/{condition}.json'
+        for directory in ('rag-results', 'part-of-results')
+        for condition in ('confidence', 'corrective', 'gold'))]
+    if any(layout.relative_identity(child_dir/path) not in evidence.hashes for path in required):
+        raise DataContractError('RAG paper report lacks authenticated result or environment evidence')
+    environment = load_json(evidence.file(layout.relative_identity(child_dir/'environment.json')))
     observations = {'coverage': summary['questions'], 'conditions': {}, 'graph_scale': {},
+        'environment': environment,
+        'claim_limits': {
+            'result_status': 'expanded CODE diagnostic, not the original paper Table 2',
+            'gold_condition': 'nondeployable gold-graph oracle',
+            'metric': 'frozen answer-hit check, not a factuality or deployment evaluation',
+            'historical_parity': 'not established by these reports; external comparison is separate',
+        },
         'canonical_graph_scale': {condition: {
             'seed': graph.get('training_seed'), 'condition': graph.get('condition'),
             'entities': len(graph['entities']), 'relations': len(graph['relations']),
@@ -330,6 +423,9 @@ def report_rag(layout, summary, runtime, child_dir):
         subset = load_json(evidence.file(layout.relative_identity(child_dir/'part-of-results'/f'{condition}.json')))
         observations['conditions'][condition] = {'questions': result['metadata']['n_questions'],
             'hits': result['correct_counts'], 'accuracy': result['accuracy'],
+            'full': {mode: {'questions': len(rows), 'hits': result['correct_counts'][mode],
+                           'answer_hit_rate': result['accuracy'][mode]}
+                     for mode, rows in result['results'].items()},
             'recorded_condition_seconds': result['metadata']['time_seconds'],
             'part_of': {mode: {'questions': len(rows), 'hits': sum(row['correct'] for row in rows),
                         'answer_hit_rate': sum(row['correct'] for row in rows)/len(rows) if rows else None}

@@ -50,7 +50,8 @@ def require_matrix_progress(layout: RunLayout, selection, *, boundary: str) -> N
     matrix, identity = selected_matrix(layout, selection)
     if boundary == "smoke":
         return
-    from stages.encoder_comparison import SMOKE_MANIFEST_RELATIVE, run_smoke, _checkpoint_manifest, _verify_profile_cache
+    from stages.encoder_comparison import (SMOKE_MANIFEST_RELATIVE, run_smoke,
+        _checkpoint_manifest, _verify_profile_cache, plan_training, _training_result)
     for arm, run_id in identity["members"].items():
         arm_layout = RunLayout(layout.source_root, run_id)
         arm_selection = selection.config.select_arm(arm)
@@ -64,14 +65,13 @@ def require_matrix_progress(layout: RunLayout, selection, *, boundary: str) -> N
                     raise DataContractError("all 32 development runs must complete before test access")
                 result = load_json(path)
                 checkpoint = arm_layout.resolve(f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True)
-                expected = _checkpoint_manifest(arm_layout, arm_selection, seed, _verify_profile_cache(arm_layout, arm_selection))
-                if (load_json(checkpoint) != expected or result.get("status") != "completed"
-                        or result.get("run_id") != run_id
-                        or result.get("checkpoint_manifest_sha256") != sha256_file(checkpoint)):
+                cache = _verify_profile_cache(arm_layout, arm_selection)
+                expected = _checkpoint_manifest(arm_layout, arm_selection, seed, cache)
+                arm_layout.resolve(f"manifests/encoder-comparison-train-plan-seed-{seed}.json", must_exist=True)
+                plan = plan_training(arm_layout, arm_selection, seed)
+                if (load_json(checkpoint) != expected
+                        or result != _training_result(arm_layout, plan, checkpoint, cache)):
                     raise DataContractError("development completion evidence changed")
-                for relative, digest in result.get("output_hashes", {}).items():
-                    if sha256_file(arm_layout.resolve(relative, must_exist=True)) != digest:
-                        raise DataContractError("development producer output changed")
 
 
 def run_matrix(layout: RunLayout, config: ComparisonConfig) -> int:
@@ -85,6 +85,9 @@ def run_matrix(layout: RunLayout, config: ComparisonConfig) -> int:
                 raise DataContractError("matrix namespace contains unbound evidence")
         bind_json(path, identity)
         from stages.encoder_comparison import prepare, run_smoke, run_training, generate
+        def smoke(command, **kwargs):
+            checked_process(layout, command, label="comparison-smoke")
+
         def execute(command, **kwargs):
             required = config.value["execution_limits"]["minimum_free_storage_bytes_before_full_run"]
             if shutil.disk_usage(layout.run_root).free < required:
@@ -99,19 +102,21 @@ def run_matrix(layout: RunLayout, config: ComparisonConfig) -> int:
                 prepare(arm_layout, selection)
                 bind_json(arm_layout.resolve(ARM_LINK), {"matrix_id": layout.run_id,
                     "matrix_sha256": sha256_file(path), "run_id": run_id, "arm_id": arm})
-                run_smoke(arm_layout, selection, 42)
+                run_smoke(arm_layout, selection, 42, command_runner=smoke)
         for arm, run_id in identity["members"].items():
             arm_layout = RunLayout(layout.source_root, run_id)
             selection = config.select_arm(arm)
-            for seed in identity["training_seeds"]:
-                run_training(arm_layout, selection, seed, command_runner=execute)
+            with exclusive_run(arm_layout):
+                for seed in identity["training_seeds"]:
+                    run_training(arm_layout, selection, seed, command_runner=execute)
         for arm, run_id in identity["members"].items():
             arm_layout = RunLayout(layout.source_root, run_id)
             selection = config.select_arm(arm)
-            for seed in identity["training_seeds"]:
-                generate(arm_layout, selection, seed, "test", command_runner=execute)
-            from utils.evaluation.reporting import report_comparison
-            report_comparison(arm_layout, selection)
+            with exclusive_run(arm_layout):
+                for seed in identity["training_seeds"]:
+                    generate(arm_layout, selection, seed, "test", command_runner=execute)
+                from utils.evaluation.reporting import report_comparison
+                report_comparison(arm_layout, selection)
         from utils.evaluation.reporting import report_matrix
         report_matrix(layout, config, identity)
     return 0

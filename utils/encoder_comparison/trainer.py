@@ -10,7 +10,7 @@ adapters to the current artifact contract.
 
 from __future__ import annotations
 
-from utils.encoder.runtime import record_runtime
+from utils.encoder.runtime import record_runtime, restart_identity
 
 from utils.encoder_comparison.options import ComparisonOptions
 
@@ -102,6 +102,7 @@ def _restart_payload(
 ) -> dict[str, Any]:
     return {
         "format_version": "phase-g-historical-trainer-restart-1.0",
+        "run_identity": restart_identity(args.prepared_dir),
         "seed": args.seed,
         "model_name": args.model_name,
         "model_revision": args.model_revision,
@@ -127,6 +128,7 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
     state = torch.load(args.resume_from, map_location="cpu", weights_only=False)
     required = {
         "format_version",
+        "run_identity",
         "seed",
         "model_name",
         "model_revision",
@@ -151,6 +153,7 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
     ):
         raise ValueError("comparison restart state has an invalid field contract")
     expected = {
+        "run_identity": restart_identity(args.prepared_dir),
         "seed": args.seed,
         "model_name": args.model_name,
         "model_revision": args.model_revision,
@@ -516,6 +519,15 @@ def train(args):
     }
     id2entity = {value: key for key, value in entity_type2id.items()}
     model = _model(args, device)
+    from utils.common.paths import RunLayout
+    from utils.encoder.cache import write_cache_manifest
+
+    run_root = Path(args.prepared_dir).absolute().parent
+    write_cache_manifest(
+        RunLayout(run_root.parent.parent, run_root.name),
+        model=args.model_name,
+        revision=args.model_revision,
+    )
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -674,6 +686,7 @@ def train(args):
     )
     summary = {
         "schema_version": "phase-g-historical-trainer-summary-1.0",
+        "run_identity": restart_identity(args.prepared_dir),
         "status": "completed",
         "seed": args.seed,
         "model_name": args.model_name,
@@ -706,6 +719,7 @@ def _read_sentences(path: Path) -> list[dict[str, Any]]:
 
 
 def predict(args):
+    record_runtime(args.prepared_dir)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = _tokenizer(args)
     model = _model(args, device)

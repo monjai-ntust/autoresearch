@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from utils.encoder.runtime import training_environment
+from utils.encoder.runtime import restart_identity, training_environment
 
 from dataclasses import replace
 
@@ -11,6 +11,7 @@ from utils.encoder_comparison.options import ComparisonOptions
 import argparse
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -347,6 +348,7 @@ def _validate_smoke_outputs(
             or summary.get("model_revision") != selection.profile.revision
             or summary.get("completed_steps") != 1
             or summary.get("test_evaluated") is not False
+            or summary.get("run_identity") != restart_identity(layout.resolve("data-prepared"))
             or (training_environment(layout.run_root, summary) or {}).get("cuda_available") is not True
         ):
             raise DataContractError(f"encoder comparison {label} smoke summary differs")
@@ -457,6 +459,7 @@ def run_smoke(
     manifest = load_json(manifest_path)
     if (
         manifest.get("schema_version") != "phase-g-encoder-smoke-1.0"
+        or manifest.get("status") != "completed"
         or manifest.get("run_id") != layout.run_id
         or manifest.get("training_seed") != seed
         or manifest.get("table1_arm") != selection.arm.manifest()
@@ -537,6 +540,9 @@ def _checkpoint_manifest(
         or summary.get("seed") != seed
         or summary.get("model_name") != selection.profile.model
         or summary.get("model_revision") != selection.profile.revision
+        or summary.get("completed_steps") != selection.recipe.value["max_steps"]
+        or summary.get("selection_metric") != "development_strict_triple_f1"
+        or summary.get("run_identity") != restart_identity(layout.resolve("data-prepared"))
     ):
         raise DataContractError("comparison trainer summary violates its selection")
     selected_step = summary.get("selected_step")
@@ -545,8 +551,11 @@ def _checkpoint_manifest(
         isinstance(selected_step, bool)
         or not isinstance(selected_step, int)
         or selected_step < 1
+        or selected_step > selection.recipe.value["max_steps"]
         or isinstance(selected_f1, bool)
         or not isinstance(selected_f1, (int, float))
+        or not math.isfinite(selected_f1)
+        or not 0 <= selected_f1 <= 1
     ):
         raise DataContractError("comparison trainer summary lacks selected dev F1")
     acquisition_path = layout.resolve(
@@ -604,6 +613,23 @@ def _checkpoint_manifest(
     }
 
 
+def _training_result(layout, plan, checkpoint_manifest_path, cache_identity) -> dict:
+    seed = plan["training_seed"]
+    checkpoint_dir = checkpoint_manifest_path.parent
+    return {
+        **plan,
+        "schema_version": "phase-g-encoder-train-result-1.0",
+        "status": "completed",
+        "checkpoint_manifest": layout.relative_identity(checkpoint_manifest_path),
+        "checkpoint_manifest_sha256": sha256_file(checkpoint_manifest_path),
+        "cache_identity": cache_identity,
+        "output_hashes": {layout.relative_identity(p): sha256_file(p) for p in (
+            checkpoint_manifest_path, checkpoint_dir / "training-summary.json",
+            checkpoint_dir / "restart-state.pt",
+            layout.resolve(f"logs/encoder-comparison-seed-{seed}.log"))},
+    }
+
+
 def run_training(
     layout: RunLayout,
     selection: ComparisonSelection,
@@ -649,15 +675,7 @@ def run_training(
             raise DataContractError("existing comparison checkpoint manifest differs")
     else:
         atomic_write_json(checkpoint_manifest_path, checkpoint_manifest)
-    stage_manifest = {
-        **plan,
-        "schema_version": "phase-g-encoder-train-result-1.0",
-        "status": "completed",
-        "checkpoint_manifest": layout.relative_identity(checkpoint_manifest_path),
-        "checkpoint_manifest_sha256": sha256_file(checkpoint_manifest_path),
-        "cache_identity": cache_identity,
-        "output_hashes": {layout.relative_identity(p): sha256_file(p) for p in (checkpoint_manifest_path, checkpoint_dir / "training-summary.json", checkpoint_dir / "restart-state.pt", layout.resolve(f"logs/encoder-comparison-seed-{seed}.log"))},
-    }
+    stage_manifest = _training_result(layout, plan, checkpoint_manifest_path, cache_identity)
     result_path = layout.resolve(
         f"manifests/encoder-comparison-train-live-seed-{seed}.json"
     )
@@ -667,6 +685,25 @@ def run_training(
     else:
         atomic_write_json(result_path, stage_manifest)
     return stage_manifest
+
+
+def _prediction_identity(layout, selection, seed, split) -> dict:
+    """Bind raw model output before the deterministic candidate conversion."""
+    inputs = (
+        "manifests/00-checkout-manifest.json",
+        "manifests/encoder-comparison-selection.json",
+        CACHE_MANIFEST_RELATIVE,
+        f"checkpoints/seed-{seed}/checkpoint-manifest.json",
+        f"checkpoints/seed-{seed}/checkpoint.pt",
+        f"data-prepared/{split}.jsonl",
+    )
+    return {"run_id": layout.run_id, "arm_id": selection.arm.arm_id,
+        "training_seed": seed, "split": split,
+        "inputs": {name: sha256_file(layout.resolve(name, must_exist=True)) for name in inputs}}
+
+
+def _prediction_receipt(ledger: Path, identity: dict) -> dict:
+    return {"identity": identity, "ledger_sha256": sha256_file(ledger)}
 
 
 def generate(
@@ -690,11 +727,17 @@ def generate(
     ledger = layout.resolve(
         f"predictions/{short_split}/seed-{seed}-prediction-ledger.jsonl"
     )
+    identity = _prediction_identity(layout, selection, seed, split)
+    receipt = ledger.with_suffix(".jsonl.manifest.json")
+    if receipt.exists() and not ledger.is_file():
+        raise DataContractError("completed comparison prediction ledger is missing")
     if not ledger.is_file():
         command = _private_command(
             layout, selection, seed, "predict", split=split
         )
         command_runner(command, cwd=layout.source_root, check=True)
+    if not receipt.is_file() or load_json(receipt) != _prediction_receipt(ledger, identity):
+        raise DataContractError("comparison prediction lacks matching producer evidence")
     candidates = layout.resolve(
         f"predictions/{short_split}/seed-{seed}-candidates.jsonl"
     )
@@ -732,9 +775,9 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
         raise DataContractError("private worker names another matrix")
     require_matrix_progress(layout, selection,
         boundary="smoke" if action == "smoke" else "test" if action == "predict" and args.split == "test" else "training")
-    if action != "smoke":
-        require_active_dispatch(matrix, [f"_{action}-encoder", *arguments])
-    with exclusive_run(layout, f"{action}-{args.training_seed}"):
+    require_active_dispatch(matrix, [f"_{action}-encoder", *arguments],
+        label="comparison-smoke" if action == "smoke" else "comparison-full")
+    with exclusive_run(layout, "comparison-worker"):
         return _execute_private(layout, selection, args, action)
 
 
@@ -833,6 +876,13 @@ def _execute_private(layout, selection, args, action):
     elif action == "predict":
         mode = "predict"
         split = args.split
+        identity = _prediction_identity(layout, selection, args.training_seed, split)
+        from utils.common.execution import bind_json
+        ledger = Path(trainer_arguments(layout, selection, args.training_seed,
+            mode=mode, split=split).prediction_ledger_out)
+        if ledger.exists() or ledger.with_suffix(".jsonl.manifest.json").exists():
+            raise DataContractError("private prediction cannot overwrite retained output")
+        bind_json(ledger.with_suffix(".jsonl.work.json"), identity)
     else:
         raise DataContractError(f"unsupported private comparison action: {action}")
     from utils.encoder_comparison.trainer import main as trainer_main
@@ -846,4 +896,6 @@ def _execute_private(layout, selection, args, action):
             split=split,
         )
     )
+    if action == "predict":
+        bind_json(ledger.with_suffix(".jsonl.manifest.json"), _prediction_receipt(ledger, identity))
     return 0

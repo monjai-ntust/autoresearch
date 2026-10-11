@@ -494,6 +494,10 @@ class EncoderComparisonTests(unittest.TestCase):
             layout = RunLayout(Path(temporary), "smoke")
             layout.create()
             selection = self.config.select_arm("bert-base-common")
+            run_identity = {"run_id": layout.run_id, "inputs": {"cache": "fixture"}}
+            identity_patch = mock.patch.object(comparison_stage, "restart_identity", return_value=run_identity)
+            identity_patch.start()
+            self.addCleanup(identity_patch.stop)
             bind_selection(layout, selection)
             atomic_write_json(layout.resolve("data-prepared/split-manifest.json"), {})
             arguments = comparison_stage._smoke_training_arguments(
@@ -520,6 +524,7 @@ class EncoderComparisonTests(unittest.TestCase):
             )
             summary = {
                 "status": "completed",
+                "run_identity": run_identity,
                 "seed": 42,
                 "model_name": selection.profile.model,
                 "model_revision": selection.profile.revision,
@@ -568,6 +573,10 @@ class EncoderComparisonTests(unittest.TestCase):
                 layout, selection, 42
             )
             self.assertEqual(evidence["cuda_device"], "fixture")
+            atomic_write_json(paths["training_summary"], {**summary, "run_identity": {"run_id": "foreign"}})
+            with self.assertRaisesRegex(DataContractError, "smoke summary differs"):
+                comparison_stage._validate_smoke_outputs(layout, selection, 42)
+            atomic_write_json(paths["training_summary"], summary)
 
             smoke_path = layout.resolve(comparison_stage.SMOKE_MANIFEST_RELATIVE)
             atomic_write_json(layout.resolve(comparison_stage.CACHE_MANIFEST_RELATIVE), {})

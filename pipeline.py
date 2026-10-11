@@ -56,9 +56,11 @@ def main(argv: list[str] | None = None) -> int:
             print("Canonical configuration and literal prompt/schema hashes valid.")
             return 0
         layout = RunLayout(root, args.run_id)
-        from stages.preparation import initialize
+        from stages.preparation import initialize, require_canonical_namespace
+        require_canonical_namespace(layout)
         layout.run_root.mkdir(parents=True, exist_ok=True)
         with exclusive_run(layout):
+            require_canonical_namespace(layout)
             initialize(layout, config)
             return _run_full_pipeline(layout, config, ollama_url=args.ollama_url,
                                       model_blob_source=args.model_blob_source)

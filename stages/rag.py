@@ -151,8 +151,12 @@ def run_command(
             identity, source, summary, runtime, base_contract
         )
         stage = status.get("stages", {}).get(stage_name)
+        output_path = child_dir / "rag-results" / f"{condition}.json"
+        kg_path = projection_paths[condition]
+        records = runtime["records"]
+        kg = runner.load_json(kg_path)
         reuse_completed = False
-        if isinstance(stage, dict) and stage.get("status") == "complete":
+        if isinstance(stage, dict) and stage.get("status") in {"complete", "output-validated"}:
             runner.validate_model_check(
                 child_dir,
                 status,
@@ -161,11 +165,14 @@ def run_command(
                 expected_model=summary["model_identity"],
                 condition=condition,
             )
+            restored = evaluate_ordered(records, kg,
+                questions=runtime["panels"]["combined"], condition=condition,
+                identity=identity, child_dir=child_dir, status=status,
+                status_path=status_path, model_identity=summary["model_identity"],
+                ollama_url=args.ollama_url.rstrip("/"), completed_only=True)
+            if not output_path.is_file() or output_path.read_bytes() != runner.scientific_json_bytes(restored):
+                raise runner.PhaseEError("completed RAG output differs from its original occurrence evidence")
             reuse_completed = True
-        output_path = child_dir / "rag-results" / f"{condition}.json"
-        kg_path = projection_paths[condition]
-        records = runtime["records"]
-        kg = runner.load_json(kg_path)
         runner.run_stage(
             stage_name,
             lambda records=records, kg=kg, kg_path=kg_path: evaluate_ordered(
@@ -207,6 +214,9 @@ def run_command(
             status["stages"][stage_name].update(
                 status="complete", post_model_identity_check=check
             )
+            runner.write_status(status_path, status, child_dir)
+        elif stage.get("status") != "complete":
+            stage["status"] = "complete"
             runner.write_status(status_path, status, child_dir)
         replacement_outputs[condition] = runner.load_json(output_path)
 
