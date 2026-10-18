@@ -204,6 +204,12 @@ prompt/schema bytes, old parsed worker values, and raw graph/projection/question
 prompt/result/statistical replay. Fixed Python hash seed preserves characterized
 set iteration order rather than normalizing results. Other tests cover tiny CPU
 tensor/RNG/restart cases, typed scoring, lineage tampering and continuation.
+AST checks parse source bytes using Python's source encoding; JSON fixtures use
+UTF-8 explicitly. The paired t-test's standard deviation, statistic and p-value
+allow at most 32 ULP (steps between adjacent floating-point values) from the
+frozen Windows fixture for platform math-library rounding. Its algorithm source,
+all other fields and the graph/prompt/result fixtures still compare exactly;
+production values and saved golden bytes are never rounded for this check.
 [test_continuation.py](../tests/test_continuation.py) injects response/model-proof/
 gate/lock/budget failures; [test_reporting.py](../tests/test_reporting.py) verifies
 automatic report authentication, ties, coverage and deterministic reinvocation.

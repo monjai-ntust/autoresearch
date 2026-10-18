@@ -134,7 +134,7 @@
     {
       "path": "utils/evaluation/tables.py",
       "name": "publication_products",
-      "ast_sha256": "4f08bbd255e1e462177818571675d0a7e7f024f400eea39896e631062457b94e"
+      "ast_sha256": "3a49c10f5660956b763f117773dffb67a4ab728e00e5d3afc07b2f319c3919a3"
     },
     {
       "path": "utils/evaluation/scoring.py",
