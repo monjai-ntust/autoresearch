@@ -167,10 +167,6 @@
       4
     ]
   },
-  "environment": {
-    "python": "3.10.20",
-    "uv": "0.11.26"
-  },
   "runtime_paths": {
     "sentences": "data-prepared/test.jsonl",
     "warmup_sentences": "data-prepared/development.jsonl",

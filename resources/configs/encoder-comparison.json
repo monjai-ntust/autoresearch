@@ -5,8 +5,7 @@
   "dataset_id": "CODE-ACCORD-v1.0.0",
   "split_id": "CODE-SPLIT-1",
   "canonical_pipeline_config": {
-    "path": "resources/configs/pipeline.json",
-    "sha256": "131364740c0513ec7d172bacbd0add7a76eee07a7a1712c31e78584a6f2bb55a"
+    "path": "resources/configs/pipeline.json"
   },
   "encoder_profiles": [
     {

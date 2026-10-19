@@ -104,9 +104,6 @@ def rag_output(
 
 
 class CodeQuestionTests(unittest.TestCase):
-    def setUp(self):
-        self.method = code_questions.replacement_method()
-
     def test_method_matches_historical_templates_and_keeps_protected_generator(self):
         records = [
             record(
@@ -134,13 +131,6 @@ class CodeQuestionTests(unittest.TestCase):
         ]
         self.assertEqual(len(necessity), 1)
         self.assertEqual(necessity[0]["gold_answer"], "First")
-        self.assertEqual(
-            tuple(
-                (item["relation"], item["question"], item["answer"])
-                for item in self.method["additional_templates"]
-            ),
-            code_questions.EXPECTED_ADDITIONAL_TEMPLATES,
-        )
 
     def test_protected_and_replacement_share_one_evaluator_kernel(self):
         self.assertIs(runner.evaluator, evaluator)
@@ -192,12 +182,10 @@ class CodeQuestionTests(unittest.TestCase):
         self.assertEqual(list(output["results"]), list(evaluator.MODES))
 
     def test_method_is_source_defined_without_a_duplicate_resource(self):
-        changed = code_questions.replacement_method()
-        changed["additional_templates"][0]["question"] = "Changed {head}?"
-        self.assertEqual(
-            code_questions.replacement_method()["additional_templates"][0]["question"],
-            "What is required for {head}?",
-        )
+        changed = code_questions._template_mapping()
+        changed["necessity"] = ("Changed {head}?", "{tail}")
+        panels = code_questions.build_question_panels([record(1, [("Need", "necessity", "Power")])])
+        self.assertEqual(panels["added"][0]["question"], "What is required for Need?")
         self.assertFalse((ROOT / "resources/contracts/code-questions.json").exists())
 
     def test_part_of_artifact_extracts_fresh_rows_in_combined_order(self):
@@ -229,17 +217,46 @@ class CodeQuestionTests(unittest.TestCase):
         self.assertEqual(statistics["llm_only"]["part_of"]["n"], 2)
 
     def test_replacement_method_has_no_historical_oracle_binding(self):
-        self.assertNotIn("historical_oracle", self.method)
         source = (ROOT / "utils/rag/code_questions.py").read_text(encoding="utf-8")
         self.assertNotIn("HISTORICAL_ORACLE_NAMESPACE", source)
         self.assertNotIn("_validate_protected_child", source)
         self.assertNotIn("protected-parent.json", source)
 
+    def test_fresh_metadata_binds_source_resource_and_generated_hashes_without_static_copies(self):
+        records = [record(1, [("Part", "part-of", "Whole")])]
+        projections = {"records": runner.canonical_jsonl_bytes(records)}
+        base = {"run_id": RUN_ID, "parent_artifact_set_sha256": "1" * 64,
+            "score_manifest_sha256": "2" * 64, "seed": 42, "threshold": 0.25,
+            "projection_sha256": {"records": runner.sha256_bytes(projections["records"])},
+            "graphs": {}, "records": {}, "model_identity": model_identity(), "environment": {}}
+        base["model_identity"].update({"ollama_runtime": {"path": "runtime/ollama.json", "sha256": "c" * 64},
+                                      "ollama_runtime_identity": {"fixture": "loaded shared runtime"}})
+        with mock.patch.object(runner, "preflight_same_run",
+                               return_value=(ROOT / "output" / RUN_ID, base, projections, {})), \
+             mock.patch.object(runner, "sha256_file", side_effect=AssertionError("fixed resource hashed")):
+            _run_dir, summary, _runtime = code_questions.preflight_code_questions(RUN_ID, CONTRACT)
+        source = {"head": "a" * 40}
+        identity = code_questions.build_identity(RUN_ID, source, summary)
+        for document in (summary, identity):
+            self.assertNotIn("method_sha256", document)
+            self.assertNotIn("base_contract_sha256", document)
+            self.assertNotIn("method", document)
+            self.assertNotIn("base_contract", document)
+            self.assertEqual(document["contract"], "resources/contracts/table2.json")
+        self.assertEqual(identity["source"], source)
+        self.assertNotIn("ollama_tag_digest", identity)
+        self.assertNotIn("ollama_model_blob_sha256", identity)
+        self.assertNotIn("ollama_runtime_identity", identity["base_preflight_identity"]["model_identity"])
+        self.assertNotIn("name", identity["base_preflight_identity"]["model_identity"])
+        self.assertEqual(identity["projection_sha256"], base["projection_sha256"])
+        self.assertEqual(identity["question_sha256"]["combined"], summary["questions"]["combined_sha256"])
+
     def test_dry_run_has_no_model_call_or_output_write(self):
         args = argparse.Namespace(
             run_id=RUN_ID, ollama_url="http://localhost:11434", dry_run=True
         )
-        summary = {"run_id": RUN_ID, "questions": {"added_count": 1}}
+        summary = {"run_id": RUN_ID, "questions": {"added_count": 1},
+                   "model_identity": model_identity()}
         with tempfile.TemporaryDirectory() as temporary:
             run_dir = Path(temporary)
             with mock.patch.object(
@@ -296,10 +313,7 @@ class CodeQuestionTests(unittest.TestCase):
                 "run_dir": str(run_dir),
                 "lineage_status": "lineage-valid",
                 "profile_id": code_questions.PROFILE_ID,
-                "method_sha256": runner.sha256_bytes(
-                    runner.canonical_json_bytes(self.method)
-                ),
-                "base_contract_sha256": runner.sha256_file(runner.CONTRACT_PATH),
+                "contract": runner.CONTRACT_PATH.relative_to(runner.ROOT).as_posix(),
                 "base_preflight_identity": runner._preflight_identity(base_preflight),
                 "projection_sha256": base_preflight["projection_sha256"],
                 "graphs": {},
@@ -312,7 +326,6 @@ class CodeQuestionTests(unittest.TestCase):
                     "question_sha256": "3" * 64,
                 },
                 "questions": panels["summary"],
-                "method": self.method,
                 "model_identity": identity,
                 "environment": {},
             }
@@ -330,8 +343,6 @@ class CodeQuestionTests(unittest.TestCase):
             )
             source = {
                 "head": "a" * 40,
-                "branch": "publication-refactored-rag",
-                "baseline": "b" * 40,
             }
             capture = model_capture(identity)
             calls = []
@@ -389,6 +400,13 @@ class CodeQuestionTests(unittest.TestCase):
             self.assertEqual(len(combined["results"]["llm_only"]), 2)
             self.assertEqual(len(part_of["results"]["llm_only"]), 1)
             self.assertFalse((run_dir / "table2-q105").exists())
+            child = run_dir / code_questions.OUTPUT_NAMESPACE
+            self.assertFalse((child / "method-manifest.json").exists())
+            fresh_identity = runner.load_json(child / "run-status.json")["identity"]
+            self.assertEqual(fresh_identity["contract"], "resources/contracts/table2.json")
+            self.assertEqual(fresh_identity["source"], source)
+            self.assertNotIn("base_contract_sha256", fresh_identity)
+            self.assertNotIn("method_sha256", fresh_identity)
 
     def test_public_runner_dispatches_to_replacement(self):
         args = argparse.Namespace(

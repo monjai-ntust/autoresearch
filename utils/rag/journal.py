@@ -13,7 +13,8 @@ def _producer(child_dir, identity, model_identity, ollama_url):
     process = process_identity()
     path = child_dir / "calls" / "producers" / f"{process['process_id']}.json"
     runner.write_json_once(path, {"binding": {"identity": identity,
-        "model_identity": model_identity, "ollama_url": ollama_url}, "process": process}, child_dir)
+        "model_identity": runner.persisted_model_identity(model_identity),
+        "ollama_url": ollama_url}, "process": process}, child_dir)
     return {"path": path.relative_to(child_dir).as_posix(), "sha256": runner.sha256_file(path)}
 
 
@@ -29,21 +30,26 @@ def _validate_producer(reference, child_dir, identity, model_identity):
         raise runner.PhaseEError("RAG producer evidence is malformed")
     binding = producer["binding"]
     if (not isinstance(binding, dict) or set(binding) != {"identity", "model_identity", "ollama_url"}
-            or binding.get("identity") != identity or binding.get("model_identity") != model_identity
+            or binding.get("identity") != identity
+            or binding.get("model_identity") not in (runner.persisted_model_identity(model_identity), model_identity)
             or not isinstance(binding.get("ollama_url"), str) or not binding["ollama_url"]):
         raise runner.PhaseEError("RAG producer belongs to different run or model inputs")
     process = producer["process"]
-    seed_fields = {"environment_at_capture", "startup_setting", "effective_setting"}
-    if (not isinstance(process, dict) or process.get("schema_version") != "python-process-observation-1"
+    fields = {"process_id", "pid", "observed_unix_ns"}
+    if (not isinstance(process, dict)
             or not isinstance(process.get("process_id"), str)
             or not re.fullmatch(r"[1-9][0-9]*-[0-9]+", process["process_id"])
-            or type(process.get("pid")) is not int
-            or type(process.get("observed_unix_ns")) is not int
+            or type(process.get("pid")) is not int or process["pid"] <= 0
+            or type(process.get("observed_unix_ns")) is not int or process["observed_unix_ns"] <= 0
             or process["process_id"] != f"{process['pid']}-{process['observed_unix_ns']}"
-            or not isinstance(process.get("python_hash_seed"), dict)
-            or not seed_fields.issubset(process["python_hash_seed"])
             or reference["path"] != f"calls/producers/{process['process_id']}.json"):
         raise runner.PhaseEError("RAG producing process identity is malformed")
+    if set(process) != fields:
+        seed_fields = {"environment_at_capture", "startup_setting", "effective_setting"}
+        if (process.get("schema_version") != "python-process-observation-1"
+                or not isinstance(process.get("python_hash_seed"), dict)
+                or not seed_fields.issubset(process["python_hash_seed"])):
+            raise runner.PhaseEError("RAG legacy producing process evidence is malformed")
     return producer
 
 
@@ -125,9 +131,13 @@ def _saved_occurrences(directory, plan, stage, child_dir, condition, identity, m
             if proof.get("answer_sha256") != runner.sha256_file(answer_path):
                 raise runner.PhaseEError("RAG answer changed after its model proof")
             evidence = proof.get("evidence", {})
-            for field in ("name", "tag_digest", "blob_sha256", "details"):
-                if evidence.get(field) != model_identity[field]:
-                    raise runner.ModelEvidenceError("RAG occurrence model identity differs", condition)
+            if "ollama_runtime_identity" not in model_identity:
+                for field in ("name", "tag_digest", "blob_sha256", "details"):
+                    if evidence.get(field) != model_identity[field]:
+                        raise runner.ModelEvidenceError("RAG occurrence model identity differs", condition)
+            if ("ollama_runtime_identity" in model_identity
+                    and evidence.get("ollama_runtime_sha256") != model_identity["ollama_runtime"]["sha256"]):
+                raise runner.ModelEvidenceError("RAG occurrence runtime identity differs", condition)
             tags = runner.run_file(child_dir, proof["tags"])
             show = runner.run_file(child_dir, proof["show"])
             if (runner.sha256_file(tags) != evidence.get("tags_response_sha256")
@@ -183,9 +193,11 @@ def evaluate_ordered(records, kg, *, questions, condition, identity, child_dir,
             or len(prompts) != len(questions)*len(evaluator.MODES)
             or not all(isinstance(prompt, str) for prompt in prompts)):
         raise runner.PhaseEError("RAG request plan occurrence coverage differs")
-    enriched = set(plan) == {"binding", "producer", "prompts", "requests", "request_template"}
+    enriched = set(plan) in ({"binding", "producer", "prompts", "requests", "model"},
+                             {"binding", "producer", "prompts", "requests", "request_template"})
+    current = enriched and request_evidence.is_current_request_plan(plan, model_identity["name"])
     if enriched:
-        request_evidence.validate_request_plan(plan, questions, model_identity["name"])
+        request_evidence.validate_request_plan(plan, questions, model_identity["name"], allow_legacy=True)
         _validate_producer(plan.get("producer"), child_dir, identity, model_identity)
     elif set(plan) != {"binding", "prompts"}:
         raise runner.PhaseEError("RAG request plan evidence fields are unsupported or incomplete")
@@ -193,6 +205,8 @@ def evaluate_ordered(records, kg, *, questions, condition, identity, child_dir,
         directory, plan, stage, child_dir, condition, identity, model_identity)
     if not enriched and len(answers) != len(prompts):
         raise runner.PhaseEError("unfinished historical RAG plan lacks recorded ordered request context")
+    if enriched and not current and len(answers) != len(prompts):
+        raise runner.PhaseEError("unfinished historical RAG plan requires its original source workflow")
     if completed_only and len(answers) != len(prompts):
         raise runner.PhaseEError("completed RAG stage lacks its successful occurrence evidence")
     results = {mode: [] for mode in evaluator.MODES}
@@ -209,6 +223,8 @@ def evaluate_ordered(records, kg, *, questions, condition, identity, child_dir,
             answer_path = occurrence / f"{index:03d}-answer.json"
             proof_path = occurrence / f"{index:03d}-model.json"
             if producer is None:
+                if "ollama_runtime_identity" in model_identity:
+                    runner.fetch_matching_model(ollama_url, model_identity)
                 producer = _producer(child_dir, identity, model_identity, ollama_url)
             runner.write_json_once(request_path, {"binding": {"plan_sha256": stage["plan_sha256"],
                 "ordinal": ordinal, "attempt": index},
@@ -223,7 +239,8 @@ def evaluate_ordered(records, kg, *, questions, condition, identity, child_dir,
                 "answer": answer, "recorded_at": runner.utc_now()}, child_dir)
             # Once the answer is durable, absence of this contemporaneous proof
             # must fail closed on resume; a later query cannot replace it.
-            evidence, tags_bytes, show_bytes = runner.fetch_matching_model(ollama_url, model_identity)
+            evidence, tags_bytes, show_bytes = runner.fetch_matching_model(ollama_url, model_identity,
+                                                                         check_runtime=False)
             evidence_dir = child_dir / "calls" / "model-evidence"
             tags = evidence_dir / (runner.sha256_bytes(tags_bytes)+".json")
             show = evidence_dir / (runner.sha256_bytes(show_bytes)+".json")
@@ -246,7 +263,7 @@ def evaluate_ordered(records, kg, *, questions, condition, identity, child_dir,
                              "gold": question["gold_answer"], "correct": hit})
     if called:
         stage["time_seconds"] = previous_seconds + time.time() - started
-    if not completed_only and enriched:
+    if not completed_only and current:
         runner.write_status(status_path, status, child_dir)
     count = len(questions)
     return {"metadata": {"kg": runner.stable_child_path(child_dir/"projections"/f"{condition}-seed-42.json")

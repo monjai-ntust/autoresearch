@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 
 from utils.common.artifact_io import (
     DataContractError, atomic_write_bytes, canonical_json_bytes, load_json,
@@ -11,12 +12,10 @@ from utils.common.environment import inspect_checkout
 from utils.common.execution import retain_bytes
 
 CHECKOUT = "manifests/00-checkout-manifest.json"
-CONFIG = "inputs/config/pipeline.json"
 RECOVERY = "manifests/checkout-recovery"
 _SNAPSHOTS = {
     "previous_checkout": "previous-checkout.json",
     "fresh_checkout": "fresh-checkout.json",
-    "config": "config.json",
 }
 _RETRYABLE_CHECKS = {"clean-tracked-source", "root-output-ignore-rule",
                      "root-output-ignore-negative", "source-bytecode-disabled"}
@@ -26,7 +25,12 @@ def _digest(payload):
     return hashlib.sha256(payload).hexdigest()
 
 
-def _blocked_checkout(document, layout, config, config_bytes):
+def _committed_config(layout, commit, relative):
+    return subprocess.run(['git', 'show', f'{commit}:{relative}'],
+        cwd=layout.source_root, check=True, capture_output=True).stdout
+
+
+def _blocked_checkout(document, layout, config):
     expected = {
         "schema_version": "phase-b-checkout-manifest-2.0",
         "lifecycle_version": 1,
@@ -55,15 +59,20 @@ def _blocked_checkout(document, layout, config, config_bytes):
     if (not failures or not failures <= _RETRYABLE_CHECKS
             or ("clean-tracked-source" in failures) != (source["worktree_clean"] is False)):
         raise DataContractError("checkout continuation requires a dirty-source or retired-check failure")
-    identity = {"path": config.path.relative_to(layout.source_root).as_posix(),
-                "sha256": _digest(config_bytes), "run_local_path": CONFIG}
-    if source.get("config") != identity or config.path.read_bytes() != config_bytes:
+    relative = config.path.relative_to(layout.source_root).as_posix()
+    if source.get("config") != {"path": relative}:
+        raise DataContractError("blocked checkout configuration differs from the selected configuration")
+    try:
+        committed = _committed_config(layout, source["commit"], relative)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise DataContractError('blocked checkout source configuration is unavailable') from exc
+    if committed != config.path.read_bytes():
         raise DataContractError("blocked checkout configuration differs from the selected configuration")
 
 
 def _inventory(layout, *, checkout_only):
     """Reject redirected recovery paths and any pre-admission scientific files."""
-    ordinary = {CHECKOUT, CONFIG, "logs/locks/workflow.lock"}
+    ordinary = {CHECKOUT, "logs/locks/workflow.lock"}
     snapshots = {f"{RECOVERY}/{name}" for name in _SNAPSHOTS.values()}
     receipts = []
     scan_root = layout.run_root if checkout_only else layout.run_root / RECOVERY
@@ -105,7 +114,7 @@ def _validate_retained(layout, config, path):
     if receipt != _receipt(layout, payloads):
         raise DataContractError("checkout recovery receipt belongs to different or changed evidence")
     previous = load_json(layout.resolve(f"{RECOVERY}/previous-checkout.json", must_exist=True))
-    _blocked_checkout(previous, layout, config, payloads["config"])
+    _blocked_checkout(previous, layout, config)
     fresh = load_json(layout.resolve(f"{RECOVERY}/fresh-checkout.json", must_exist=True))
     marker = {"receipt_directory": RECOVERY,
               "previous_checkout_sha256": _digest(payloads["previous_checkout"])}
@@ -133,15 +142,14 @@ def continue_checkout(layout, config):
     if has_marker and not receipts:
         raise DataContractError("checkout recovery promotion receipt is missing")
     if not receipts:
-        config_bytes = layout.resolve(CONFIG, must_exist=True).read_bytes()
-        _blocked_checkout(active, layout, config, config_bytes)
+        _blocked_checkout(active, layout, config)
         fresh, passed = inspect_checkout(layout, config)
         if not passed:
             raise DataContractError(f"Checkout doctor failed: {fresh}")
         fresh["checkout_recovery"] = {"receipt_directory": RECOVERY,
                                       "previous_checkout_sha256": _digest(active_bytes)}
         payloads = {"previous_checkout": active_bytes,
-                    "fresh_checkout": canonical_json_bytes(fresh), "config": config_bytes}
+                    "fresh_checkout": canonical_json_bytes(fresh)}
         for key, value in payloads.items():
             retain_bytes(layout.resolve(f"{RECOVERY}/{_SNAPSHOTS[key]}"), value)
         receipt_bytes = canonical_json_bytes(_receipt(layout, payloads))
@@ -151,8 +159,6 @@ def continue_checkout(layout, config):
     payloads, fresh = _validate_retained(layout, config, receipts[0])
     if active_bytes not in {payloads["previous_checkout"], payloads["fresh_checkout"]}:
         raise DataContractError("active checkout differs from retained recovery evidence")
-    if layout.resolve(CONFIG, must_exist=True).read_bytes() != payloads["config"]:
-        raise DataContractError("run-local configuration changed during checkout recovery")
     if active_bytes == payloads["fresh_checkout"]:
         return
     current, passed = inspect_checkout(layout, config)

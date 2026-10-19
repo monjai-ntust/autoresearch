@@ -10,7 +10,7 @@ from typing import Any
 
 from utils.common.config import PipelineConfig
 from utils.common.constants import MATCHER_ID, PROTOCOL_ID, WORKFLOW_ID
-from utils.common.artifact_io import atomic_write_json, atomic_write_bytes, sha256_file
+from utils.common.artifact_io import atomic_write_json
 from utils.common.paths import RunLayout
 
 
@@ -91,12 +91,16 @@ def inspect_checkout(layout: RunLayout, config: PipelineConfig) -> tuple[dict[st
             "root output is ignored" if positive.returncode == 0 else "root output is not ignored",
         )
     )
+    config_relative = config.path.relative_to(source_root).as_posix()
+    tracked = _command(source_root,
+        ['git', 'ls-files', '--error-unmatch', '--', config_relative])
+    checks.append(_check('selected-config-tracked', tracked.returncode == 0,
+        'selected configuration is tracked' if tracked.returncode == 0
+        else 'selected configuration is not tracked by the source commit'))
     actual_python = platform.python_version()
     actual_uv, _ = _uv_version(source_root)
 
     passed = all(item["status"] == "pass" for item in checks)
-    config_relative = config.path.relative_to(source_root).as_posix()
-    run_local_config = "inputs/config/pipeline.json"
     manifest = {
         "schema_version": "phase-b-checkout-manifest-2.0",
         "lifecycle_version": 1,
@@ -110,8 +114,6 @@ def inspect_checkout(layout: RunLayout, config: PipelineConfig) -> tuple[dict[st
             "worktree_clean": clean,
             "config": {
                 "path": config_relative,
-                "sha256": sha256_file(config.path),
-                "run_local_path": run_local_config,
             },
         },
         "environment": {
@@ -131,7 +133,6 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
 
     manifest, passed = inspect_checkout(layout, config)
     layout.create(allow_lock_only=True)
-    atomic_write_bytes(layout.resolve("inputs/config/pipeline.json"), config.path.read_bytes())
     manifest_path = layout.resolve("manifests/00-checkout-manifest.json")
     atomic_write_json(manifest_path, manifest)
     return manifest, passed

@@ -608,6 +608,8 @@ class LiveModelIdentityTests(unittest.TestCase):
                             }
                         ]
                     }
+                elif url.endswith("/api/version"):
+                    body = {"version": "fixture-server-version"}
                 else:
                     body = {
                         "details": {
@@ -628,16 +630,9 @@ class LiveModelIdentityTests(unittest.TestCase):
                     return verifier["model_blob_sha256"]
                 return real_sha256_file(path)
 
-            command = {
-                "status": "available",
-                "returncode": 0,
-                "stdout": "FROM sha256:" + verifier["model_blob_sha256"],
-            }
             with patch(
                 "utils.verifier.verifier.sha256_file",
                 side_effect=sha256_file,
-            ), patch(
-                "utils.verifier.verifier._command_output", return_value=command
             ):
                 evidence = _verify_live_model(
                     layout,

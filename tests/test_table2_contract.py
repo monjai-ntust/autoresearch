@@ -1,4 +1,4 @@
-"""Characterization tests for the frozen Table-2 evaluator method."""
+"""Protected Table-2 definitions and the explicitly seeded fresh-run payload."""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ class Table2EvaluatorContractTests(unittest.TestCase):
                 "curl", "-s", "http://localhost:11434/api/chat", "-d",
                 '{"model": "qwen3:32b", "messages": [{"role": "user", '
                 '"content": "PROMPT"}], "stream": false, "think": false, '
-                '"options": {"temperature": 0.0, "num_predict": 50}}',
+                '"options": {"temperature": 0.0, "num_predict": 50, "seed": 42}}',
             ],
         )
         self.assertEqual(kwargs, {"capture_output": True, "text": True, "timeout": 60})

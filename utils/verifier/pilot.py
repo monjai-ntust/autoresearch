@@ -765,14 +765,10 @@ def _validate_capture(
             raise DataContractError(
                 f"capture {capture.capture_id} manifest {field} must be {expected!r}"
             )
-    prompt_sha256, model_sha256, decoding_sha256 = (
-        next(iter(requests_by_id.values()))[field]
-        for field in ("prompt_sha256", "model_manifest_sha256", "decoding_sha256")
-    )
+    selected_request = next(iter(requests_by_id.values()))
     for field, expected in {
-        "prompt_sha256": prompt_sha256,
-        "model_manifest_sha256": model_sha256,
-        "decoding_sha256": decoding_sha256,
+        "template_id": selected_request["template_id"],
+        "model_manifest_sha256": selected_request["model_manifest_sha256"],
     }.items():
         if stage.get(field) != expected:
             raise DataContractError(
@@ -817,7 +813,6 @@ def _validate_capture(
         f"{base}/warmup-response.jsonl",
         f"{base}/model/tags.json",
         f"{base}/model/show.json",
-        f"{base}/model/ollama-modelfile.txt",
     }
     if not required_outputs <= set(outputs):
         raise DataContractError(
@@ -835,7 +830,8 @@ def _validate_capture(
             )
 
     environment = load_json(capture.environment_manifest)
-    runtime_fields = ("python", "platform", "hardware", "software", "ollama", "model")
+    fresh_runtime = isinstance(environment, dict) and isinstance(environment.get("model"), dict) and "ollama_runtime" in environment["model"]
+    runtime_fields = ("model",) if fresh_runtime else ("python", "platform", "hardware", "software", "ollama", "model")
     if not isinstance(environment, dict) or any(
         not isinstance(environment.get(field), dict) for field in runtime_fields
     ):
@@ -843,8 +839,13 @@ def _validate_capture(
             f"capture {capture.capture_id} environment runtime fields must be objects"
         )
     model = environment["model"]
+    if "ollama_runtime" in model:
+        from utils.verifier.runtime import load_runtime
+        actual = load_runtime(capture.root, model["ollama_runtime"])["model"]
+        model = {**model, **actual, "registry_manifest_sha256": actual["tag_digest"],
+                 "model_blob_sha256": actual["blob_sha256"]}
     if (
-        environment.get("protocol_id") != PROTOCOL_ID
+        (not fresh_runtime and environment.get("protocol_id") != PROTOCOL_ID)
         or environment.get("condition_id") != condition
         or environment.get("execution_mode") != "live"
         or not isinstance(model, dict)
@@ -1023,13 +1024,12 @@ def _validate_capture(
             "details",
         )
     }
-    runtime_identity = {
+    runtime_identity = ({"ollama_runtime": model["ollama_runtime"]} if fresh_runtime else {
         **{field: environment[field] for field in runtime_fields if field != "model"},
         "model": runtime_model,
-    }
-    runtime_identity_sha256 = hashlib.sha256(
-        canonical_json_bytes(runtime_identity)
-    ).hexdigest()
+    })
+    runtime_identity_sha256 = (model["ollama_runtime"]["sha256"] if fresh_runtime else
+        hashlib.sha256(canonical_json_bytes(runtime_identity)).hexdigest())
     provenance = {
         "capture_id": capture.capture_id,
         "mode": capture.mode,
@@ -1526,11 +1526,10 @@ def _run_verifier_pilot(
         },
         "prompt_identities": {
             mode: {
-                "prompt_sha256": next(iter(requests.values()))["prompt_sha256"],
+                "template_id": next(iter(requests.values()))["template_id"],
                 "model_manifest_sha256": next(iter(requests.values()))[
                     "model_manifest_sha256"
                 ],
-                "decoding_sha256": next(iter(requests.values()))["decoding_sha256"],
             }
             for mode, requests in requests_by_mode.items()
         },

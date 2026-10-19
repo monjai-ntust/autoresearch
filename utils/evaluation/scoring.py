@@ -33,7 +33,7 @@ from utils.evaluation.statistics import (
     paired_hierarchical_triple_f1_bootstrap,
     paired_t_test,
 )
-from utils.verifier.requests import verifier_identity
+from utils.verifier.requests import _sha256_value, verifier_identity, verifier_template_id
 
 
 @dataclass(frozen=True)
@@ -104,7 +104,8 @@ def _load_verdicts(
     path: Path,
     condition_id: str,
     candidates: dict[str, Candidate],
-    expected_identity: tuple[str, str, str],
+    expected_identity: tuple[str, str, str] | None = None,
+    *, config: PipelineConfig | None = None, mode: str | None = None,
 ) -> dict[str, Verdict]:
     records: dict[str, Verdict] = {}
     observed_order: list[tuple[int, str]] = []
@@ -128,6 +129,37 @@ def _load_verdicts(
         raise DataContractError(
             f"{path.name}: verdicts must be sorted by training_seed, candidate_id"
         )
+    fresh = [item for item in records.values() if item.template_id is not None]
+    if fresh:
+        if len(fresh) != len(records) or config is None or mode is None:
+            raise DataContractError(f"{path.name}: mixed or unbound verifier template identities")
+        identity = (verifier_template_id(config, mode),
+                    config.value['verifier']['registry_manifest_sha256'])
+        if any((item.template_id, item.model_manifest_sha256) != identity
+               or item.request_sha256 is None
+               or item.prompt_sha256 is not None or item.decoding_sha256 is not None
+               for item in fresh):
+            raise DataContractError(f"{path.name}: template/model/request identity differs")
+        requests = {}
+        for line_number, request in iter_jsonl(path.parent/'requests.jsonl'):
+            if (not isinstance(request, dict) or request.get('candidate_id') not in candidates
+                    or request['candidate_id'] in requests
+                    or request.get('condition_id') != condition_id
+                    or (request.get('template_id'), request.get('model_manifest_sha256')) != identity
+                    or not isinstance(request.get('payload'), dict)
+                    or request['payload'].get('model') != config.value['verifier']['model']
+                    or request.get('request_sha256') != _sha256_value(request['payload'])):
+                raise DataContractError(f"{path.name}: invalid same-run request identity at {line_number}")
+            requests[request['candidate_id']] = request
+        if any(item.candidate_id not in requests
+               or requests[item.candidate_id]['request_sha256'] != item.request_sha256
+               or requests[item.candidate_id].get('training_seed') != item.training_seed
+               for item in fresh):
+            raise DataContractError(f"{path.name}: verdict differs from its same-run request")
+        return records
+    # Original archived verdicts retain their old identity fields read-only.
+    if expected_identity is None and config is not None and mode is not None:
+        expected_identity = verifier_identity(config, mode)
     identities = {
         (item.prompt_sha256, item.model_manifest_sha256, item.decoding_sha256)
         for item in records.values()
@@ -285,13 +317,13 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
         inputs.simple_verdicts,
         "VER-SIMPLE",
         candidates_by_id,
-        verifier_identity(config, "simple"),
+        config=config, mode="simple",
     )
     corrective = _load_verdicts(
         inputs.corrective_verdicts,
         "VER-CORRECTIVE",
         candidates_by_id,
-        verifier_identity(config, "corrective"),
+        config=config, mode="corrective",
     )
     threshold = _load_threshold(inputs.threshold_selection, config)
 
@@ -592,6 +624,9 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
             publication_summary_path
         ),
     }
+    request_inputs = tuple(path.parent/'requests.jsonl'
+        for path, records in ((inputs.simple_verdicts, simple), (inputs.corrective_verdicts, corrective))
+        if any(item.template_id is not None for item in records.values()))
     manifest = {
         "schema_version": "phase-b-score-manifest-1.0",
         "protocol_id": PROTOCOL_ID,
@@ -606,7 +641,7 @@ def score_run(layout: RunLayout, config: PipelineConfig, inputs: ScoreInputs) ->
                 inputs.simple_verdicts,
                 inputs.corrective_verdicts,
                 inputs.threshold_selection,
-            )
+            ) + request_inputs
         },
         "outputs": output_hashes,
         "nonpublication_smoke": inputs.nonpublication_smoke,

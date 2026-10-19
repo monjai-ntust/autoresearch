@@ -12,7 +12,6 @@ from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     load_json,
-    sha256_file,
 )
 from utils.common.config import PipelineConfig, load_pipeline_config
 from utils.common.constants import (
@@ -20,11 +19,10 @@ from utils.common.constants import (
     PROTOCOL_ID,
     TRAINING_SEEDS,
 )
-from utils.common.paths import RunLayout, resolve_tracked_path
+from utils.common.paths import RunLayout, discover_source_root, resolve_tracked_path
 
 
 SCHEMA_VERSION = "phase-g-encoder-comparison-1.2"
-SELECTION_SCHEMA_VERSION = "phase-g-encoder-selection-1.0"
 DEFAULT_CONFIG = "resources/configs/encoder-comparison.json"
 PROFILE_FIELDS = {
     "profile_id",
@@ -241,12 +239,15 @@ class Table1Arm:
 @dataclass(frozen=True)
 class ComparisonConfig:
     path: Path
-    sha256: str
     value: dict[str, Any]
     pipeline: PipelineConfig
     profiles: dict[str, EncoderProfile]
     recipes: dict[str, ComparisonRecipe]
     arms: dict[str, Table1Arm]
+
+    @property
+    def source_path(self) -> str:
+        return self.path.relative_to(discover_source_root(self.path)).as_posix()
 
     def select_arm(self, arm_id: str) -> "ComparisonSelection":
         try:
@@ -316,19 +317,8 @@ class ComparisonSelection:
 
     def manifest(self, run_id: str | None = None) -> dict[str, Any]:
         manifest = {
-            "schema_version": SELECTION_SCHEMA_VERSION,
-            "protocol_id": PROTOCOL_ID,
-            "matcher_id": MATCHER_ID,
-            "split_id": "CODE-SPLIT-1",
-            "comparison_config": {
-                "path": self.config.path.relative_to(
-                    self.config.pipeline.path.parents[2]
-                ).as_posix(),
-                "sha256": self.config.sha256,
-            },
-            "table1_arm": self.arm.manifest(),
-            "encoder_profile": self.profile.manifest(),
-            "recipe": copy.deepcopy(self.recipe.value),
+            "comparison_config": self.config.source_path,
+            "arm_id": self.arm.arm_id,
         }
         if run_id is not None:
             manifest["run_id"] = run_id
@@ -521,8 +511,7 @@ def load_comparison_config(
     pipeline_record = _object(
         value["canonical_pipeline_config"], "canonical_pipeline_config"
     )
-    _exact_keys({key: item for key, item in pipeline_record.items() if key != "sha256"},
-                {"path"}, "canonical_pipeline_config")
+    _exact_keys(pipeline_record, {"path"}, "canonical_pipeline_config")
     pipeline_path = resolve_tracked_path(source_root, pipeline_record["path"])
     pipeline = load_pipeline_config(source_root, pipeline_path)
 
@@ -580,7 +569,6 @@ def load_comparison_config(
         raise DataContractError("execution limits differ from the user-approved limits")
     return ComparisonConfig(
         path=path,
-        sha256=sha256_file(path),
         value=value,
         pipeline=pipeline,
         profiles=profile_map,

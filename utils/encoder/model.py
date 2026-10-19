@@ -81,7 +81,7 @@ class CheckpointIdentity:
     prepared_dataset_tree_sha256: str
     train_jsonl_sha256: str
     development_jsonl_sha256: str
-    config_sha256: str
+    config: str
     model_cache_manifest_sha256: str
     model_cache_tree_sha256: str
     source_commit: str
@@ -105,30 +105,27 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             "protocol_id",
             "split_id",
             "training_seed",
-            "base_model",
-            "base_model_revision",
             "checkpoint_sha256",
             "checkpoint_step",
             "split_manifest_sha256",
-            "max_span_width",
-            "context_between_spans",
             "archive_sha256",
             "acquisition_manifest_sha256",
             "annotation_bundle_sha256",
             "prepared_dataset_tree_sha256",
             "train_jsonl_sha256",
             "development_jsonl_sha256",
-            "config_sha256",
+            "config",
             "model_cache_manifest",
             "model_cache_manifest_sha256",
             "model_cache_tree_sha256",
             "source_commit",
-            "selected_metric",
             "selected_metric_value",
             "restart_state_sha256",
         },
         label,
-        optional={"trainer_sha256", "data_adapter_sha256", "model_helper_sha256"},
+        optional={"trainer_sha256", "data_adapter_sha256", "model_helper_sha256",
+                  "base_model", "base_model_revision", "max_span_width",
+                  "context_between_spans", "selected_metric"},
     )
     if value["schema_version"] not in {
         "encoder-checkpoint-1",
@@ -143,16 +140,18 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
         raise DataContractError(f"{label}.training_seed is outside seeds 42-49")
     training = config.value["training"]
     for field in ("base_model", "base_model_revision", "max_span_width", "context_between_spans"):
-        if value[field] != training[field]:
+        if field in value and value[field] != training[field]:
             raise DataContractError(
                 f"{label}.{field} differs from the approved training recipe"
             )
     step = _integer(value["checkpoint_step"], f"{label}.checkpoint_step", minimum=1)
-    if value["selected_metric"] != "development_strict_triple_f1":
+    if value.get("selected_metric", "development_strict_triple_f1") != "development_strict_triple_f1":
         raise DataContractError(f"{label}.selected_metric is unsupported")
     _unit_float(value["selected_metric_value"], f"{label}.selected_metric_value")
     if value["model_cache_manifest"] != HF_CACHE_MANIFEST_RELATIVE:
         raise DataContractError(f"{label}.model_cache_manifest is unsupported")
+    if value["config"] != config.source_path:
+        raise DataContractError(f"{label}.config differs from the selected source configuration")
     source_commit = value["source_commit"]
     if (
         not isinstance(source_commit, str)
@@ -167,7 +166,7 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
         split_manifest_sha256=_sha256_hex(
             value["split_manifest_sha256"], f"{label}.split_manifest_sha256"
         ),
-        max_span_width=_integer(value["max_span_width"], f"{label}.max_span_width", minimum=1),
+        max_span_width=training["max_span_width"],
         archive_sha256=_sha256_hex(value["archive_sha256"], f"{label}.archive_sha256"),
         acquisition_manifest_sha256=_sha256_hex(
             value["acquisition_manifest_sha256"],
@@ -188,7 +187,7 @@ def _load_checkpoint_manifest(path: Path, config: PipelineConfig) -> CheckpointI
             value["development_jsonl_sha256"],
             f"{label}.development_jsonl_sha256",
         ),
-        config_sha256=_sha256_hex(value["config_sha256"], f"{label}.config_sha256"),
+        config=value["config"],
         model_cache_manifest_sha256=_sha256_hex(
             value["model_cache_manifest_sha256"],
             f"{label}.model_cache_manifest_sha256",
@@ -216,7 +215,6 @@ def _generation_plan(
                 "split": sentence.split,
                 "source_document_id": sentence.source_document_id,
                 "token_count": len(sentence.words),
-                "max_span_width": checkpoint.max_span_width,
                 "training_seed": checkpoint.training_seed,
                 "checkpoint_sha256": checkpoint.checkpoint_sha256,
             }
@@ -263,7 +261,7 @@ def _validate_checkpoint_run_identity(
         "split_manifest_sha256": sha256_file(split_path),
         "train_jsonl_sha256": sha256_file(train_path),
         "development_jsonl_sha256": sha256_file(development_path),
-        "config_sha256": sha256_file(config.path),
+        "config": config.source_path,
         "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
         "model_cache_tree_sha256": cache_manifest["tree_sha256"],
         "source_commit": checkout.get("source", {}).get("commit"),
@@ -419,7 +417,8 @@ def generate_candidates(
         from utils.common.execution import bind_json
         work_path = manifest_path.with_name(f"work-{manifest_path.name}")
         binding = {"run_id": layout.run_id, "inputs": inputs,
-            "checkpoint_sha256": checkpoint.checkpoint_sha256, "config_sha256": sha256_file(config.path)}
+            "checkpoint_sha256": checkpoint.checkpoint_sha256,
+            "config": config.source_path, "source_commit": checkpoint.source_commit}
         progress = load_json(work_path) if work_path.exists() else {"binding": binding}
         if not isinstance(progress, dict) or progress.get('binding') != binding:
             raise DataContractError('prediction work belongs to different run or inputs')
@@ -657,8 +656,7 @@ def plan_training(
         "status": "planned" if execution_mode == "dry-run" else "completed",
         "created_at_utc": _utc_now(),
         "training_seed": training_seed,
-        "split": dict(split),
-        "recipe": dict(config.value["training"]),
+        "config": config.source_path,
         "expected_checkpoint_dir": f"checkpoints/seed-{training_seed}",
         "final_test_selection_forbidden": True,
     }
@@ -744,7 +742,6 @@ def plan_training(
     from utils.encoder.runtime import restart_identity
     if (
         summary.get("status") != "completed"
-        or summary.get("canonical_mode") is not True
         or summary.get("seed") != training_seed
         or summary.get("test_evaluated") is not False
         or summary.get('completed_steps') != config.value['training']['max_steps']
@@ -770,25 +767,20 @@ def plan_training(
         "protocol_id": PROTOCOL_ID,
         "split_id": _SPLIT_ID,
         "training_seed": training_seed,
-        "base_model": config.value["training"]["base_model"],
-        "base_model_revision": config.value["training"]["base_model_revision"],
         "checkpoint_sha256": sha256_file(checkpoint_path),
         "checkpoint_step": checkpoint_step,
         "split_manifest_sha256": sha256_file(split_path),
-        "max_span_width": config.value["training"]["max_span_width"],
-        "context_between_spans": config.value["training"]["context_between_spans"],
         "archive_sha256": archive_sha,
         "acquisition_manifest_sha256": sha256_file(acquisition_path),
         "annotation_bundle_sha256": preparation["annotation_bundle_sha256"],
         "prepared_dataset_tree_sha256": preparation["dataset_tree_sha256"],
         "train_jsonl_sha256": sha256_file(train_path),
         "development_jsonl_sha256": sha256_file(development_path),
-        "config_sha256": sha256_file(config.path),
+        "config": config.source_path,
         "model_cache_manifest": HF_CACHE_MANIFEST_RELATIVE,
         "model_cache_manifest_sha256": sha256_file(cache_manifest_path),
         "model_cache_tree_sha256": cache_manifest["tree_sha256"],
         "source_commit": checkout.get("source", {}).get("commit"),
-        "selected_metric": "development_strict_triple_f1",
         "selected_metric_value": float(selected_value),
         "restart_state_sha256": sha256_file(restart_path),
     }

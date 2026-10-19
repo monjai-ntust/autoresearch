@@ -187,13 +187,14 @@ class AutomaticReportingTests(unittest.TestCase):
                 'per_seed':[{'seed':42,'recorded_seconds':3600.}], 'environments':{'42':{'fixture':True}}}})
             pipeline=ROOT/'resources/configs/pipeline.json'
             config=SimpleNamespace(value=load_json(ROOT/'resources/configs/encoder-comparison.json'),
-                                   sha256='fixture-config',pipeline=SimpleNamespace(path=pipeline),
+                                   source_path='resources/configs/encoder-comparison.json',
+                                   pipeline=SimpleNamespace(source_path='resources/configs/pipeline.json'),
                                    arms={'bert-base-common':None},
                                    select_arm=lambda arm:SimpleNamespace(manifest=lambda run_id:{'fixture':True}))
             identity={'matrix_id':layout.run_id,'members':{'bert-base-common':member.run_id},
-                      'arms':{'bert-base-common':{'fixture':True}},'config_sha256':config.sha256,
-                      'pipeline_config_sha256':sha256_file(pipeline),
-                      'training_seeds':config.value['training_seeds']}
+                      'source_commit':'a'*40,
+                      'config':'resources/configs/encoder-comparison.json',
+                      'pipeline_config':'resources/configs/pipeline.json'}
             atomic_write_json(layout.resolve('manifests/comparison-matrix.json'),identity)
             invocation_fixture(layout,'comparison-smoke',1,seconds=90.)
             invocation_fixture(layout,'comparison-full',1,seconds=1800.,status='failed')
@@ -218,14 +219,13 @@ class AutomaticReportingTests(unittest.TestCase):
             hashes={path.name:sha256_file(path) for path in layout.resolve('reports/matrix').iterdir()}
             self.assertEqual(report_matrix(layout,config,identity),report)
             self.assertEqual({path.name:sha256_file(path) for path in layout.resolve('reports/matrix').iterdir()},hashes)
-            wrong_identity={**identity,'arms':{'bert-base-common':{'fixture':'another-arm'}}}
-            atomic_write_json(layout.resolve('manifests/comparison-matrix.json'),wrong_identity)
-            with self.assertRaisesRegex(DataContractError,'arm identity differs'):
-                report_matrix(layout,config,wrong_identity)
-            atomic_write_json(layout.resolve('manifests/comparison-matrix.json'),identity)
-            wrong_config=SimpleNamespace(**{**vars(config),'sha256':'another-config'})
+            wrong_config=SimpleNamespace(**{**vars(config),'source_path':'resources/configs/another-config.json'})
             with self.assertRaisesRegex(DataContractError,'configuration'):
                 report_matrix(layout,wrong_config,identity)
+            wrong_arm=SimpleNamespace(**{**vars(config),'select_arm':lambda arm:SimpleNamespace(
+                manifest=lambda run_id:{'fixture':'another-arm'})})
+            with self.assertRaisesRegex(DataContractError,'arm identity differs'):
+                report_matrix(layout,wrong_arm,identity)
             self.assertEqual({path.name:sha256_file(path) for path in layout.resolve('reports/matrix').iterdir()},hashes)
             atomic_write_json(measurement,{'fixture':'tampered'})
             with self.assertRaisesRegex(DataContractError,'evidence changed'):

@@ -1,4 +1,4 @@
-"""Internal, frozen Table-2 Graph RAG evaluator.
+"""Internal Table-2 evaluator with stable graph-first-appearance retrieval.
 
 This module intentionally has no command-line parser or file-selection surface.
 The same-run table pipeline supplies already authenticated records and graphs.
@@ -10,6 +10,8 @@ import json
 import subprocess
 import time
 from collections.abc import Callable
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
@@ -32,15 +34,41 @@ RELATION_TEMPLATES = {
 }
 
 
-def call_llm(ollama_url, model, prompt):
-    """On-premise LLM call via Ollama."""
-    payload = json.dumps({
+@lru_cache(maxsize=1)
+def _configured_options():
+    contract = Path(__file__).resolve().parents[2] / "resources/contracts/table2.json"
+    options = json.loads(contract.read_text(encoding="utf-8")).get("generation_options")
+    if (not isinstance(options, dict) or set(options) != {"temperature", "num_predict", "seed"}
+            or type(options["temperature"]) is not float or options["temperature"] != 0.0
+            or type(options["num_predict"]) is not int or options["num_predict"] != 50
+            or type(options["seed"]) is not int or not 0 <= options["seed"] <= 2**31 - 1):
+        raise ValueError("RAG generation configuration must retain temperature 0.0, "
+                         "num_predict 50 and an explicit nonnegative integer seed")
+    return options
+
+
+def request_options():
+    """Use one source-configured generation policy for planning and dispatch."""
+    return dict(_configured_options())
+
+
+def request_payload(model, prompt, *, options=None):
+    """Build the literal wire fields once, including saved legacy reconstruction."""
+    options = request_options() if options is None else options
+    ordered_options = {key: options[key] for key in ("temperature", "num_predict", "seed")
+                       if key in options}
+    return {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.0, "num_predict": 50},
-    })
+        "options": ordered_options,
+    }
+
+
+def call_llm(ollama_url, model, prompt):
+    """On-premise LLM call with the configured, explicitly seeded payload."""
+    payload = json.dumps(request_payload(model, prompt))
     try:
         result = subprocess.run(
             ["curl", "-s", f"{ollama_url}/api/chat", "-d", payload],
@@ -94,7 +122,11 @@ def generate_questions(records, *, additional_templates=None):
 
 
 def retrieve_from_kg(kg, query_entity, hops=1):
-    """Retrieve KG subgraph around an entity (multi-hop neighborhood)."""
+    """Traverse nodes and adjacent edges in authenticated first-appearance order.
+
+    Sets provide membership checks only. Both hop frontiers retain discovery
+    order before the existing 15-fact and downstream hybrid-five limits.
+    """
     query_norm = query_entity.lower().strip()
     adj = {}
     for edge in kg["edges"]:
@@ -103,21 +135,22 @@ def retrieve_from_kg(kg, query_entity, hops=1):
         adj.setdefault(t, []).append(edge)
 
     visited = set()
-    frontier = set()
+    frontier = []
     for node in adj:
         if query_norm in node or node in query_norm:
-            frontier.add(node)
+            frontier.append(node)
     if not frontier:
         query_words = set(query_norm.split())
         for node in adj:
             node_words = set(node.split())
             if len(query_words & node_words) >= max(1, len(query_words) // 2):
-                frontier.add(node)
+                frontier.append(node)
 
     context_triples = []
     seen_edges = set()
     for _hop in range(hops):
-        next_frontier = set()
+        next_frontier = []
+        next_seen = set()
         for entity in frontier:
             if entity in visited:
                 continue
@@ -129,9 +162,11 @@ def retrieve_from_kg(kg, query_entity, hops=1):
                     context_triples.append(
                         f"({edge['head']}, {edge['relation']}, {edge['tail']})"
                     )
-                    next_frontier.add(edge["head"].lower())
-                    next_frontier.add(edge["tail"].lower())
-        frontier = next_frontier - visited
+                    for node in (edge["head"].lower(), edge["tail"].lower()):
+                        if node not in next_seen:
+                            next_seen.add(node)
+                            next_frontier.append(node)
+        frontier = [node for node in next_frontier if node not in visited]
     return context_triples[:15]
 
 

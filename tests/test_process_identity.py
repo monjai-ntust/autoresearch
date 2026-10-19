@@ -1,6 +1,6 @@
-"""Process-start hash evidence remains honest across isolation and mutation."""
+"""Minimal producer tokens remain frozen without probing execution settings."""
 import json
-import os
+import random
 import subprocess
 import sys
 import unittest
@@ -14,121 +14,59 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ProcessIdentityTests(unittest.TestCase):
-    def _subprocess(self, seed, *, flags=(), before=None, after=None):
-        environment = dict(os.environ)
-        environment.pop("PYTHONHASHSEED", None)
-        if seed is not None:
-            environment["PYTHONHASHSEED"] = seed
-        program = f"""import json,os,random,sys
-sys.path.insert(0,{str(ROOT)!r})
-original_hash=hash('unchanged scientific hash behavior')
-original_random=random.getstate()
-before={before!r}
-if before is not None: os.environ['PYTHONHASHSEED']=before
-from utils.common.process_identity import capture_process_start,process_identity
-captured=capture_process_start('fixture.py')
-after={after!r}
-if after is not None: os.environ['PYTHONHASHSEED']=after
-assert process_identity()==captured
-assert hash('unchanged scientific hash behavior')==original_hash
-assert random.getstate()==original_random
-print(json.dumps(captured))
-"""
-        result = subprocess.run([sys.executable, *flags, "-B", "-c", program],
-            cwd=ROOT, env=environment, check=True, capture_output=True,
-            text=True, encoding="utf-8")
-        return json.loads(result.stdout)
+    def test_token_has_only_original_process_identity_and_is_frozen(self):
+        with mock.patch.object(identity, "_IDENTITY", None), \
+             mock.patch.object(identity.os, "getpid", return_value=101), \
+             mock.patch.object(identity.time, "time_ns", return_value=1111) as clock:
+            first = identity.process_identity()
+            self.assertEqual(first, {"process_id": "101-1111", "pid": 101, "observed_unix_ns": 1111})
+            first["process_id"] = "mutated caller copy"
+            first["pid"] = 0
+            self.assertEqual(identity.process_identity(),
+                             {"process_id": "101-1111", "pid": 101, "observed_unix_ns": 1111})
+            clock.assert_called_once_with()
 
-    def test_subprocess_startup_settings_and_interpreter_isolation(self):
-        for seed, kind in ((None, "unset"), ("random", "random"), ("0", "zero"),
-                           ("42", "numeric"), ("4294967295", "numeric")):
-            for flags in ((), ("-I",), ("-E",)):
-                with self.subTest(seed=seed, flags=flags):
-                    record = self._subprocess(seed, flags=flags, after="99")
-                    observed = record["python_hash_seed"]
-                    self.assertEqual(observed["environment_at_capture"],
-                                     {"kind": kind, "value": seed})
-                    self.assertEqual(record["capture_scope"], "entrypoint")
-                    self.assertEqual(record["entrypoint"], "fixture.py")
-                    self.assertTrue(record["process_id"].startswith(f"{record['pid']}-"))
-                    if sys.platform == "linux":
-                        self.assertEqual(observed["startup_setting"]["kind"], kind)
-                        self.assertEqual(observed["startup_setting"]["value"], seed)
-                    else:
-                        self.assertEqual(observed["startup_setting"]["kind"], "unavailable")
-                    effective = observed["effective_setting"]
-                    if flags:
-                        self.assertEqual(effective["kind"], "random")
-                        self.assertTrue(record["python"]["ignore_environment"])
-                    elif seed == "0":
-                        self.assertEqual(effective["kind"], "zero")
-                    elif sys.platform == "linux":
-                        self.assertEqual(effective["kind"],
-                                         "numeric" if kind == "numeric" else "random")
-                    else:
-                        self.assertEqual(effective["kind"], "unavailable")
-
-    def test_environment_changed_before_capture_is_not_relabelled_startup(self):
-        record = self._subprocess("42", before="456", after="789")
-        seed = record["python_hash_seed"]
-        self.assertEqual(seed["environment_at_capture"], {"kind": "numeric", "value": "456"})
-        if sys.platform == "linux":
-            self.assertEqual(seed["startup_setting"]["value"], "42")
-            self.assertEqual(seed["effective_setting"]["value"], "42")
-        else:
-            self.assertEqual(seed["startup_setting"]["kind"], "unavailable")
-            self.assertEqual(seed["effective_setting"]["kind"], "unavailable")
-
-    def test_linux_initial_environment_only_extracts_seed(self):
-        fixtures = ((b"PRIVATE=do-not-retain\0", "unset", None),
-                    (b"PRIVATE=do-not-retain\0PYTHONHASHSEED=random\0", "random", "random"),
-                    (b"PYTHONHASHSEED=0\0", "zero", "0"),
-                    (b"PYTHONHASHSEED=123\0", "numeric", "123"))
-        with mock.patch.object(identity.sys, "platform", "linux"):
-            for raw, kind, value in fixtures:
-                with self.subTest(kind=kind), mock.patch.object(identity.Path, "read_bytes", return_value=raw):
-                    result = identity._initial_setting()
-                    self.assertEqual(result, {"kind": kind, "value": value,
-                        "evidence": "linux_proc_initial_exec_environment"})
-                    self.assertNotIn("do-not-retain", json.dumps(result))
-
-    def test_initial_environment_unavailable_or_ambiguous_stays_unavailable(self):
-        with mock.patch.object(identity.sys, "platform", "linux"):
-            for raw in (b"PYTHONHASHSEED=1\0PYTHONHASHSEED=2\0",
-                        b"PYTHONHASHSEED=\xff\0", b"PYTHONHASHSEED=123"):
-                with self.subTest(raw=raw), mock.patch.object(identity.Path, "read_bytes", return_value=raw):
-                    result = identity._initial_setting()
-                    self.assertEqual(result["kind"], "unavailable")
-                    self.assertIsNone(result["value"])
-            with mock.patch.object(identity.Path, "read_bytes", side_effect=PermissionError):
-                self.assertEqual(identity._initial_setting()["kind"], "unavailable")
-        with mock.patch.object(identity.sys, "platform", "win32"):
-            with mock.patch.object(identity.Path, "read_bytes") as read:
-                self.assertEqual(identity._initial_setting()["kind"], "unavailable")
-            read.assert_not_called()
-
-    def test_capture_is_frozen_and_forked_pid_has_its_own_identity(self):
+    def test_forked_pid_receives_its_own_original_token(self):
         with mock.patch.object(identity, "_IDENTITY", None), \
              mock.patch.object(identity.os, "getpid", return_value=101) as pid, \
-             mock.patch.object(identity.time, "time_ns", side_effect=(1111, 2222)):
-            with mock.patch.dict(os.environ, {"PYTHONHASHSEED": "random"}):
-                first = identity.capture_process_start("rag.py")
-            first["python_hash_seed"]["environment_at_capture"]["value"] = "modified-copy"
-            second = identity.capture_process_start("different.py")
-            self.assertEqual(second["entrypoint"], "rag.py")
-            self.assertEqual(second["python_hash_seed"]["environment_at_capture"]["value"], "random")
-            self.assertEqual(second["process_id"], "101-1111")
+             mock.patch.object(identity.time, "time_ns", side_effect=(1111, 2222)) as clock:
+            parent = identity.process_identity()
             pid.return_value = 202
             child = identity.process_identity()
-            self.assertEqual(child["process_id"], "202-2222")
-            self.assertEqual(child["capture_scope"], "late_import")
+            self.assertEqual(parent["process_id"], "101-1111")
+            self.assertEqual(child, {"process_id": "202-2222", "pid": 202, "observed_unix_ns": 2222})
+            self.assertEqual(identity.process_identity(), child)
+            self.assertEqual(clock.call_count, 2)
 
-    def test_late_access_never_claims_an_entrypoint_capture(self):
-        with mock.patch.object(identity, "_IDENTITY", None):
-            record = identity.process_identity()
-            self.assertEqual(record["capture_scope"], "late_import")
-            self.assertIsNone(record["entrypoint"])
-            self.assertIn("not_original_startup_proof", record["python_hash_seed"]["environment_evidence"])
+    def test_token_does_not_change_rng_hashes_or_read_environment(self):
+        before_rng = random.getstate()
+        before_hash = hash("unchanged scientific string")
+        with mock.patch.object(identity, "_IDENTITY", None), \
+             mock.patch.object(identity.os, "environ", None):
+            token = identity.process_identity()
+        self.assertEqual(set(token), {"process_id", "pid", "observed_unix_ns"})
+        self.assertEqual(random.getstate(), before_rng)
+        self.assertEqual(hash("unchanged scientific string"), before_hash)
+
+    def test_independent_isolated_processes_need_no_startup_capture_or_output(self):
+        program = f"""import json,sys
+sys.path.insert(0,{str(ROOT)!r})
+from utils.common.process_identity import process_identity
+first=process_identity()
+assert first==process_identity()
+print(json.dumps(first))
+"""
+        results = []
+        for _ in range(2):
+            completed = subprocess.run([sys.executable, "-I", "-B", "-c", program],
+                cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8")
+            token = json.loads(completed.stdout)
+            self.assertEqual(set(token), {"process_id", "pid", "observed_unix_ns"})
+            self.assertEqual(token["process_id"], f"{token['pid']}-{token['observed_unix_ns']}")
+            self.assertGreater(token["pid"], 0)
+            self.assertGreater(token["observed_unix_ns"], 0)
+            results.append(token)
+        self.assertNotEqual(results[0]["process_id"], results[1]["process_id"])
 
 
 if __name__ == "__main__":

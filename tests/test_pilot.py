@@ -547,11 +547,10 @@ class VerifierPilotTests(unittest.TestCase):
                         "warmup_candidate_count": 1,
                         "warmup_latency_observation_included": False,
                         "verdict_count": len(candidate_records),
-                        "prompt_sha256": request_paths[mode][0]["prompt_sha256"],
+                        "template_id": request_paths[mode][0]["template_id"],
                         "model_manifest_sha256": request_paths[mode][0][
                             "model_manifest_sha256"
                         ],
-                        "decoding_sha256": request_paths[mode][0]["decoding_sha256"],
                         "inputs": {
                             "data-prepared/development.jsonl": sha256_file(sentences),
                             "predictions/dev/pilot-candidates.jsonl": sha256_file(

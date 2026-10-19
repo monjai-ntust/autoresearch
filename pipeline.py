@@ -11,10 +11,6 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from utils.common.process_identity import capture_process_start
-if __name__ == "__main__":
-    capture_process_start("pipeline.py")
-
 from utils.common.artifact_io import DataContractError
 from utils.common.config import load_pipeline_config
 from utils.common.execution import exclusive_run
@@ -58,7 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         root = discover_source_root(_ROOT)
         config = load_pipeline_config(root, DEFAULT_CONFIG)
         if args.action == "validate":
-            print("Canonical configuration and literal prompt/schema hashes valid.")
+            from utils.verifier.requests import _prompt_bundle
+            for mode in ("simple", "corrective"):
+                _prompt_bundle(config, mode)
+            print("Canonical configuration and prompt/schema resource selectors valid.")
             return 0
         layout = RunLayout(root, args.run_id)
         from stages.preparation import require_canonical_namespace

@@ -49,6 +49,8 @@ class CheckoutDiagnosticsTests(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     arguments, 1 if arguments[-1].startswith("nested/") else 0, "", ""
                 )
+            if arguments[:3] == ['git', 'ls-files', '--error-unmatch']:
+                return subprocess.CompletedProcess(arguments, 0, arguments[-1], '')
             self.fail(f"unexpected checkout command: {arguments!r}")
 
         with mock.patch.object(environment, "_command", side_effect=command), mock.patch.object(
@@ -87,6 +89,9 @@ class CheckoutDiagnosticsTests(unittest.TestCase):
         self.assertTrue(passed)
         self.assertEqual(manifest["status"], "pass")
         self.assertTrue(manifest["source"]["worktree_clean"])
+        self.assertEqual(manifest['source']['config'], {'path': 'resources/configs/pipeline.json'})
+        self.assertNotIn('tracked_artifact_sha256', manifest)
+        self.assertFalse((self.source_root / 'output/diagnostic-run/inputs/config').exists())
         self.assertEqual(
             check, {"check_id": "clean-tracked-source", "status": "pass", "detail": "clean"}
         )

@@ -34,7 +34,7 @@ class CanonicalContinuationTests(unittest.TestCase):
                 'manifests/02-input-acquisition-manifest.json',
                 'manifests/03-data-preparation-manifest.json',
                 'manifests/huggingface-model-cache.json',
-                'manifests/encoder-runtime.json', 'inputs/config/pipeline.json',
+                'manifests/encoder-runtime.json', 'manifests/encoder-model-runtime.json',
                 'data-prepared/split-manifest.json', 'data-prepared/train.jsonl',
                 'data-prepared/development.jsonl'):
             atomic_write_json(layout.resolve(relative), {})

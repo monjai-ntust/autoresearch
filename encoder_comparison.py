@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 sys.dont_write_bytecode = True
@@ -11,10 +10,6 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-
-from utils.common.process_identity import capture_process_start
-if __name__ == "__main__":
-    capture_process_start("encoder_comparison.py")
 
 from utils.common.artifact_io import DataContractError
 from utils.common.paths import PathContractError, RunLayout, discover_source_root
@@ -36,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         root = discover_source_root(_ROOT)
         config = load_comparison_config(root)
         if args.action == "validate":
-            print(json.dumps({arm: config.select_arm(arm).manifest() for arm in config.arms}, indent=2))
+            print("Matched encoder comparison configuration valid.")
             return 0
         from stages.comparison_matrix import run_matrix
         return run_matrix(RunLayout(root, args.matrix_id), config)

@@ -1,7 +1,7 @@
 """encoder trainer responsibilities."""
 from __future__ import annotations
 
-from utils.encoder.runtime import record_runtime, restart_identity
+from utils.encoder.runtime import configure_numerics, continue_training, record_model_runtime, record_runtime, restart_identity
 
 from utils.encoder.options import EncoderOptions
 
@@ -74,8 +74,6 @@ def _restart_payload(
     return {
         "format_version": "train-span-restart-2.0",
         "seed": args.seed,
-        "model_name": args.model_name,
-        "model_revision": args.model_revision,
         "max_steps": args.max_steps,
         "encoder": model.state_dict(),
         "optimizer": optimizer.state_dict(),
@@ -100,8 +98,6 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
     common = {
         "format_version",
         "seed",
-        "model_name",
-        "model_revision",
         "max_steps",
         "encoder",
         "optimizer",
@@ -125,7 +121,7 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
         raise ValueError("restart state has an invalid field contract")
     if state['run_identity'] != restart_identity(args.prepared_dir):
         raise ValueError('restart state belongs to different run/source/input/runtime evidence')
-    for field, value in (("seed", args.seed), ("model_name", args.model_name), ("model_revision", args.model_revision), ("max_steps", args.max_steps)):
+    for field, value in (("seed", args.seed), ("max_steps", args.max_steps)):
         if state[field] != value:
             raise ValueError(
                 f"restart state {field} mismatch: expected {value!r}, got {state[field]!r}"
@@ -417,6 +413,7 @@ def main(argv: EncoderOptions):
     if not isinstance(args, EncoderOptions):
         raise TypeError("worker requires typed options")
     _validate_paths(args)
+    configure_numerics()
     runtime_reference = record_runtime(args.prepared_dir)
     torch.manual_seed(args.seed)
     random.seed(args.seed)
@@ -468,6 +465,7 @@ def main(argv: EncoderOptions):
         torch.nn.Dropout(0.1),
         torch.nn.Linear(hidden_size, code_accord.NUM_RELATIONS),
     ).to(device)
+    record_model_runtime(args.prepared_dir, model)
 
     # Freeze the acquired bytes before saving any resumable scientific state.
     from utils.common.paths import RunLayout
@@ -500,6 +498,8 @@ def main(argv: EncoderOptions):
         resumed_from = str(Path(args.resume_from))
 
     train_iterator = cycle(train_loader)
+    if args.resume_from:
+        train_iterator = continue_training(train_loader, train_iterator)
     model.train()
     started = time.time()
     while step < args.max_steps:
@@ -646,14 +646,9 @@ def main(argv: EncoderOptions):
     summary = {
         "schema_version": "train-span-summary-1.0",
         "status": "completed",
-        "canonical_mode": True,
-        "dataset": "accord",
         "seed": args.seed,
-        "model_name": args.model_name,
-        "model_revision": args.model_revision,
         "completed_steps": step,
         "selected_step": best_step,
-        "selection_metric": "triple_f1",
         "selected_metrics": best_metrics,
         "test_evaluated": False,
         "resumed_from": resumed_from,

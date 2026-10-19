@@ -87,7 +87,7 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
         "prepared_dataset_tree_sha256": "e" * 64,
         "train_jsonl_sha256": sha256_file(train),
         "development_jsonl_sha256": sha256_file(development),
-        "config_sha256": sha256_file(config.path),
+        "config": config.source_path,
         "trainer_sha256": sha256_file(layout.source_root / "stages/encoder.py"),
         "data_adapter_sha256": sha256_file(
             layout.source_root / "utils/encoder/data.py"
@@ -114,8 +114,8 @@ def _checkpoint_manifest(layout: RunLayout, config) -> dict:
 
 
 def _prepare_run_identities(layout: RunLayout, *, compatibility=True):
-    atomic_write_json(layout.resolve('inputs/config/pipeline.json'), {})
     atomic_write_json(layout.resolve('manifests/encoder-runtime.json'), {})
+    atomic_write_json(layout.resolve('manifests/encoder-model-runtime.json'), {})
     atomic_write_json(
         layout.resolve("manifests/00-checkout-manifest.json"),
         {"status": "pass", "source": {"commit": "3" * 40}},
@@ -244,6 +244,7 @@ class ModelAdapterTests(unittest.TestCase):
             plan = [json.loads(line) for line in plan_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(plan), 1)
             self.assertEqual(plan[0]["token_count"], len(WORDS))
+            self.assertNotIn("max_span_width", plan[0])
 
     def test_replay_reproduces_greedy_confidence_and_dedup(self):
         with _temporary_output_directory() as temporary:
@@ -557,9 +558,9 @@ class ModelTrainTests(unittest.TestCase):
             self.assertEqual(manifest["training_seed"], 42)
             self.assertTrue(manifest["final_test_selection_forbidden"])
             self.assertEqual(manifest["expected_checkpoint_dir"], "checkpoints/seed-42")
-            # The plan is bound to the exact frozen recipe and split.
-            self.assertEqual(manifest["recipe"], self.config.value["training"])
-            self.assertEqual(manifest["split"], self.config.value["split"])
+            self.assertEqual(manifest['config'], self.config.source_path)
+            self.assertNotIn('recipe', manifest)
+            self.assertNotIn('split', manifest)
             for path in Path(temporary).rglob("*"):
                 if path.is_file():
                     self.assertTrue(path.resolve().is_relative_to(layout.run_root.resolve()))
@@ -694,6 +695,9 @@ class ModelTrainTests(unittest.TestCase):
             self.assertNotIn("trainer_sha256", checkpoint_value)
             self.assertNotIn("data_adapter_sha256", checkpoint_value)
             self.assertNotIn("model_helper_sha256", checkpoint_value)
+            self.assertFalse({"base_model", "base_model_revision", "max_span_width",
+                              "context_between_spans", "selected_metric", "config_sha256"}
+                             & checkpoint_value.keys())
             self.assertEqual(checkpoint_value["checkpoint_step"], 100)
             self.assertEqual(
                 _validate_training_stage(

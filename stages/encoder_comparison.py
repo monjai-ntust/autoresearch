@@ -286,7 +286,7 @@ def _smoke_identity(
         "schema_version": "phase-g-encoder-smoke-identity-1.0",
         "run_id": layout.run_id,
         "training_seed": seed,
-        "table1_arm": selection.arm.manifest(),
+        "arm_id": selection.arm.arm_id,
         "selection_manifest_sha256": sha256_file(
             layout.resolve("manifests/encoder-comparison-selection.json", must_exist=True)
         ),
@@ -344,8 +344,6 @@ def _validate_smoke_outputs(
         if (
             summary.get("status") != "completed"
             or summary.get("seed") != seed
-            or summary.get("model_name") != selection.profile.model
-            or summary.get("model_revision") != selection.profile.revision
             or summary.get("completed_steps") != 1
             or summary.get("test_evaluated") is not False
             or summary.get("run_identity") != restart_identity(layout.resolve("data-prepared"))
@@ -449,7 +447,7 @@ def run_smoke(
             "status": "completed",
             "run_id": layout.run_id,
             "training_seed": seed,
-            "table1_arm": selection.arm.manifest(),
+            "arm_id": selection.arm.arm_id,
             "identity": identity,
             "cache_identity": cache_identity,
             "evidence": evidence,
@@ -462,7 +460,7 @@ def run_smoke(
         or manifest.get("status") != "completed"
         or manifest.get("run_id") != layout.run_id
         or manifest.get("training_seed") != seed
-        or manifest.get("table1_arm") != selection.arm.manifest()
+        or manifest.get("arm_id") != selection.arm.arm_id
         or manifest.get("identity") != identity
         or manifest.get("final_test_accessed") is not False
     ):
@@ -497,7 +495,7 @@ def plan_training(
         "stage": "encoder-comparison-train",
         "status": "planned",
         "training_seed": seed,
-        "table1_arm": selection.arm.manifest(),
+        "arm_id": selection.arm.arm_id,
         "selection_manifest_sha256": sha256_file(
             layout.resolve("manifests/encoder-comparison-selection.json", must_exist=True)
         ),
@@ -510,8 +508,6 @@ def plan_training(
         "development_jsonl_sha256": sha256_file(
             layout.resolve("data-prepared/development.jsonl", must_exist=True)
         ),
-        "encoder_profile": selection.profile.manifest(),
-        "recipe": selection.recipe.value,
         "final_test_selection_forbidden": True,
     }
     if path.is_file():
@@ -538,10 +534,7 @@ def _checkpoint_manifest(
         summary.get("status") != "completed"
         or summary.get("test_evaluated") is not False
         or summary.get("seed") != seed
-        or summary.get("model_name") != selection.profile.model
-        or summary.get("model_revision") != selection.profile.revision
         or summary.get("completed_steps") != selection.recipe.value["max_steps"]
-        or summary.get("selection_metric") != "development_strict_triple_f1"
         or summary.get("run_identity") != restart_identity(layout.resolve("data-prepared"))
     ):
         raise DataContractError("comparison trainer summary violates its selection")
@@ -574,15 +567,11 @@ def _checkpoint_manifest(
         "protocol_id": PROTOCOL_ID,
         "split_id": "CODE-SPLIT-1",
         "training_seed": seed,
-        "base_model": selection.profile.model,
-        "base_model_revision": selection.profile.revision,
         "checkpoint_sha256": sha256_file(checkpoint),
         "checkpoint_step": selected_step,
         "split_manifest_sha256": sha256_file(
             layout.resolve("data-prepared/split-manifest.json", must_exist=True)
         ),
-        "max_span_width": selection.recipe.value["max_span_width"],
-        "context_between_spans": selection.recipe.value["context_between_spans"],
         "archive_sha256": acquisition["archive"]["sha256"],
         "acquisition_manifest_sha256": sha256_file(acquisition_path),
         "annotation_bundle_sha256": preparation["annotation_bundle_sha256"],
@@ -593,12 +582,11 @@ def _checkpoint_manifest(
         "development_jsonl_sha256": sha256_file(
             layout.resolve("data-prepared/development.jsonl", must_exist=True)
         ),
-        "config_sha256": selection.config.sha256,
+        "config": selection.config.source_path,
         "model_cache_manifest": CACHE_MANIFEST_RELATIVE,
         "model_cache_manifest_sha256": cache_identity["cache_manifest_sha256"],
         "model_cache_tree_sha256": cache_identity["cache_tree_sha256"],
         "source_commit": checkout["source"]["commit"],
-        "selected_metric": "development_strict_triple_f1",
         "selected_metric_value": float(selected_f1),
         "restart_state_sha256": sha256_file(restart),
     }
@@ -775,6 +763,8 @@ def run_private(arguments: list[str], *, action: str, default_config: str) -> in
 def _execute_private(layout, selection, args, action):
     _validate_prepared_inputs(layout, selection)
     if action == "smoke":
+        from utils.encoder.runtime import configure_numerics
+        configure_numerics()
         import torch
 
         if not torch.cuda.is_available():

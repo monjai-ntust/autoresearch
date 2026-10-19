@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import platform
-import sys
 from pathlib import Path
 from typing import Any
 from utils.rag import evaluator, runner
@@ -24,7 +22,9 @@ def run_command(
     )
     run_dir, summary, runtime = preflight_code_questions(args.run_id, base_contract)
     if args.dry_run:
-        print(json.dumps({"source": source, **summary}, indent=2, sort_keys=True))
+        print(json.dumps({"source": source, **summary,
+                          "model_identity": runner.persisted_model_identity(summary["model_identity"])},
+                         indent=2, sort_keys=True))
         return 0
 
     child_dir = run_dir / OUTPUT_NAMESPACE
@@ -114,32 +114,11 @@ def run_command(
         child_dir,
     )
     runner.write_json_once(
-        child_dir / "method-manifest.json",
-        {
-            "schema_version": "phase-g-code-question-method-1.0",
-            "run_id": args.run_id,
-            "identity": identity,
-            "method": summary["method"],
-            "base_contract": base_contract,
-            "reuse": {
-                "historical_results": False,
-                "historical_projections": False,
-                "same_run_graph_construction": True,
-                "evaluation_kernel": True,
-            },
-        },
-        child_dir,
-    )
-    runner.write_json_once(
         child_dir / "environment.json",
         {
-            "schema_version": "phase-g-code-question-environment-1.0",
             "run_id": args.run_id,
-            "captured_at": status["created_at"],
-            "platform": platform.platform(),
-            "python": sys.version,
             "source": source,
-            "model_identity": summary["model_identity"],
+            "model_identity": runner.persisted_model_identity(summary["model_identity"]),
         },
         child_dir,
     )

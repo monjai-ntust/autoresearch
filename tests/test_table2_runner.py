@@ -314,6 +314,17 @@ class Table2RunnerTests(unittest.TestCase):
         self.assertFalse(legacy)
         self.assertEqual(config["protocol_id"], CONTRACT["pipeline"]["protocol_id"])
 
+    def test_fresh_clone_configuration_uses_commit_and_selector_without_file_hash(self):
+        commit = runner.run_git("rev-parse", "HEAD").stdout.strip()
+        path = "resources/configs/pipeline.json"
+        checkout = {"source": {"commit": commit, "config": {"path": path}}}
+        full = {"schema_version": "pipeline-run-2", "source_commit": commit, "config": path}
+        config, legacy = runner._load_authenticated_run_config(checkout, full, CONTRACT)
+        self.assertFalse(legacy)
+        self.assertEqual(config["protocol_id"], CONTRACT["pipeline"]["protocol_id"])
+        with self.assertRaisesRegex(runner.PhaseEError, "not bound"):
+            runner._load_authenticated_run_config(checkout, {**full, "config": "resources/configs/another.json"}, CONTRACT)
+
     def test_saved_configuration_needs_no_producer_git_history(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "output") as temporary:
             run_dir = Path(temporary)

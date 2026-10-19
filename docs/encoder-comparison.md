@@ -15,6 +15,9 @@ Frozen profile revisions, exact weight sizes/SHA-256, tokenizer files, recipes,
 seeds and statistical declarations live once in
 [`encoder-comparison.json`](../resources/configs/encoder-comparison.json).
 Historical development statistics are not new fixed-test results.
+Fresh workers enforce the [numerical reproducibility policy](reproducibility.md)
+before CUDA initialization. This is a prospective execution correction; it
+does not claim historical runs used deterministic algorithms.
 
 ```bash
 uv run --frozen --no-sync python -I -B encoder_comparison.py validate

@@ -105,8 +105,6 @@ class PreparedAdapterTests(unittest.TestCase):
         state = {
             "format_version": "train-span-restart-2.0",
             "seed": 42,
-            "model_name": "microsoft/deberta-large",
-            "model_revision": "revision-a",
             "max_steps": 3500,
             "encoder": {},
             "optimizer": {},

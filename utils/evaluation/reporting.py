@@ -346,6 +346,7 @@ def _cost(evidence, seeds, comparison=False):
     layout = evidence.layout
     summaries = []
     environments = {}
+    runtime_reference = None
     for seed in seeds:
         relative = f'checkpoints/seed-{seed}/training-summary.json'
         checkpoint = load_json(evidence.file(f'checkpoints/seed-{seed}/checkpoint-manifest.json'))
@@ -372,12 +373,18 @@ def _cost(evidence, seeds, comparison=False):
         environment = summary.get('environment')
         if isinstance(summary.get('runtime_environment'), dict):
             ref = summary['runtime_environment']
-            environment = load_json(evidence.file(ref['path'], ref['sha256']))
-        if environment is not None:
+            evidence.file(ref['path'], ref['sha256'])
+            if runtime_reference is not None and ref != runtime_reference:
+                raise DataContractError('training summaries use different numerical runtimes')
+            runtime_reference = ref
+        elif environment is not None:
             environments[str(seed)] = environment
         evidence.file(checkpoint['model_cache_manifest'], checkpoint['model_cache_manifest_sha256'])
     result = training_statistics(summaries, list(seeds))
-    result['environments'] = environments
+    if runtime_reference is not None:
+        result['runtime_environment'] = runtime_reference
+    elif environments:
+        result['environments'] = environments  # Original archived summaries only.
     if not comparison:
         per_seed = {str(seed): _invocation_cost(evidence, f'canonical-train-seed-{seed}')
                     for seed in seeds}
@@ -536,14 +543,10 @@ def report_matrix(layout, config, identity):
     recorded_identity = load_json(evidence.file('manifests/comparison-matrix.json'))
     if recorded_identity != identity or identity.get('matrix_id') != layout.run_id:
         raise DataContractError('matrix report identity differs')
-    if (identity.get('config_sha256') != config.sha256
-            or identity.get('pipeline_config_sha256') != sha256_file(config.pipeline.path)
-            or identity.get('training_seeds') != config.value['training_seeds']
+    if (identity.get('config') != config.source_path
+            or identity.get('pipeline_config') != config.pipeline.source_path
             or set(identity.get('members', {})) != set(config.arms)):
         raise DataContractError('matrix report configuration or declared member family differs')
-    if identity.get('arms') != {arm: config.select_arm(arm).manifest(run_id)
-                                for arm, run_id in identity['members'].items()}:
-        raise DataContractError('matrix report arm identity differs from the configured matrix')
     members = {}
     readers = []
     shared_pairing = None
@@ -558,7 +561,7 @@ def report_matrix(layout, config, identity):
                 or receipt.get('outputs', {}).get('reports/comparison/paper-statistics.json') != sha256_file(report)):
             raise DataContractError('matrix report member identity differs')
         observations = document['observations']
-        if observations.get('arm') != identity.get('arms', {}).get(arm):
+        if observations.get('arm') != config.select_arm(arm).manifest(run_id):
             raise DataContractError('matrix report arm identity differs from its declared member')
         pairing = observations.get('pairing')
         required = {'data-prepared/split-manifest.json', 'data-prepared/test-gold.jsonl'}
@@ -601,7 +604,6 @@ def report_matrix(layout, config, identity):
             'smoke': _invocation_cost(evidence, 'comparison-smoke'),
             'full': _invocation_cost(evidence, 'comparison-full'),
             'scope': 'smoke is separate from full training and candidate-generation processes; full execution includes failed/resumed attempts and overlaps member training summaries'},
-        'predeclared_statistics': config.value['statistical_protocol'],
         'scope': 'same-protocol Table-1 comparison with the approved frozen four-contrast analysis; underlying-document uncertainty remains unproved'})
 
 

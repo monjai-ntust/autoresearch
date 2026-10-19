@@ -28,7 +28,6 @@ class PromptBundle:
     system: str
     instruction: str
     response_schema: dict[str, Any]
-    sha256: str
 
 def _sha256_value(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
@@ -63,16 +62,7 @@ def _prompt_bundle(config: PipelineConfig, mode: str) -> PromptBundle:
     schema = load_json(schema_path)
     if not isinstance(schema, dict):
         raise DataContractError(f"{schema_path.name} must contain a JSON object")
-    identity = {
-        "protocol_id": PROTOCOL_ID,
-        "prompt_revision": verifier["prompt_revision"],
-        "mode": mode,
-        "system": system,
-        "instruction": instruction,
-        "response_schema": schema,
-    }
-    digest = _sha256_value(identity)
-    return PromptBundle(mode, system, instruction, schema, digest)
+    return PromptBundle(mode, system, instruction, schema)
 
 def _load_sentences(path: Path) -> dict[str, PreparedSentence]:
     required = {
@@ -188,14 +178,21 @@ def _decoding(config: PipelineConfig) -> dict[str, Any]:
     }
 
 def verifier_identity(config: PipelineConfig, mode: str) -> tuple[str, str, str]:
-    """Return the frozen prompt, model-manifest, and decoding identities."""
+    """Read-only identity for archived verdicts containing source-file hashes."""
 
     bundle = _prompt_bundle(config, mode)
     return (
-        bundle.sha256,
+        _sha256_value({"protocol_id": PROTOCOL_ID,
+            "prompt_revision": config.value["verifier"]["prompt_revision"], "mode": mode,
+            "system": bundle.system, "instruction": bundle.instruction,
+            "response_schema": bundle.response_schema}),
         config.value["verifier"]["registry_manifest_sha256"],
         _sha256_value(_decoding(config)),
     )
+
+
+def verifier_template_id(config: PipelineConfig, mode: str) -> str:
+    return f"{config.value['verifier']['prompt_revision']}:{mode}"
 
 def _request_record(
     candidate: Candidate,
@@ -241,11 +238,10 @@ def _request_record(
         **decoding,
     }
     candidate_sha256 = _sha256_value(candidate_raw)
-    decoding_sha256 = _sha256_value(decoding)
+    request_sha256 = _sha256_value(payload)
     cache_identity = {
         "model_manifest_sha256": config.value["verifier"]["registry_manifest_sha256"],
-        "prompt_sha256": bundle.sha256,
-        "decoding_sha256": decoding_sha256,
+        "request_sha256": request_sha256,
         "mode": bundle.mode,
         "candidate_sha256": candidate_sha256,
     }
@@ -258,9 +254,8 @@ def _request_record(
         "candidate_id": candidate.candidate_id,
         "candidate_sha256": candidate_sha256,
         "cache_key": _sha256_value(cache_identity),
-        "prompt_sha256": bundle.sha256,
+        "template_id": verifier_template_id(config, bundle.mode),
         "model_manifest_sha256": config.value["verifier"]["registry_manifest_sha256"],
-        "decoding_sha256": decoding_sha256,
-        "request_sha256": _sha256_value(payload),
+        "request_sha256": request_sha256,
         "payload": payload,
     }

@@ -166,7 +166,7 @@ def _validate_training_stage(
         },
         f"seed-{seed} training manifest",
     )
-    if manifest.get("recipe") != config.value["training"]:
+    if manifest.get("config") != config.source_path:
         raise DataContractError(f"seed-{seed} training recipe differs from this run")
     if execution_mode == "dry-run":
         return manifest
@@ -206,14 +206,11 @@ def _validate_training_stage(
         {
             "protocol_id": config.value["protocol_id"],
             "training_seed": seed,
-            "base_model": config.value["training"]["base_model"],
-            "base_model_revision": config.value["training"]["base_model_revision"],
-            "max_span_width": config.value["training"]["max_span_width"],
-            "context_between_spans": config.value["training"]["context_between_spans"],
+            "config": config.source_path,
         },
         f"seed-{seed} checkpoint manifest",
     )
-    revision = identity.get("base_model_revision")
+    revision = config.value["training"]["base_model_revision"]
     if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise DataContractError(f"seed-{seed} encoder revision is not immutable")
     digest = identity.get("checkpoint_sha256")
@@ -256,7 +253,6 @@ def _validate_training_stage(
     from utils.encoder.runtime import restart_identity
     if (
         summary.get("status") != "completed"
-        or summary.get("canonical_mode") is not True
         or summary.get("seed") != seed
         or summary.get("test_evaluated") is not False
         or summary.get('completed_steps') != config.value['training']['max_steps']

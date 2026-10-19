@@ -4,6 +4,8 @@ Use the three commands in [README](../README.md) from the standalone source
 checkout. `pipeline.py` owns encoder/verifier evaluation, `encoder_comparison.py`
 owns the isolated four-arm matrix, and `rag.py` owns downstream Graph RAG.
 Private worker actions enforce the same prerequisites as their coordinator.
+The [reproducibility policy](reproducibility.md) defines strict numerical startup,
+ordered RAG traversal and the dedicated external server setup for fresh runs.
 
 ## One physical run
 

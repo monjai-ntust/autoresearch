@@ -21,12 +21,12 @@ def matrix_identity(layout: RunLayout, config: ComparisonConfig) -> dict:
     source = run_git("rev-parse", "HEAD").stdout.strip()
     if run_git("status", "--porcelain", "--untracked-files=normal").stdout.strip():
         raise DataContractError("comparison matrix requires clean current source")
-    return {"schema_version": 1, "matrix_id": layout.run_id, "source_commit": source,
-        "protocol_id": config.value["protocol_id"], "config_sha256": config.sha256,
-        "pipeline_config_sha256": sha256_file(config.pipeline.path), "members": members,
-        "arms": {arm: config.select_arm(arm).manifest(run) for arm, run in members.items()},
-        "training_seeds": config.value["training_seeds"],
-        "execution_limits": config.value["execution_limits"]}
+    for relative in (config.source_path, config.pipeline.source_path):
+        if run_git('ls-files', '--error-unmatch', '--', relative, check=False).returncode != 0:
+            raise DataContractError('comparison configurations must be tracked by the source commit')
+    return {"matrix_id": layout.run_id, "source_commit": source,
+        "config": config.source_path, "pipeline_config": config.pipeline.source_path,
+        "members": members}
 
 
 def selected_matrix(layout: RunLayout, selection) -> tuple[RunLayout, dict]:
@@ -59,7 +59,7 @@ def require_matrix_progress(layout: RunLayout, selection, *, boundary: str) -> N
             raise DataContractError("all four authenticated smokes must complete before training")
         run_smoke(arm_layout, arm_selection, 42)
         if boundary == "test":
-            for seed in identity["training_seeds"]:
+            for seed in selection.config.value["training_seeds"]:
                 path = arm_layout.resolve(f"manifests/encoder-comparison-train-live-seed-{seed}.json")
                 if not path.is_file():
                     raise DataContractError("all 32 development runs must complete before test access")
@@ -107,13 +107,13 @@ def run_matrix(layout: RunLayout, config: ComparisonConfig) -> int:
             arm_layout = RunLayout(layout.source_root, run_id)
             selection = config.select_arm(arm)
             with exclusive_run(arm_layout):
-                for seed in identity["training_seeds"]:
+                for seed in config.value["training_seeds"]:
                     run_training(arm_layout, selection, seed, command_runner=execute)
         for arm, run_id in identity["members"].items():
             arm_layout = RunLayout(layout.source_root, run_id)
             selection = config.select_arm(arm)
             with exclusive_run(arm_layout):
-                for seed in identity["training_seeds"]:
+                for seed in config.value["training_seeds"]:
                     generate(arm_layout, selection, seed, "test", command_runner=execute)
                 from utils.evaluation.reporting import report_comparison
                 report_comparison(arm_layout, selection)

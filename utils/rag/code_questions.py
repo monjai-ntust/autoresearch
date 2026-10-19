@@ -28,20 +28,6 @@ EXPECTED_ADDITIONAL_TEMPLATES = (
 )
 
 
-def replacement_method() -> dict[str, Any]:
-    """Describe the source-defined replacement method for emitted provenance."""
-
-    return {
-        "schema_version": 1,
-        "profile_id": PROFILE_ID,
-        "output_namespace": OUTPUT_NAMESPACE,
-        "additional_templates": [
-            {"relation": relation, "question": question, "answer": answer}
-            for relation, question, answer in EXPECTED_ADDITIONAL_TEMPLATES
-        ],
-    }
-
-
 def _template_mapping() -> dict[str, tuple[str, str]]:
     return {
         relation: (question, answer)
@@ -135,7 +121,6 @@ def preflight_code_questions(
     )
     records = _records_from_bytes(projections["records"])
     panels = build_question_panels(records)
-    method = replacement_method()
     graph_summaries = {
         name: {
             **value,
@@ -152,14 +137,12 @@ def preflight_code_questions(
         "run_dir": str(run_dir),
         "lineage_status": "lineage-valid",
         "profile_id": PROFILE_ID,
-        "method_sha256": runner.sha256_bytes(runner.canonical_json_bytes(method)),
-        "base_contract_sha256": runner.sha256_file(runner.CONTRACT_PATH),
+        "contract": runner.CONTRACT_PATH.relative_to(runner.ROOT).as_posix(),
         "base_preflight_identity": _base_preflight_identity(base_preflight),
         "projection_sha256": base_preflight["projection_sha256"],
         "graphs": graph_summaries,
         "record_summary": base_preflight["records"],
         "questions": panels["summary"],
-        "method": method,
         "model_identity": base_preflight["model_identity"],
         "environment": base_preflight["environment"],
     }
@@ -176,22 +159,23 @@ def preflight_code_questions(
 def build_identity(
     run_id: str, source: dict[str, str], summary: dict[str, Any]
 ) -> dict[str, Any]:
-    return {
+    identity = {
         "schema_version": "phase-g-code-questions-identity-1.0",
         "run_id": run_id,
         "source": source,
         "profile_id": summary["profile_id"],
-        "method_sha256": summary["method_sha256"],
-        "base_contract_sha256": summary["base_contract_sha256"],
+        "contract": summary["contract"],
         "base_preflight_identity": summary["base_preflight_identity"],
         "projection_sha256": summary["projection_sha256"],
         "question_sha256": {
             name: summary["questions"][f"{name}_sha256"]
             for name in ("protected", "added", "combined")
         },
-        "ollama_tag_digest": summary["model_identity"]["tag_digest"],
-        "ollama_model_blob_sha256": summary["model_identity"]["blob_sha256"],
     }
+    if "ollama_runtime" not in summary["model_identity"]:
+        identity.update({"ollama_tag_digest": summary["model_identity"]["tag_digest"],
+                         "ollama_model_blob_sha256": summary["model_identity"]["blob_sha256"]})
+    return identity
 
 
 
@@ -203,18 +187,10 @@ def validate_execution_snapshot(
     runtime: dict[str, Any],
     base_contract: dict[str, Any],
 ) -> None:
-    """Recheck source, method, parent lineage, projections, and questions."""
+    """Recheck clean source identity, parent lineage, projections and questions."""
 
     if runner.validate_source_contract(base_contract, require_clean=True) != source:
         raise runner.PhaseEError("Source identity changed after CODE-question preflight")
-    method = replacement_method()
-    if method != summary["method"]:
-        raise runner.PhaseEError("CODE question method changed after preflight")
-    if (
-        runner.sha256_bytes(runner.canonical_json_bytes(method))
-        != summary["method_sha256"]
-    ):
-        raise runner.PhaseEError("CODE question method hash changed after preflight")
     if build_identity(summary["run_id"], source, summary) != identity:
         raise runner.PhaseEError("CODE question child identity changed after preflight")
     _run_dir, current_preflight, current_projections, _graphs = (
@@ -451,42 +427,19 @@ def validate_extension_child(
             path = child_dir / "canonical-graphs" / name / "manifest.json"
             if runner.load_json(path) != graph:
                 raise runner.PhaseEError(f"Replacement canonical graph changed: {name}")
-    expected_method = {
-        "schema_version": "phase-g-code-question-method-1.0",
-        "run_id": summary["run_id"],
-        "identity": identity,
-        "method": summary["method"],
-        "base_contract": runner.load_json(runner.CONTRACT_PATH),
-        "reuse": {
-            "historical_results": False,
-            "historical_projections": False,
-            "same_run_graph_construction": True,
-            "evaluation_kernel": True,
-        },
-    }
-    if runner.load_json(child_dir / "method-manifest.json") != expected_method:
-        raise runner.PhaseEError("CODE question method manifest changed")
     environment = runner.load_json(child_dir / "environment.json")
     if (
         not isinstance(environment, dict)
         or set(environment)
         != {
-            "schema_version",
             "run_id",
-            "captured_at",
-            "platform",
-            "python",
             "source",
             "model_identity",
         }
-        or environment.get("schema_version")
-        != "phase-g-code-question-environment-1.0"
         or environment.get("run_id") != summary["run_id"]
-        or environment.get("captured_at") != status.get("created_at")
         or environment.get("source") != identity["source"]
-        or environment.get("model_identity") != summary["model_identity"]
-        or not isinstance(environment.get("platform"), str)
-        or not isinstance(environment.get("python"), str)
+        or environment.get("model_identity") not in (
+            runner.persisted_model_identity(summary["model_identity"]), summary["model_identity"])
     ):
         raise runner.PhaseEError("CODE question environment manifest changed")
     condition_summaries = {}

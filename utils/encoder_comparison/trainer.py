@@ -10,7 +10,7 @@ adapters to the current artifact contract.
 
 from __future__ import annotations
 
-from utils.encoder.runtime import record_runtime, restart_identity
+from utils.encoder.runtime import configure_numerics, continue_training, record_model_runtime, record_runtime, restart_identity
 
 from utils.encoder_comparison.options import ComparisonOptions
 
@@ -104,8 +104,6 @@ def _restart_payload(
         "format_version": "phase-g-historical-trainer-restart-1.0",
         "run_identity": restart_identity(args.prepared_dir),
         "seed": args.seed,
-        "model_name": args.model_name,
-        "model_revision": args.model_revision,
         "max_steps": args.max_steps,
         "encoder": model.state_dict(),
         "optimizer": optimizer.state_dict(),
@@ -130,8 +128,6 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
         "format_version",
         "run_identity",
         "seed",
-        "model_name",
-        "model_revision",
         "max_steps",
         "encoder",
         "optimizer",
@@ -155,8 +151,6 @@ def _load_restart(args, model, optimizer, scheduler, train_loader):
     expected = {
         "run_identity": restart_identity(args.prepared_dir),
         "seed": args.seed,
-        "model_name": args.model_name,
-        "model_revision": args.model_revision,
         "max_steps": args.max_steps,
     }
     for field, expected_value in expected.items():
@@ -497,6 +491,7 @@ def pipeline_comparison_boost(
 
 
 def train(args):
+    configure_numerics()
     runtime_reference = record_runtime(args.prepared_dir)
     torch.manual_seed(args.seed)
     random.seed(args.seed)
@@ -519,6 +514,7 @@ def train(args):
     }
     id2entity = {value: key for key, value in entity_type2id.items()}
     model = _model(args, device)
+    record_model_runtime(args.prepared_dir, model)
     from utils.common.paths import RunLayout
     from utils.encoder.cache import write_cache_manifest
 
@@ -550,6 +546,8 @@ def train(args):
         resumed_from = str(Path(args.resume_from))
 
     iterator = _cycle(train_loader)
+    if args.resume_from:
+        iterator = continue_training(train_loader, iterator)
     started = time.time()
     model.train()
     while step < args.max_steps:
@@ -689,11 +687,8 @@ def train(args):
         "run_identity": restart_identity(args.prepared_dir),
         "status": "completed",
         "seed": args.seed,
-        "model_name": args.model_name,
-        "model_revision": args.model_revision,
         "completed_steps": step,
         "selected_step": best_step,
-        "selection_metric": "development_strict_triple_f1",
         "selected_metrics": best_metrics,
         "test_evaluated": False,
         "resumed_from": resumed_from,
@@ -719,10 +714,12 @@ def _read_sentences(path: Path) -> list[dict[str, Any]]:
 
 
 def predict(args):
+    configure_numerics()
     record_runtime(args.prepared_dir)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = _tokenizer(args)
     model = _model(args, device)
+    record_model_runtime(args.prepared_dir, model)
     checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
     if not isinstance(checkpoint, dict) or "encoder" not in checkpoint:
         raise ValueError("comparison checkpoint lacks the historical encoder payload")

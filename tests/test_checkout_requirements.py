@@ -29,19 +29,14 @@ class CheckoutRequirementsTests(unittest.TestCase):
             with self.subTest(environment=environment):
                 value = copy.deepcopy(original)
                 if environment is None:
-                    value.pop('environment')
+                    value.pop('environment', None)
                 else:
                     value['environment'] = environment
                 loaded = self.load(value)
-                loaded.value['verifier']['registry_manifest_sha256'] = 'a' * 64
-                loaded.value['verifier']['model_blob_sha256'] = 'b' * 64
-                with mock.patch('utils.verifier.verifier._command_output',
-                                return_value={'status': 'unavailable', 'stdout': None}):
+                with mock.patch('subprocess.run', side_effect=AssertionError('unnecessary client probe')):
                     actual = _environment_manifest(loaded, 'VER-SIMPLE', 'replay')
-                self.assertTrue(actual['python']['observed'])
-                self.assertNotIn('expected', actual['python'])
-                self.assertNotIn('expected_uv', actual['software'])
-                self.assertIn('packages', actual['software'])
+                self.assertEqual(actual['execution_mode'], 'replay')
+                self.assertFalse({'python', 'platform', 'hardware', 'software', 'ollama'} & actual.keys())
 
     def test_unused_metadata_text_does_not_gate_scientific_configuration(self):
         value = self.original()
@@ -68,13 +63,17 @@ class CheckoutRequirementsTests(unittest.TestCase):
         from utils.encoder_comparison import config as comparison
         path = ROOT / 'resources/configs/encoder-comparison.json'
         value = json.loads(path.read_text(encoding='utf-8'))
-        value['canonical_pipeline_config'].pop('sha256')
-        actual_hash = comparison.sha256_file
+        value['canonical_pipeline_config'].pop('sha256', None)
         with mock.patch.object(comparison, 'load_json', return_value=value), \
-             mock.patch.object(comparison, 'sha256_file', wraps=actual_hash) as hashes:
+             mock.patch('utils.common.artifact_io.sha256_file', side_effect=AssertionError('tracked file hashing')):
             loaded = comparison.load_comparison_config(ROOT)
         self.assertEqual(loaded.pipeline.value, self.original())
-        hashes.assert_called_once_with(path)
+        self.assertFalse(hasattr(loaded, 'sha256'))
+        self.assertEqual(loaded.select_arm('bert-base-common').manifest('fixture'), {
+            'comparison_config': 'resources/configs/encoder-comparison.json',
+            'arm_id': 'bert-base-common', 'run_id': 'fixture'})
+        self.assertEqual(loaded.value['canonical_pipeline_config'],
+                         {'path': 'resources/configs/pipeline.json'})
 
     def test_entrypoints_disable_bytecode_without_a_required_cli_flag(self):
         for script in ('pipeline.py', 'encoder_comparison.py', 'rag.py'):

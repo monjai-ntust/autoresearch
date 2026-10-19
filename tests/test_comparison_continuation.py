@@ -162,10 +162,9 @@ class ComparisonContinuationTests(unittest.TestCase):
             atomic_write_bytes(self.layout.resolve(f"checkpoints/seed-42/{name}"), b"fixture")
         summary = {"status": "completed", "test_evaluated": False, "seed": 42,
             "run_identity": {"run_id": self.layout.run_id},
-            "model_name": self.selection.profile.model, "model_revision": self.selection.profile.revision,
-            "completed_steps": 3500, "selection_metric": "development_strict_triple_f1",
+            "completed_steps": 3500,
             "selected_step": 100, "selected_metrics": {"triple_f1": 0.2}}
-        for change in ({"completed_steps": 1}, {"selection_metric": "test_f1"},
+        for change in ({"completed_steps": 1}, {"test_evaluated": True},
                        {"run_identity": {"run_id": "foreign"}},
                        {"selected_step": 3501}, {"selected_metrics": {"triple_f1": float("nan")}},
                        {"selected_metrics": {"triple_f1": 1.1}}):
@@ -185,8 +184,9 @@ class ComparisonContinuationTests(unittest.TestCase):
         plan = {"training_seed": 42, "run_id": self.layout.run_id}
         result_path = self.layout.resolve("manifests/encoder-comparison-train-live-seed-42.json")
         good = stage._training_result(self.layout, plan, checkpoint, {})
-        matrix = {"members": {self.selection.arm.arm_id: self.layout.run_id}, "training_seeds": [42]}
+        matrix = {"members": {self.selection.arm.arm_id: self.layout.run_id}}
         with (
+            mock.patch.dict(self.config.value, {'training_seeds': [42]}),
             mock.patch.object(comparison_matrix, "selected_matrix", return_value=(self.layout, matrix)),
             mock.patch.object(stage, "run_smoke"),
             mock.patch.object(stage, "_verify_profile_cache", return_value={}),

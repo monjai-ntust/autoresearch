@@ -312,9 +312,11 @@ class Verdict:
     corrected: StrictTriple | None
     correction_validation_status: str
     raw_response_sha256: str | None
-    prompt_sha256: str
+    prompt_sha256: str | None
     model_manifest_sha256: str
-    decoding_sha256: str
+    decoding_sha256: str | None
+    template_id: str | None
+    request_sha256: str | None
     attempts: int
     error_category: str | None
     telemetry: dict[str, Any]
@@ -336,15 +338,19 @@ class Verdict:
                 "corrected",
                 "correction_validation_status",
                 "raw_response_sha256",
-                "prompt_sha256",
                 "model_manifest_sha256",
-                "decoding_sha256",
                 "attempts",
                 "error_category",
                 "telemetry",
             },
             label,
+            {"prompt_sha256", "decoding_sha256", "template_id", "request_sha256"},
         )
+        legacy_fields = {"prompt_sha256", "decoding_sha256"}
+        fresh_fields = {"template_id", "request_sha256"}
+        identity_fields = set(value) & (legacy_fields | fresh_fields)
+        if identity_fields not in (legacy_fields, fresh_fields):
+            raise DataContractError(f"{label} must contain one complete verifier request identity")
         if _require(value, "protocol_id", label) != PROTOCOL_ID:
             raise DataContractError(f"{label}.protocol_id does not match {PROTOCOL_ID}")
         condition = _string(_require(value, "condition_id", label), f"{label}.condition_id")
@@ -440,14 +446,14 @@ class Verdict:
             corrected=corrected,
             correction_validation_status=correction_status,
             raw_response_sha256=raw_response_sha256,
-            prompt_sha256=_sha256(_require(value, "prompt_sha256", label), f"{label}.prompt_sha256") or "",
+            prompt_sha256=_sha256(value["prompt_sha256"], f"{label}.prompt_sha256") if "prompt_sha256" in value else None,
             model_manifest_sha256=_sha256(
                 _require(value, "model_manifest_sha256", label),
                 f"{label}.model_manifest_sha256",
             ) or "",
-            decoding_sha256=_sha256(
-                _require(value, "decoding_sha256", label), f"{label}.decoding_sha256"
-            ) or "",
+            decoding_sha256=_sha256(value["decoding_sha256"], f"{label}.decoding_sha256") if "decoding_sha256" in value else None,
+            template_id=_string(value["template_id"], f"{label}.template_id") if "template_id" in value else None,
+            request_sha256=_sha256(value["request_sha256"], f"{label}.request_sha256") if "request_sha256" in value else None,
             attempts=_integer(_require(value, "attempts", label), f"{label}.attempts", minimum=1),
             error_category=error_category,
             telemetry=telemetry,

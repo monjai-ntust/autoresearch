@@ -9,6 +9,7 @@ from utils.common.artifact_io import (
     _load_manifest,
     _require_fields,
     sha256_file,
+    iter_jsonl,
 )
 from utils.common.config import PipelineConfig
 from utils.common.paths import RunLayout
@@ -78,6 +79,10 @@ def _validate_score(layout: RunLayout, config) -> dict:
             "metrics/publication-summary.md",
         },
     }
+    for mode in ('simple', 'corrective'):
+        if any(row.get('template_id') is not None for _, row in
+               iter_jsonl(layout.resolve(f'verifier/{mode}/verdicts.jsonl', must_exist=True))):
+            required['inputs'].add(f'verifier/{mode}/requests.jsonl')
     for mapping_name, paths in required.items():
         mapping = manifest.get(mapping_name)
         if not isinstance(mapping, dict) or set(mapping) != paths:

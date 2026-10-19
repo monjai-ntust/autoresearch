@@ -34,13 +34,14 @@ class CheckoutRecoveryTests(unittest.TestCase):
         self.layout = RunLayout(self.root, "research-1019")
         self.layout.create()
         self.config_bytes = path.read_bytes()
-        atomic_write_bytes(self.layout.resolve(checkout.CONFIG), self.config_bytes)
+        committed = mock.patch.object(checkout, '_committed_config', return_value=self.config_bytes)
+        committed.start()
+        self.addCleanup(committed.stop)
         self.blocked = {
             "schema_version": "phase-b-checkout-manifest-2.0", "lifecycle_version": 1,
             **value, "run_id": self.layout.run_id, "status": "blocked",
             "source": {"commit": "a" * 40, "worktree_clean": False, "config": {
-                "path": "resources/configs/pipeline.json", "sha256": sha256_file(path),
-                "run_local_path": checkout.CONFIG}},
+                "path": "resources/configs/pipeline.json"}},
             "environment": {"machine": "aarch64"},
             "checks": [{"check_id": "git-head", "status": "pass"},
                        {"check_id": "clean-tracked-source", "status": "fail"}],
@@ -62,11 +63,12 @@ class CheckoutRecoveryTests(unittest.TestCase):
     def _receipt(self):
         return next(self.layout.resolve(checkout.RECOVERY).glob("receipt-*.json"))
 
-    def test_initialize_retains_exact_failure_and_config_then_continues_same_run(self):
+    def test_initialize_retains_exact_failure_and_source_selector_then_continues_same_run(self):
         self._initialize()
         root = self.layout.resolve(checkout.RECOVERY)
         self.assertEqual((root / "previous-checkout.json").read_bytes(), self.original)
-        self.assertEqual((root / "config.json").read_bytes(), self.config_bytes)
+        self.assertFalse((root / 'config.json').exists())
+        self.assertFalse(self.layout.resolve('inputs/config/pipeline.json').exists())
         admitted = self.layout.resolve(checkout.CHECKOUT).read_bytes()
         self.assertEqual((root / "fresh-checkout.json").read_bytes(), admitted)
         document = load_json(self.layout.resolve(checkout.CHECKOUT))
@@ -75,7 +77,7 @@ class CheckoutRecoveryTests(unittest.TestCase):
         self.assertTrue(document["source"]["worktree_clean"])
         receipt_path = self._receipt()
         receipt = load_json(receipt_path)
-        self.assertEqual(set(receipt["artifacts"]), {"previous_checkout", "fresh_checkout", "config"})
+        self.assertEqual(set(receipt["artifacts"]), {"previous_checkout", "fresh_checkout"})
         self.assertEqual(receipt_path.stem, "receipt-" + sha256_file(receipt_path))
         for identity in receipt["artifacts"].values():
             self.assertEqual(sha256_file(self.layout.resolve(identity["path"])), identity["sha256"])
@@ -133,7 +135,6 @@ class CheckoutRecoveryTests(unittest.TestCase):
                 self.layout.create()
                 self.blocked["run_id"] = self.layout.run_id
                 self.fresh["run_id"] = self.layout.run_id
-                atomic_write_bytes(self.layout.resolve(checkout.CONFIG), self.config_bytes)
 
     def test_any_acquired_or_downstream_file_prevents_checkout_replacement(self):
         for relative in ("inputs/dataset.zip", "data-prepared/train.jsonl",

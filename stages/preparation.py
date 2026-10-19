@@ -81,10 +81,6 @@ def _validate_existing_checkout(layout: RunLayout, config) -> dict:
         "checkout manifest",
     )
     source = manifest.get("source")
-    config_identity = source.get("config") if isinstance(source, dict) else None
-    if isinstance(config_identity, dict) and config_identity.get("run_local_path"):
-        if sha256_file(layout.resolve(config_identity["run_local_path"], must_exist=True)) != config_identity.get("sha256"):
-            raise DataContractError("run-local configuration copy changed")
     if not isinstance(source, dict) or source.get("worktree_clean") is not True:
         raise DataContractError("existing run was not admitted from a clean checkout")
     current = subprocess.run(
@@ -107,14 +103,7 @@ def _validate_existing_checkout(layout: RunLayout, config) -> dict:
         )
     config_relative = config.path.resolve().relative_to(layout.source_root).as_posix()
     source_config = source.get("config")
-    tracked = manifest.get("tracked_artifact_sha256")
-    recorded_config_hash = (
-        source_config.get("sha256")
-        if isinstance(source_config, dict)
-        and source_config.get("path") == config_relative
-        else tracked.get(config_relative) if isinstance(tracked, dict) else None
-    )
-    if recorded_config_hash != sha256_file(config.path):
+    if source_config != {"path": config_relative}:
         raise DataContractError(
             "existing run checkout does not authenticate its selected config"
         )

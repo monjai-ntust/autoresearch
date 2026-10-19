@@ -99,19 +99,11 @@ class EncoderComparisonTests(unittest.TestCase):
             self.assertEqual(
                 profile.base_parameter_count_source, BASE_PARAMETER_COUNT_SOURCE
             )
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-B",
-                    str(ENTRYPOINT),
-                    "validate",
-                ],
-                cwd=SOURCE_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            self.assertIn(profile.revision, completed.stdout)
+        completed = subprocess.run(
+            [sys.executable, "-I", "-B", str(ENTRYPOINT), "validate"],
+            cwd=SOURCE_ROOT, check=True, capture_output=True, text=True)
+        self.assertEqual(completed.stdout, "Matched encoder comparison configuration valid.\n")
+        self.assertEqual(completed.stderr, "")
 
     def test_only_populated_table1_arms_and_two_historical_recipes_are_registered(self):
         self.assertEqual(
@@ -140,21 +132,6 @@ class EncoderComparisonTests(unittest.TestCase):
             self.config.value["statistical_protocol"]["historical_statistics_role"],
             "provenance_only",
         )
-
-        for arm_id in self.config.arms:
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    "-B",
-                    str(ENTRYPOINT),
-                    "validate",
-                ],
-                cwd=SOURCE_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            self.assertIn(arm_id, completed.stdout)
 
     def test_unknown_profile_and_mutable_revision_fail_closed(self):
         with self.assertRaisesRegex(DataContractError, "unknown approved Table 1 arm"):

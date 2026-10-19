@@ -35,6 +35,8 @@ class RagRequestTests(unittest.TestCase):
         self.assertEqual(kg.call_count, 2)
         self.assertEqual(text.call_count, 1)
         self.assertEqual([item["mode"] for item in plan["requests"]], list(evaluator.MODES))
+        self.assertEqual(set(plan), {"prompts", "requests", "model"})
+        self.assertEqual(plan["model"], "qwen3:32b")
         one_hop = plan["requests"][2]["context"]
         hybrid = plan["requests"][4]["context"]
         self.assertEqual(len(one_hop["retrieved_triples"]), 15)
@@ -49,7 +51,7 @@ class RagRequestTests(unittest.TestCase):
               mock.patch.object(evaluator, "retrieve_sentences", side_effect=AssertionError("reretrieval"))):
             self.assertEqual(requests.validate_request_plan(plan, questions, "qwen3:32b"), plan["requests"])
 
-    def test_reconstructed_wire_bytes_match_frozen_actual_dispatch(self):
+    def test_reconstructed_wire_bytes_match_seeded_actual_dispatch(self):
         plan, _questions = self._plan()
         restored = json.loads(runner.canonical_json_bytes(plan))
         requests.validate_request_plan(restored, _questions, "qwen3:32b")
@@ -69,6 +71,7 @@ class RagRequestTests(unittest.TestCase):
                                  plan["requests"][ordinal]["request_sha256"])
         self.assertIn(b"\\u03b1", dispatched[1])
         self.assertNotIn("α".encode("utf-8"), dispatched[1])
+        self.assertEqual(json.loads(dispatched[1])["options"], evaluator.request_options())
 
     def test_observer_precedes_dispatch_without_changing_prompts_answers_or_scores(self):
         records, graph, questions = self._fixture()
@@ -138,12 +141,34 @@ class RagRequestTests(unittest.TestCase):
                        lambda value: value["requests"].pop(),
                        lambda value: value["prompts"].__setitem__(2, "changed"),
                        lambda value: value["requests"][2]["context"]["included_triples"].reverse(),
-                       lambda value: value["request_template"]["options"].__setitem__("num_predict", 51),
-                       lambda value: value["request_template"]["options"].__setitem__("temperature", False)):
+                       lambda value: value.pop("model"),
+                       lambda value: value.__setitem__("model", "foreign-model"),
+                       lambda value: value.__setitem__("request_template", requests._template("qwen3:32b"))):
             changed = copy.deepcopy(plan)
             change(changed)
             with self.assertRaises(runner.PhaseEError):
                 requests.validate_request_plan(changed, questions, "qwen3:32b")
+
+    def test_legacy_wire_hashes_remain_seedless_without_retrieval(self):
+        plan, questions = self._plan()
+        plan["request_template"] = requests._template(plan.pop("model"), legacy=True)
+        for ordinal, request in enumerate(plan["requests"]):
+            request["request_sha256"] = runner.sha256_bytes(requests.request_bytes(plan, ordinal))
+            self.assertNotIn("seed", json.loads(requests.request_bytes(plan, ordinal))["options"])
+        self.assertFalse(requests.is_current_request_plan(plan, "qwen3:32b"))
+        with self.assertRaises(runner.PhaseEError):
+            requests.validate_request_plan(plan, questions, "qwen3:32b")
+        with mock.patch.object(evaluator, "retrieve_from_kg", side_effect=AssertionError("reretrieval")):
+            self.assertEqual(requests.validate_request_plan(plan, questions, "qwen3:32b", allow_legacy=True),
+                             plan["requests"])
+
+    def test_fresh_plan_hashes_bind_the_source_defined_payload_without_copying_options(self):
+        plan, questions = self._plan()
+        self.assertEqual(set(plan), {"prompts", "requests", "model"})
+        with mock.patch.object(evaluator, "request_options",
+                               return_value={"temperature": 0.0, "num_predict": 50, "seed": 17}):
+            with self.assertRaisesRegex(runner.PhaseEError, "request or context hash differs"):
+                requests.validate_request_plan(plan, questions, "qwen3:32b")
 
     def test_repeated_question_occurrences_have_distinct_ordinals(self):
         records, graph, questions = self._fixture()

@@ -76,9 +76,11 @@ flowchart LR
    confidence/corrective/gold canonical graphs and `project_graph` converts them
    into the evaluator view. [code_questions.py](../utils/rag/code_questions.py)
    defines the seven added templates once and preserves the original `part-of`
-   generator. [evaluator.py](../utils/rag/evaluator.py) is the frozen five-mode
-   kernel: question order, retrieval, literal prompt, non-thinking decoding,
-   normalization and answer matching. [journal.py](../utils/rag/journal.py)
+   generator. [evaluator.py](../utils/rag/evaluator.py) retains the five modes,
+   question order, literal prompts, non-thinking decoding and answer matching.
+   Fresh retrieval uses ordered list frontiers; generation uses the explicit
+   seed in [table2.json](../resources/contracts/table2.json).
+   [journal.py](../utils/rag/journal.py)
    saves ordered occurrences and original answers around that kernel.
    [requests.py](../utils/rag/requests.py) observes the actual selected context
    and verifies the saved request without performing retrieval again.
@@ -152,9 +154,10 @@ active recorded dispatch; canonical and comparison namespaces stay separate.
 Qwen weight SHA-256/byte size, model/quantization settings, Python/Ollama/Torch/
 Transformers and numerical backend settings remain visible. Historical reference
 digests, hardware and branch ancestry are not fresh admission criteria.
-Fresh source identity comes from the clean Git commit, without separate
-integrity hashes for cloned source files. Configuration snapshots and
-input/artifact/request/model hashes still bind actual same-run inputs and results.
+Fresh source identity comes from the clean Git commit and selected tracked
+resource paths. No separate hashes or copied definitions identify tracked
+configuration, templates, schemas or method code. External inputs, generated
+artifacts, requests and actual model bytes retain their same-run hash bindings.
 
 Repeat a command unchanged after failure. Complete outputs are authenticated;
 unsaved steps can run again; pure finalization requires identical existing
@@ -162,7 +165,9 @@ bytes. Verifier's original three-attempt budget and terminal failure verdicts
 survive continuation. Independent pilot captures never share answers. RAG
 reuses saved successful occurrences and retries only unfinished empty/error
 answers. Missing contemporaneous model proof fails closed; later queries cannot
-create past proof. Corrupt or foreign progress stops rather than becoming a new
+create past proof. A completed seedless request plan replays read-only; an
+unfinished one cannot dispatch using the new generation policy.
+Corrupt or foreign progress stops rather than becoming a new
 run. Concurrent execution fails without deleting lock files or evidence.
 Saved response hashes and original model evidence are checked before new calls.
 Missing completed journals, changed outputs or a prediction ledger without its
@@ -177,14 +182,19 @@ Under `output/<run-id>/table2-code-all/`, each condition's
 identity, ordered retrieved triples and included triples, retrieved sentences
 and included source excerpts. Retrieved graph lists retain the evaluator's
 15-fact return cap; one-hop/two-hop include those lists and hybrid includes the
-first five one-hop facts. Text retrieval retains up to three sentences, with
+first five one-hop facts. Both graph frontiers follow node/edge first appearance
+in the authenticated projected graph; sets are membership checks only. Ordering
+is fixed before either fact cap, without reference to gold answers or results.
+Text retrieval retains up to three sentences, with
 the original 200-character excerpt boundary; hybrid includes the first excerpt
 and preserves its empty source bullet when nothing is retrieved. Observation
-does not sort facts, repeat retrieval, force a seed or change decoding options.
+does not repeat retrieval. The plan and live dispatcher share the configured
+temperature, output-token limit and explicit generation seed.
 
 The plan hashes UTF-8 prompt bytes, canonical ordered-context JSON without a
-trailing newline, and the exact outgoing request JSON. Its common
-`request_template` retains role/model/options once. `request_bytes` reconstructs
+trailing newline, and the exact outgoing request JSON. It retains the selected
+model and derives fixed role/options/serialization from the recorded source
+commit. `request_bytes` reconstructs
 the original request serialization, including ASCII escapes, field order and
 spacing, from saved evidence alone. Each occurrence's `001-request.json` is
 durable before dispatch; its answer and model proof bind that request record's
@@ -194,16 +204,10 @@ and interrupted dispatch records. Requests reference a common
 same-run source/model identity. The plan's retrieval producer and a resumed
 attempt's dispatch producer can therefore differ without changing saved context.
 
-[process_identity.py](../utils/common/process_identity.py) freezes an observation
-at entry and retains the interpreter's hash-randomization/isolation flags.
-`PYTHONHASHSEED` observed in the current environment is labelled separately from
-startup evidence: changing it after Python starts does not reseed that process.
-Linux records the initial exec setting from `/proc/self/environ` when available;
-unavailable or ambiguous evidence remains explicit. Other platforms do not claim
-an original environment setting that Python cannot expose. The documented `-I`
-commands ignore `PYTHONHASHSEED`, including an inherited `0`; enabled random hash
-secrets remain unavailable. Exact selected order in the plan is the durable
-evidence even when that secret cannot be recovered.
+[process_identity.py](../utils/common/process_identity.py) supplies only an
+immutable original producer token shared by that process's calls. No hash-seed,
+startup-environment or interpreter diagnostics are logged. Ordered traversal
+makes those observations unnecessary; selected context stays in the request plan.
 
 Completed historical journals may replay their validated original responses
 without adding new metadata. Their missing ordered-context or startup evidence
@@ -275,25 +279,26 @@ preflight retains actual runtime versions and enforces current source identity
 and ignored run output; documented version comparisons and redundant ignore
 probes are absent. [checkout.py](../utils/preparation/checkout.py) lets a fresh
 checkout-only failure continue under its original ID after preflight succeeds.
-It preserves the exact failed/passing manifest bytes, one unchanged config
-snapshot and their hash receipt before promotion. Existing scientific work and
+It preserves the exact failed/passing manifest bytes and their hash receipt
+before promotion. The commit and selected resource path identify configuration;
+recovery checks unchanged tracked configuration directly against the old commit.
+Existing scientific work and
 old partial workflows cannot use that recovery path.
 
-[test_scientific_bytes.py](../tests/test_scientific_bytes.py) checks independent
-baseline definition/optimizer-loop hashes, immutable scientific module and
-prompt/schema bytes, old parsed worker values, and raw graph/projection/question/
-prompt/result/statistical replay. Replay fixtures fix the Python hash seed to
-preserve characterized set iteration order; production does not reseed or
-normalize retrieval. [test_rag_requests.py](../tests/test_rag_requests.py) checks
+[test_scientific_outputs.py](../tests/test_scientific_outputs.py) checks raw
+graph/projection/question/prompt/result/statistical replay. Source/AST-hash and
+approval inventories and duplicate worker-option snapshots are absent.
+Scientific expected output values remain intact;
+new process tests vary hash settings and isolation to verify ordered retrieval.
+[test_rag_requests.py](../tests/test_rag_requests.py) checks
 actual request bytes, ordered inclusion limits and unchanged answer scores;
-process and journal tests cover startup evidence, resumed producers and request
+process and journal tests cover minimal producer identity, resumed producers and request
 corruption. Other tests cover tiny CPU
 tensor/RNG/restart cases, typed scoring, lineage tampering and continuation.
-AST checks parse source bytes using Python's source encoding; JSON fixtures use
-UTF-8 explicitly. The paired t-test's standard deviation, statistic and p-value
+JSON fixtures use UTF-8 explicitly. The paired t-test's standard deviation, statistic and p-value
 allow at most 32 ULP (steps between adjacent floating-point values) from the
-frozen Windows fixture for platform math-library rounding. Its algorithm source,
-all other fields and the graph/prompt/result fixtures still compare exactly;
+frozen Windows fixture for platform math-library rounding. All other fields
+and the graph/prompt/result fixtures still compare exactly;
 production values and saved golden bytes are never rounded for this check.
 [test_continuation.py](../tests/test_continuation.py) injects response/model-proof/
 gate/lock/budget failures; [test_reporting.py](../tests/test_reporting.py) verifies

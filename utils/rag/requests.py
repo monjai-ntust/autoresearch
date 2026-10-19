@@ -1,4 +1,4 @@
-"""Exact request and ordered context evidence for the frozen RAG evaluator."""
+"""Exact request and ordered context evidence for the configured RAG evaluator."""
 from __future__ import annotations
 
 import json
@@ -10,9 +10,12 @@ SERIALIZATION = "json.dumps defaults, insertion-order keys, ASCII escapes, UTF-8
 CONTEXT_FIELDS = ("retrieved_triples", "included_triples", "retrieved_sentences", "source_excerpts")
 
 
-def _template(model):
-    return {"model": model, "role": "user", "stream": False, "think": False,
-            "options": {"temperature": 0.0, "num_predict": 50},
+def _template(model, *, legacy=False):
+    payload = evaluator.request_payload(model, "")
+    if legacy:
+        del payload["options"]["seed"]
+    return {"model": payload["model"], "role": payload["messages"][0]["role"],
+            "stream": payload["stream"], "think": payload["think"], "options": payload["options"],
             "serialization": SERIALIZATION}
 
 
@@ -22,15 +25,13 @@ def _digest(value):
 
 def request_bytes(plan, ordinal):
     """Reconstruct the literal JSON passed to curl, without retrieval or a model."""
-    template = plan["request_template"]
-    return json.dumps({
-        "model": template["model"],
-        "messages": [{"role": template["role"], "content": plan["prompts"][ordinal]}],
-        "stream": template["stream"],
-        "think": template["think"],
-        "options": {"temperature": template["options"]["temperature"],
-                    "num_predict": template["options"]["num_predict"]},
-    }).encode("utf-8")
+    if "request_template" in plan:
+        template = plan["request_template"]
+        payload = evaluator.request_payload(template["model"], plan["prompts"][ordinal],
+                                            options=template["options"])
+    else:
+        payload = evaluator.request_payload(plan["model"], plan["prompts"][ordinal])
+    return json.dumps(payload).encode("utf-8")
 
 
 def request_identity(plan, ordinal):
@@ -41,7 +42,7 @@ def request_identity(plan, ordinal):
 
 def capture_request_plan(records, kg, questions, condition, model, ollama_url):
     """Observe each original retrieval once while preparing the existing plan."""
-    plan = {"prompts": [], "requests": [], "request_template": _template(model)}
+    plan = {"prompts": [], "requests": [], "model": model}
 
     def observe(*, question, mode, prompt, **context):
         ordinal = len(plan["prompts"])
@@ -97,12 +98,33 @@ def _context_prompt(question, mode, context):
             f"Answer in 1-2 words: {question['question']}")
 
 
-def validate_request_plan(plan, questions, model):
+def is_current_request_plan(plan, model):
+    fields = {"prompts", "requests", "model"}
+    return (isinstance(plan, dict) and plan.get("model") == model
+            and set(plan) in (fields, fields | {"binding", "producer"}))
+
+
+def _is_legacy_request_plan(plan, model):
+    fields = {"prompts", "requests", "request_template"}
+    if not isinstance(plan, dict) or set(plan) not in (fields, fields | {"binding", "producer"}):
+        return False
+    template = plan["request_template"]
+    if not isinstance(template, dict) or not isinstance(template.get("options"), dict):
+        return False
+    expected = _template(model, legacy=True)
+    if "seed" in template["options"]:
+        seed = template["options"]["seed"]
+        if type(seed) is not int or not 0 <= seed <= 2**31 - 1:
+            return False
+        expected["options"]["seed"] = seed
+    return runner.canonical_json_bytes(template) == runner.canonical_json_bytes(expected)
+
+
+def validate_request_plan(plan, questions, model, *, allow_legacy=False):
     """Authenticate recorded prompts, ordered contexts and wire payload hashes."""
-    if (not isinstance(plan, dict)
-            or runner.canonical_json_bytes(plan.get("request_template"))
-            != runner.canonical_json_bytes(_template(model))):
-        raise runner.PhaseEError("saved RAG request template differs from the frozen payload")
+    if not is_current_request_plan(plan, model) and not (
+            allow_legacy and _is_legacy_request_plan(plan, model)):
+        raise runner.PhaseEError("saved RAG model or payload identity differs from the configured source")
     prompts = plan.get("prompts")
     requests = plan.get("requests")
     count = len(questions) * len(evaluator.MODES)

@@ -4,17 +4,13 @@ from __future__ import annotations
 
 from utils.verifier.interpretation import _parse_content
 
-from utils.verifier.requests import PreparedSentence, _exact_keys, _load_candidates, _load_sentences, _prompt_bundle, _request_record, _sha256_value
+from utils.verifier.requests import PreparedSentence, _exact_keys, _load_candidates, _load_sentences, _prompt_bundle, _request_record, _sha256_value, verifier_template_id
 
 import hashlib
-import importlib.metadata
 import json
 import math
 import os
-import platform
 import re
-import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -28,7 +24,6 @@ from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
     atomic_write_jsonl,
-    atomic_write_text,
     canonical_json_bytes,
     iter_jsonl,
     load_json,
@@ -37,6 +32,7 @@ from utils.common.artifact_io import (
 from utils.common.paths import RunLayout
 from utils.common.records import Candidate, Verdict
 from utils.common.execution import bind_json
+from utils.verifier.runtime import bind_runtime, runtime_identity
 
 
 from utils.verifier.requests import MODE_CONDITIONS
@@ -104,125 +100,14 @@ class _EventLog:
         self.events.append(record)
 
 
-def _command_output(arguments: list[str], timeout: float = 30) -> dict[str, Any]:
-    try:
-        result = subprocess.run(
-            arguments,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return {"status": "unavailable", "returncode": None, "stdout": None}
-    return {
-        "status": "available" if result.returncode == 0 else "failed",
-        "returncode": result.returncode,
-        "stdout": result.stdout.strip() or None,
-    }
-
-
-def _physical_memory_bytes() -> int | None:
-    if sys.platform == "win32":
-        try:
-            import ctypes
-
-            class MemoryStatus(ctypes.Structure):
-                _fields_ = [
-                    ("length", ctypes.c_ulong),
-                    ("memory_load", ctypes.c_ulong),
-                    ("total_physical", ctypes.c_ulonglong),
-                    ("available_physical", ctypes.c_ulonglong),
-                    ("total_page_file", ctypes.c_ulonglong),
-                    ("available_page_file", ctypes.c_ulonglong),
-                    ("total_virtual", ctypes.c_ulonglong),
-                    ("available_virtual", ctypes.c_ulonglong),
-                    ("available_extended_virtual", ctypes.c_ulonglong),
-                ]
-
-            status = MemoryStatus()
-            status.length = ctypes.sizeof(MemoryStatus)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-                return int(status.total_physical)
-        except (AttributeError, OSError):
-            return None
-    try:
-        page_size = os.sysconf("SC_PAGE_SIZE")
-        page_count = os.sysconf("SC_PHYS_PAGES")
-    except (AttributeError, OSError, ValueError):
-        return None
-    return int(page_size * page_count)
 
 
 def _environment_manifest(
     config: PipelineConfig, condition: str, execution_mode: str
 ) -> dict[str, Any]:
-    packages: dict[str, str | None] = {}
-    for name in ("requests", "torch", "transformers"):
-        try:
-            packages[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            packages[name] = None
-    hardware: dict[str, Any] = {
-        "logical_cpu_count": os.cpu_count(),
-        "processor": platform.processor() or None,
-        "physical_memory_bytes": _physical_memory_bytes(),
-        "cuda_available": False,
-        "cuda_runtime": None,
-        "cuda_devices": [],
-        "cuda_probe_status": "not_executed_non_live",
-    }
-    if execution_mode == "live":
-        probe_script = (
-            "import json,torch; available=bool(torch.cuda.is_available()); "
-            "print(json.dumps({'cuda_available':available,'cuda_runtime':torch.version.cuda,"
-            "'cuda_devices':[{'index':i,'name':torch.cuda.get_device_name(i),"
-            "'total_memory_bytes':torch.cuda.get_device_properties(i).total_memory} "
-            "for i in range(torch.cuda.device_count())] if available else []},"
-            "sort_keys=True))"
-        )
-        probe = _command_output([sys.executable, "-B", "-c", probe_script], timeout=30)
-        hardware["cuda_probe_status"] = probe["status"]
-        if probe["status"] == "available" and probe["stdout"] is not None:
-            try:
-                observed_hardware = json.loads(probe["stdout"])
-            except json.JSONDecodeError:
-                hardware["cuda_probe_status"] = "malformed"
-            else:
-                if isinstance(observed_hardware, dict):
-                    hardware.update(observed_hardware)
-    return {
-        "protocol_id": PROTOCOL_ID,
-        "condition_id": condition,
-        "execution_mode": execution_mode,
-        "created_at_utc": _utc_now(),
-        "python": {
-            "observed": platform.python_version(),
-            "implementation": platform.python_implementation(),
-        },
-        "platform": {
-            "system": platform.system(),
-            "release": platform.release(),
-            "machine": platform.machine(),
-        },
-        "hardware": hardware,
-        "software": {
-            "uv_version_command": _command_output(["uv", "--version"]),
-            "packages": packages,
-        },
-        "ollama": {"version_command": _command_output(["ollama", "--version"])},
-        "model": {
-            "name": config.value["verifier"]["model"],
-            "registry_manifest_sha256": config.value["verifier"][
-                "registry_manifest_sha256"
-            ],
-            "model_blob_sha256": config.value["verifier"]["model_blob_sha256"],
-            "architecture": "Qwen3",
-            "parameters": "32.8B",
-            "quantization": "Q4_K_M",
-            "identity_verified": False,
-        },
-    }
+    """Stage selection plus a reference to actual shared server identity."""
+    return {"condition_id": condition, "execution_mode": execution_mode,
+            "model": {"identity_verified": False}}
 
 
 def _safe_ollama_url(value: str) -> str:
@@ -328,21 +213,26 @@ def _verify_live_model(
     }:
         raise DataContractError(f"Ollama model details differ from the protocol: {observed}")
     modelfile = show_result.json_body.get("modelfile")
-    if not isinstance(modelfile, str) or verifier["model_blob_sha256"] not in modelfile:
+    from_lines = [line for line in modelfile.splitlines()
+                  if line.lstrip().upper().startswith("FROM ")] if isinstance(modelfile, str) else []
+    from_blobs = {match.lower() for line in from_lines
+                  for match in re.findall(r"sha256[-:]([0-9a-f]{64})", line, re.IGNORECASE)}
+    if len(from_lines) != 1 or from_blobs != {verifier["model_blob_sha256"]}:
         raise DataContractError("Ollama modelfile does not reference the frozen model blob")
-    cli_modelfile = _command_output(
-        ["ollama", "show", "--modelfile", verifier["model"]], timeout=60
-    )
-    if cli_modelfile["stdout"] is not None:
-        atomic_write_text(
-            layout.resolve(f"{artifact_base}/model/ollama-modelfile.txt"),
-            cli_modelfile["stdout"] + "\n",
+    if (not layout.resolve("runtime/ollama.json").exists()
+            and any(layout.resolve("verifier").rglob("environment-manifest.json"))):
+        raise DataContractError(
+            "historical verifier evidence lacks the fresh server runtime identity; "
+            "continue it with its original pinned workflow"
         )
-    if (
-        cli_modelfile["status"] != "available"
-        or verifier["model_blob_sha256"] not in (cli_modelfile["stdout"] or "")
-    ):
-        raise DataContractError("ollama show --modelfile did not prove the frozen blob identity")
+    version_result = transport("GET", f"{ollama_url}/api/version", None, 30)
+    if version_result.status_code != 200 or version_result.json_body is None:
+        raise DataContractError("Ollama /api/version did not return the actual server version")
+    runtime = runtime_identity(ollama_url, version_result.json_body, show_result.json_body, {
+        "name": verifier["model"], "tag_digest": observed_manifest,
+        "blob_sha256": verifier["model_blob_sha256"], "details": observed,
+    })
+    runtime_reference = bind_runtime(layout, runtime)
     return {
         "identity_verified": True,
         "tag_digest": observed_manifest,
@@ -350,6 +240,7 @@ def _verify_live_model(
         "details": observed,
         "tags_response_sha256": _sha256_value(tags_result.json_body),
         "show_response_sha256": _sha256_value(show_result.json_body),
+        "ollama_runtime": runtime_reference,
     }
 
 
@@ -548,9 +439,10 @@ def _verdict_from_response(
             else "not_applicable"
         ),
         "raw_response_sha256": interpreted.get("raw_response_sha256"),
-        "prompt_sha256": request["prompt_sha256"],
         "model_manifest_sha256": request["model_manifest_sha256"],
-        "decoding_sha256": request["decoding_sha256"],
+        **({"template_id": request["template_id"], "request_sha256": request["request_sha256"]}
+           if "template_id" in request else
+           {field: request[field] for field in ("prompt_sha256", "decoding_sha256")}),
         "attempts": len(response["attempts"]),
         "error_category": interpreted.get("error_category") if not valid else None,
         "telemetry": telemetry,
@@ -605,8 +497,10 @@ def _write_verified_jsonl(path, rows):
 
 
 def _environment_receipt(paths):
-    evidence_paths = {name: paths[name] for name in
-                      ("environment", "model_tags", "model_show", "model_modelfile")}
+    names = ("environment", "model_tags", "model_show")
+    if paths["environment"].exists() and "ollama_runtime" not in load_json(paths["environment"]).get("model", {}):
+        names += ("model_modelfile",)
+    evidence_paths = {name: paths[name] for name in names}
     if any(not path.is_file() for path in evidence_paths.values()):
         raise DataContractError("saved verifier model environment evidence is missing")
     return {name: sha256_file(path) for name, path in evidence_paths.items()}
@@ -865,7 +759,6 @@ def run_verifier(
                 paths["warmup_response"],
                 paths["model_tags"],
                 paths["model_show"],
-                paths["model_modelfile"],
             ]
         )
     existing = [layout.relative_identity(path) for path in planned if path.exists()]
@@ -873,7 +766,7 @@ def run_verifier(
         raise DataContractError("verifier refuses to overwrite existing artifacts: " + ", ".join(existing))
     progress_path = layout.resolve(f"{base}/progress-identity.json")
     identity = {"run_id": layout.run_id, "mode": mode, "execution_mode": execution_mode,
-        "config_sha256": sha256_file(config.path), "artifact_prefix": prefix,
+        "config": config.source_path, "artifact_prefix": prefix,
         "sentences_sha256": sha256_file(sentences_path), "candidates_sha256": sha256_file(candidates_path),
         "model_sha256": sha256_file(model_blob_path) if model_blob_path else None,
         "model_registry": config.value["verifier"]["registry_manifest_sha256"],
@@ -1024,13 +917,10 @@ def run_verifier(
             endpoint = _safe_ollama_url(ollama_url)
             original_environment = load_json(paths["environment"]) if paths["environment"].exists() else None
             if original_environment is not None:
-                for field in ("python", "platform", "hardware"):
-                    if original_environment.get(field) != environment[field]:
-                        raise DataContractError(f"verifier numerical runtime drift: {field}")
-                if original_environment.get("software", {}).get("packages") != environment["software"]["packages"]:
-                    raise DataContractError("verifier package runtime drift")
-                if original_environment.get("ollama", {}).get("version_command") != environment["ollama"]["version_command"]:
-                    raise DataContractError("verifier Ollama version drift")
+                runtime_reference = original_environment.get("model", {}).get("ollama_runtime")
+                if runtime_reference is not None:
+                    from utils.verifier.runtime import load_runtime
+                    load_runtime(layout.run_root, runtime_reference)
             model_evidence = _verify_live_model(
                 layout,
                 config,
@@ -1040,15 +930,19 @@ def run_verifier(
                 active_transport,
                 artifact_base=(base if original_environment is None else f"{base}/resume-checks/{event_log.sequence:06d}"),
             )
-            environment["model"].update(model_evidence)
-            environment["ollama"]["origin"] = endpoint
+            if "ollama_runtime" in model_evidence:
+                environment["model"] = {key: model_evidence[key] for key in (
+                    "identity_verified", "ollama_runtime", "tags_response_sha256", "show_response_sha256")}
+            else:
+                environment["model"].update(model_evidence)
             event_log.append(
                 "model_identity_verified",
                 "verified",
-                details={
+                details=({"ollama_runtime": model_evidence["ollama_runtime"]}
+                         if "ollama_runtime" in model_evidence else {
                     "registry_manifest_sha256": model_evidence["tag_digest"],
                     "model_blob_sha256": model_evidence["blob_sha256"],
-                },
+                }),
             )
             if original_environment is None:
                 atomic_write_json(paths["environment"], environment)
@@ -1175,7 +1069,6 @@ def run_verifier(
                     paths["warmup_response"],
                     paths["model_tags"],
                     paths["model_show"],
-                    paths["model_modelfile"],
                 ]
             )
         if execution_mode == "live":
@@ -1183,6 +1076,11 @@ def run_verifier(
             resume_dir = layout.resolve(f"{base}/resume-checks")
             if resume_dir.exists():
                 output_paths.extend(p for p in resume_dir.rglob("*") if p.is_file())
+            runtime_reference = environment.get("model", {}).get("ollama_runtime")
+            if runtime_reference is not None:
+                output_paths.append(layout.resolve(runtime_reference["path"], must_exist=True))
+            elif paths["model_modelfile"].is_file():
+                output_paths.append(paths["model_modelfile"])
         output_paths.append(progress_path)
         manifest = {
             "protocol_id": PROTOCOL_ID,
@@ -1193,11 +1091,10 @@ def run_verifier(
             "warmup_candidate_count": 1 if execution_mode == "live" else 0,
             "warmup_latency_observation_included": False,
             "verdict_count": len(verdicts),
-            "prompt_sha256": bundle.sha256,
+            "template_id": verifier_template_id(config, mode),
             "model_manifest_sha256": config.value["verifier"][
                 "registry_manifest_sha256"
             ],
-            "decoding_sha256": serialized_requests[0]["decoding_sha256"],
             "inputs": {
                 layout.relative_identity(sentences_path): sha256_file(sentences_path),
                 layout.relative_identity(candidates_path): sha256_file(candidates_path),

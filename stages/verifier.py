@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -89,16 +88,8 @@ def run_pilot(
         ollama_url=ollama_url,
         model_blob_source=model_blob_source,
     )
-    model_relative, model_blob = _materialize_model_blob(
+    _, model_blob = _materialize_model_blob(
         layout, source, str(model_identity["blob_sha256"])
-    )
-    _write_full_run_manifest(
-        layout,
-        config,
-        model_relative,
-        model_identity,
-        encoder_identity,
-        training_hardware,
     )
 
     pilot_candidates = layout.resolve(
@@ -135,6 +126,7 @@ def run_pilot(
                 }
             )
 
+    _write_full_run_manifest(layout, config)
     capture_index = layout.resolve("predictions/dev/pilot-captures.json")
     capture_document = {
         "schema_version": "phase-b-verifier-pilot-captures-2.0",
@@ -370,7 +362,8 @@ def _validate_verifier_stage(
     if not isinstance(environment_hash, str):
         raise DataContractError(f"{mode} verifier lacks its environment identity")
     identity = table2_runner.load_verifier_model_identity(
-        layout.resolve(environment_relative, must_exist=True), environment_hash
+        layout.resolve(environment_relative, must_exist=True), environment_hash,
+        run_dir=layout.run_root,
     )
     if (
         identity["name"] != config.value["verifier"]["model"]
@@ -533,45 +526,19 @@ def _materialize_model_blob(
 def _write_full_run_manifest(
     layout: RunLayout,
     config,
-    model_relative: str,
-    model_identity: dict[str, object],
-    encoder_identity: dict[str, str],
-    hardware: dict[str, object],
 ) -> None:
     path = layout.resolve("manifests/pipeline-run.json")
     source = layout.source_root
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=source, check=True, capture_output=True, text=True
     ).stdout.strip()
-    branch = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=source, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    observed_profile = {
-        "hardware": hardware,
-        "encoder": encoder_identity,
-        "qwen": {
-            key: model_identity[key]
-            for key in ("name", "tag_digest", "blob_sha256", "details")
-        },
-    }
+    runtime = layout.resolve("runtime/ollama.json", must_exist=True)
     document = {
-        "schema_version": "pipeline-run-1",
+        "schema_version": "pipeline-run-2",
         "run_id": layout.run_id,
         "config": config.path.relative_to(source).as_posix(),
-        "config_sha256": sha256_file(config.path),
         "source_commit": commit,
-        "source_branch": branch,
-        "ollama_model": model_identity["name"],
-        "ollama_tag_digest": model_identity["tag_digest"],
-        "run_local_model_blob": model_relative,
-        "model_blob_sha256": model_identity["blob_sha256"],
-        "observed_profile": observed_profile,
-        "training_seeds": config.value["training_seeds"],
-        "protocol_id": config.value["protocol_id"],
-        "workflow_id": config.value["workflow_id"],
-        "python_version": platform.python_version(),
-        "ollama_blob_discovery": "Ollama /api/show Modelfile FROM",
-        "failure_policy": "fail_closed_and_resume_valid_completed_stages",
+        "ollama_runtime": {"path": layout.relative_identity(runtime), "sha256": sha256_file(runtime)},
     }
     if path.exists():
         previous = _load_manifest(path, "full-run manifest")

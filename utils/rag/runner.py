@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from utils.common.artifact_io import DataContractError
+from utils.common.constants import PROTOCOL_ID
 from utils.encoder.cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE
 from utils.rag import evaluator
 from utils.rag.graph import build_table_graphs, canonical_json, project_graph
@@ -130,10 +131,9 @@ def validate_source_contract(
     if contract.get("schema_version") != 7 or contract.get("evaluator") != {"part_of_questions": 105}:
         raise PhaseEError("Unsupported frozen RAG contract")
     head = run_git("rev-parse", "HEAD").stdout.strip()
-    branch = run_git("branch", "--show-current").stdout.strip()
     if require_clean and run_git("status", "--porcelain", "--untracked-files=normal").stdout.strip():
         raise PhaseEError("RAG requires a clean source checkout")
-    return {"head": head, "branch": branch}
+    return {"head": head}
 
 
 def validate_run_id(run_id: str, *, require_existing: bool = True) -> Path:
@@ -256,7 +256,8 @@ def _validate_training_checkpoint_identity(
         **expected_inputs,
         "model_cache_manifest_sha256": model_cache_sha256,
     }
-    recipe = train_manifest.get("recipe")
+    fresh_config = isinstance(train_manifest.get("config"), str)
+    recipe = training_config if fresh_config else train_manifest.get("recipe")
     outputs = train_manifest.get("outputs")
     training_inputs = train_manifest.get("inputs")
     resume = train_manifest.get("resume")
@@ -264,25 +265,26 @@ def _validate_training_checkpoint_identity(
     if (
         not isinstance(recipe, dict)
         or recipe != training_config
-        or recipe.get("base_model") != checkpoint_manifest.get("base_model")
-        or recipe.get("base_model_revision")
-        != checkpoint_manifest.get("base_model_revision")
+        or (fresh_config and train_manifest.get("config") != checkpoint_manifest.get("config"))
+        or (not fresh_config and (
+            recipe.get("base_model") != checkpoint_manifest.get("base_model")
+            or recipe.get("base_model_revision") != checkpoint_manifest.get("base_model_revision")))
         or outputs != expected_outputs
         or training_inputs != expected_inputs
         or not isinstance(resume, dict)
         or resume.get("restart_state_sha256")
         != checkpoint_manifest.get("restart_state_sha256")
-        or not isinstance(train_split, dict)
-        or train_split.get("split_id") != "CODE-SPLIT-1"
-        or train_split.get("seed") != split_seed
-        or train_split.get("train_sentences") != split.get("train")
-        or train_split.get("development_sentences") != split.get("development")
-        or train_split.get("test_sentences") != split.get("test")
+        or (not fresh_config and (not isinstance(train_split, dict)
+            or train_split.get("split_id") != "CODE-SPLIT-1"
+            or train_split.get("seed") != split_seed
+            or train_split.get("train_sentences") != split.get("train")
+            or train_split.get("development_sentences") != split.get("development")
+            or train_split.get("test_sentences") != split.get("test")))
     ):
         raise PhaseEError(f"seed-{seed} training and checkpoint identities disagree")
 
 
-def load_verifier_model_identity(path: Path, expected_hash: str) -> dict[str, Any]:
+def load_verifier_model_identity(path: Path, expected_hash: str, *, run_dir: Path | None = None) -> dict[str, Any]:
     if sha256_file(path) != validate_sha256(expected_hash, "verifier environment hash"):
         raise PhaseEError("Verifier environment differs from its stage manifest")
     manifest = load_json(path)
@@ -291,6 +293,20 @@ def load_verifier_model_identity(path: Path, expected_hash: str) -> dict[str, An
     model = manifest.get("model")
     if not isinstance(model, dict) or model.get("identity_verified") is not True:
         raise PhaseEError("Verifier environment lacks a verified model identity")
+    runtime = None
+    if "ollama_runtime" in model:
+        from utils.verifier.runtime import load_runtime
+        from utils.common.artifact_io import DataContractError
+        if run_dir is None:
+            raise PhaseEError("Verifier runtime evidence requires the selected run root")
+        try:
+            runtime = load_runtime(run_dir, model["ollama_runtime"])
+            actual_model = runtime["model"]
+            model = {**model, **actual_model,
+                "registry_manifest_sha256": actual_model["tag_digest"],
+                "model_blob_sha256": actual_model["blob_sha256"]}
+        except (DataContractError, KeyError, TypeError) as exc:
+            raise PhaseEError("Verifier shared Ollama runtime is invalid") from exc
     name = model.get("name")
     if not isinstance(name, str) or not name.strip() or name != name.strip():
         raise PhaseEError("Verifier environment has an invalid model tag")
@@ -314,15 +330,19 @@ def load_verifier_model_identity(path: Path, expected_hash: str) -> dict[str, An
     }
     if any(not isinstance(item, str) or not item for item in normalized_details.values()):
         raise PhaseEError("Verifier environment has incomplete model details")
-    return {
+    identity = {
         "name": name,
         "tag_digest": tag,
         "blob_sha256": blob,
         "details": normalized_details,
         "verifier_environment_sha256": expected_hash,
         "verifier_condition_id": manifest.get("condition_id"),
-        "verifier_protocol_id": manifest.get("protocol_id"),
+        "verifier_protocol_id": PROTOCOL_ID if runtime is not None else manifest.get("protocol_id"),
     }
+    if runtime is not None:
+        identity["ollama_runtime"] = model["ollama_runtime"]
+        identity["ollama_runtime_identity"] = runtime
+    return identity
 
 
 def require_consistent_encoder_identity(
@@ -391,24 +411,31 @@ def _load_authenticated_run_config(
     config_path = full.get("config")
     config_hash = full.get("config_sha256")
     source_config = source.get("config")
+    config_bytes = None
+    if (isinstance(source_config, dict) and set(source_config) == {"path"}
+            and isinstance(config_path, str) and source_config["path"] == config_path
+            and config_hash is None):
+        config_bytes = _git_file_bytes(commit, config_path)
     tracked = checkout.get("tracked_artifact_sha256")
     checkout_config_hash = (
         source_config.get("sha256")
         if isinstance(source_config, dict) and source_config.get("path") == config_path
         else tracked.get(config_path) if isinstance(tracked, dict) else None
     )
-    if (
+    if config_bytes is None and (
         not isinstance(config_path, str)
         or not isinstance(config_hash, str)
         or checkout_config_hash != config_hash
     ):
         raise PhaseEError("Full-run config is not bound by the checkout manifest")
-    if isinstance(source_config, dict) and source_config.get("run_local_path") and run_dir is not None:
+    if config_bytes is not None:
+        pass
+    elif isinstance(source_config, dict) and source_config.get("run_local_path") and run_dir is not None:
         relative = source_config["run_local_path"]
         config_bytes = _verified_file(run_dir, relative, ledger if ledger is not None else {}, expected=config_hash).read_bytes()
     else:
         config_bytes = _git_file_bytes(commit, config_path)
-    if sha256_bytes(config_bytes) != config_hash:
+    if config_hash is not None and sha256_bytes(config_bytes) != config_hash:
         raise PhaseEError("Full-run config differs from the recorded Git checkout")
     try:
         config = json.loads(config_bytes.decode("utf-8"))
@@ -721,7 +748,10 @@ def _validate_verifier_stage(
     environment_path = _verified_file(
         run_dir, environment_relative, ledger, expected=environment_hash
     )
-    identity = load_verifier_model_identity(environment_path, environment_hash)
+    identity = load_verifier_model_identity(environment_path, environment_hash, run_dir=run_dir)
+    if "ollama_runtime" in identity:
+        reference = identity["ollama_runtime"]
+        _verified_file(run_dir, reference["path"], ledger, expected=reference["sha256"])
     if identity["verifier_condition_id"] != condition:
         raise PhaseEError(f"{mode} environment carries another condition")
     model_manifest = validate_sha256(str(manifest.get("model_manifest_sha256", "")), "model manifest")
@@ -732,12 +762,18 @@ def _validate_verifier_stage(
     verifier_config = run_config.get("verifier")
     if not isinstance(verifier_config, dict):
         raise PhaseEError("Authenticated run config lacks verifier settings")
-    prompt_sha = validate_sha256(
-        str(manifest.get("prompt_sha256", "")), f"{mode} producer prompt bundle"
-    )
-    decoding_sha = _verifier_decoding_sha256(run_config)
-    if manifest.get("decoding_sha256") != decoding_sha:
-        raise PhaseEError(f"{mode} verifier decoding differs from run config")
+    fresh_template = f"{verifier_config.get('prompt_revision')}:{mode}"
+    fresh_identity = "template_id" in manifest
+    if fresh_identity:
+        if manifest.get("template_id") != fresh_template:
+            raise PhaseEError(f"{mode} producer template differs from its authenticated config")
+        prompt_sha = decoding_sha = None
+    else:
+        prompt_sha = validate_sha256(
+            str(manifest.get("prompt_sha256", "")), f"{mode} producer prompt bundle")
+        decoding_sha = _verifier_decoding_sha256(run_config)
+        if manifest.get("decoding_sha256") != decoding_sha:
+            raise PhaseEError(f"{mode} verifier decoding differs from run config")
     requests_relative = f"verifier/{mode}/requests.jsonl"
     requests_hash = _manifest_hash(outputs, requests_relative, f"{mode}.outputs")
     requests = load_jsonl(
@@ -750,6 +786,7 @@ def _validate_verifier_stage(
         for row in candidate_rows
     ]
     request_keys = [(row.get("training_seed"), row.get("candidate_id")) for row in requests]
+    requests_by_id = {row.get("candidate_id"): row for row in requests}
     verdict_keys = [(row.get("training_seed"), row.get("candidate_id")) for row in verdicts]
     expected_decoding = _verifier_decoding(run_config)
     def valid_request(row: dict[str, Any]) -> bool:
@@ -758,13 +795,11 @@ def _validate_verifier_stage(
         if not isinstance(candidate, dict) or not isinstance(payload, dict):
             return False
         candidate_sha = sha256_bytes(canonical_json_bytes(candidate))
-        cache_identity = {
-            "model_manifest_sha256": model_manifest,
-            "prompt_sha256": prompt_sha,
-            "decoding_sha256": decoding_sha,
-            "mode": mode,
-            "candidate_sha256": candidate_sha,
-        }
+        request_sha = sha256_bytes(canonical_json_bytes(payload))
+        cache_identity = {"model_manifest_sha256": model_manifest, "mode": mode,
+                          "candidate_sha256": candidate_sha}
+        cache_identity.update({"request_sha256": request_sha} if fresh_identity else
+            {"prompt_sha256": prompt_sha, "decoding_sha256": decoding_sha})
         return (
             row.get("candidate_sha256") == candidate_sha
             and row.get("request_sha256")
@@ -783,8 +818,8 @@ def _validate_verifier_stage(
         or any(
             row.get("condition_id") != condition
             or row.get("protocol_id") != pipeline["protocol_id"]
-            or row.get("prompt_sha256") != prompt_sha
-            or row.get("decoding_sha256") != decoding_sha
+            or (row.get("template_id") != fresh_template if fresh_identity else
+                row.get("prompt_sha256") != prompt_sha or row.get("decoding_sha256") != decoding_sha)
             or row.get("model_manifest_sha256") != model_manifest
             or not valid_request(row)
             for row in requests
@@ -792,8 +827,9 @@ def _validate_verifier_stage(
         or any(
             row.get("condition_id") != condition
             or row.get("protocol_id") != pipeline["protocol_id"]
-            or row.get("prompt_sha256") != prompt_sha
-            or row.get("decoding_sha256") != decoding_sha
+            or ((row.get("template_id") != fresh_template
+                 or row.get("request_sha256") != requests_by_id.get(row.get("candidate_id"), {}).get("request_sha256")) if fresh_identity else
+                row.get("prompt_sha256") != prompt_sha or row.get("decoding_sha256") != decoding_sha)
             for row in verdicts
         )
     ):
@@ -817,7 +853,6 @@ def _validate_verifier_stage(
         raise PhaseEError(f"{mode} verifier environment lacks model evidence")
     tags_path = _verified_file(run_dir, tags_relative, ledger)
     show_path = _verified_file(run_dir, show_relative, ledger)
-    modelfile_path = _verified_file(run_dir, modelfile_relative, ledger)
     if (
         environment_model.get("tags_response_sha256") != sha256_file(tags_path)
         or environment_model.get("show_response_sha256") != sha256_file(show_path)
@@ -826,12 +861,14 @@ def _validate_verifier_stage(
     _validate_stored_model_response(
         load_json(tags_path), load_json(show_path), identity
     )
-    try:
-        cli_modelfile = modelfile_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise PhaseEError(f"{mode} verifier CLI Modelfile is unreadable") from exc
-    if identity["blob_sha256"] not in cli_modelfile:
-        raise PhaseEError(f"{mode} verifier CLI Modelfile names another blob")
+    if "ollama_runtime" not in identity:
+        modelfile_path = _verified_file(run_dir, modelfile_relative, ledger)
+        try:
+            cli_modelfile = modelfile_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise PhaseEError(f"{mode} verifier CLI Modelfile is unreadable") from exc
+        if identity["blob_sha256"] not in cli_modelfile:
+            raise PhaseEError(f"{mode} verifier CLI Modelfile names another blob")
     recovery_prefix = f"inputs/recovery/verifier-{mode}/"
     recovery_cache_paths = [
         path
@@ -944,15 +981,15 @@ def validate_parent_lineage(
     _reject_foreign_run_ids(full, run_id, "full-run manifest")
     _require_fields(
         full,
-        {
+        ({"run_id": run_id} if full.get("schema_version") == "pipeline-run-2" else {
             "run_id": run_id,
             "protocol_id": pipeline["protocol_id"],
             "workflow_id": pipeline["workflow_id"],
             "training_seeds": pipeline["training_seeds"],
-        },
+        }),
         "full-run manifest",
     )
-    if full.get("schema_version") not in {"pipeline-run-1", "phase-b-debug-full-run-1.0"}:
+    if full.get("schema_version") not in {"pipeline-run-1", "pipeline-run-2", "phase-b-debug-full-run-1.0"}:
         raise PhaseEError("Full-run manifest schema is unsupported")
     run_config, legacy_compatibility = _load_authenticated_run_config(
         checkout, full, contract, run_dir=run_dir, ledger=ledger
@@ -1164,14 +1201,8 @@ def validate_parent_lineage(
         if (
             checkpoint_manifest.get("split_id") != "CODE-SPLIT-1"
             or checkpoint_manifest.get("split_manifest_sha256") != split_manifest_sha
-            or checkpoint_manifest.get("base_model")
-            != training_config.get("base_model")
-            or checkpoint_manifest.get("base_model_revision")
-            != training_config.get("base_model_revision")
-            or checkpoint_manifest.get("max_span_width")
-            != training_config.get("max_span_width")
-            or checkpoint_manifest.get("context_between_spans")
-            != training_config.get("context_between_spans")
+            or ("config_sha256" in full and any(checkpoint_manifest.get(field) != training_config.get(field)
+                for field in ("base_model", "base_model_revision", "max_span_width", "context_between_spans")))
             or checkpoint_manifest.get("archive_sha256") != archive_sha
             or checkpoint_manifest.get("acquisition_manifest_sha256")
             != ledger[acquisition_relative]["sha256"]
@@ -1179,7 +1210,8 @@ def validate_parent_lineage(
             != ledger[paths["prepared_train"]]["sha256"]
             or checkpoint_manifest.get("development_jsonl_sha256")
             != ledger[paths["prepared_development"]]["sha256"]
-            or checkpoint_manifest.get("config_sha256") != full["config_sha256"]
+            or (checkpoint_manifest.get("config_sha256") != full["config_sha256"]
+                if "config_sha256" in full else checkpoint_manifest.get("config") != full.get("config"))
             or checkpoint_manifest.get("source_commit")
             != checkout["source"]["commit"]
         ):
@@ -1229,15 +1261,17 @@ def validate_parent_lineage(
         selected_metrics = summary.get("selected_metrics")
         if (
             summary.get("status") != "completed"
-            or summary.get("canonical_mode") is not True
+            or (summary.get("canonical_mode") is not True
+                if full.get("schema_version") != "pipeline-run-2" else
+                summary.get("completed_steps") != training_config.get("max_steps"))
             or summary.get("seed") != seed
             or summary.get("test_evaluated") is not False
-            or summary.get("model_name") != checkpoint_manifest.get("base_model")
-            or summary.get("model_revision")
-            != checkpoint_manifest.get("base_model_revision")
+            or (full.get("schema_version") != "pipeline-run-2" and (
+                summary.get("model_name") != checkpoint_manifest.get("base_model")
+                or summary.get("model_revision") != checkpoint_manifest.get("base_model_revision")
+                or summary.get("selection_metric") != "triple_f1"))
             or summary.get("selected_step")
             != checkpoint_manifest.get("checkpoint_step")
-            or summary.get("selection_metric") != "triple_f1"
             or not isinstance(selected_metrics, dict)
             or selected_metrics.get("triple_f1")
             != checkpoint_manifest.get("selected_metric_value")
@@ -1262,8 +1296,8 @@ def validate_parent_lineage(
                 )
         checkpoint_manifest_hashes[seed] = ledger[checkpoint_manifest_relative]["sha256"]
         encoder_identities.append({
-            "base_model": checkpoint_manifest.get("base_model"),
-            "base_model_revision": checkpoint_manifest.get("base_model_revision"),
+            "base_model": training_config["base_model"],
+            "base_model_revision": training_config["base_model_revision"],
         })
         train_manifest = load_json(_verified_file(
             run_dir, f"manifests/model-train-live-seed-{seed}.json", ledger
@@ -1282,7 +1316,8 @@ def validate_parent_lineage(
                 "training_seed": seed,
                 "expected_checkpoint_dir": f"checkpoints/seed-{seed}",
                 "final_test_selection_forbidden": True,
-                "recipe": training_config,
+                **({"config": full["config"]} if full.get("schema_version") == "pipeline-run-2" else
+                   {"recipe": training_config}),
             },
             f"seed-{seed} training manifest",
         )
@@ -1406,7 +1441,14 @@ def validate_parent_lineage(
     qwen_fields = ("name", "tag_digest", "blob_sha256", "details", "model_path")
     if any(simple_model[field] != corrective_model[field] for field in qwen_fields):
         raise PhaseEError("Simple and corrective stages use different Qwen identities")
-    if (
+    if simple_model.get("ollama_runtime") != corrective_model.get("ollama_runtime"):
+        raise PhaseEError("Simple and corrective stages use different Ollama server runtimes")
+    if full.get("schema_version") == "pipeline-run-2":
+        if full.get("ollama_runtime") != corrective_model.get("ollama_runtime"):
+            raise PhaseEError("Full-run manifest and verifier stages disagree about Qwen runtime")
+        reference = full["ollama_runtime"]
+        _verified_file(run_dir, reference["path"], ledger, expected=reference["sha256"])
+    elif (
         full.get("ollama_model") != corrective_model["name"]
         or full.get("model_blob_sha256") != corrective_model["blob_sha256"]
         or full.get("run_local_model_blob") != corrective_model["model_path"]
@@ -1634,7 +1676,7 @@ def fetch_ollama_json(
 
 
 def fetch_matching_model(
-    ollama_url: str, expected: dict[str, Any]
+    ollama_url: str, expected: dict[str, Any], *, check_runtime: bool = True
 ) -> tuple[dict[str, Any], bytes, bytes]:
     origin = validate_ollama_url(ollama_url)
     tags, tags_bytes, tags_hash = fetch_ollama_json("GET", origin + "/api/tags")
@@ -1672,18 +1714,35 @@ def fetch_matching_model(
     } if isinstance(modelfile, str) else set()
     if observed_blobs != {expected["blob_sha256"]}:
         raise PhaseEError("Ollama blob identity differs from the same-run verifier")
-    evidence = {
-        "identity_verified": True,
-        "name": expected["name"],
-        "tag_digest": observed_tag,
-        "blob_sha256": expected["blob_sha256"],
-        "details": observed_details,
-        "verifier_environment_sha256": expected["verifier_environment_sha256"],
-        "verifier_condition_id": expected["verifier_condition_id"],
-        "verifier_protocol_id": expected["verifier_protocol_id"],
-        "tags_response_sha256": tags_hash,
-        "show_response_sha256": show_hash,
-    }
+    runtime_evidence = {}
+    if "ollama_runtime_identity" in expected:
+        from utils.verifier.runtime import runtime_identity
+        from utils.common.artifact_io import DataContractError
+        stored_runtime = expected["ollama_runtime_identity"]
+        if check_runtime:
+            version, _version_bytes, _version_hash = fetch_ollama_json("GET", origin + "/api/version")
+        else:
+            # The enclosing stage checks the actual server before new calls.
+            # Per-answer checks still authenticate tag/blob/defaults without
+            # duplicating the same version request and metadata thousands of times.
+            version = {"version": stored_runtime.get("server_version")}
+        try:
+            observed_runtime = runtime_identity(origin, version, show, expected)
+        except DataContractError as exc:
+            raise PhaseEError(str(exc)) from exc
+        if observed_runtime != stored_runtime:
+            raise PhaseEError("Ollama server/model runtime differs from the same-run verifier")
+        runtime_evidence = {"ollama_runtime_sha256": expected["ollama_runtime"]["sha256"]}
+    evidence = {"tags_response_sha256": tags_hash, "show_response_sha256": show_hash}
+    if runtime_evidence:
+        evidence.update(runtime_evidence)
+    else:
+        evidence.update({"identity_verified": True, "name": expected["name"],
+            "tag_digest": observed_tag, "blob_sha256": expected["blob_sha256"],
+            "details": observed_details,
+            "verifier_environment_sha256": expected["verifier_environment_sha256"],
+            "verifier_condition_id": expected["verifier_condition_id"],
+            "verifier_protocol_id": expected["verifier_protocol_id"]})
     return evidence, tags_bytes, show_bytes
 
 
@@ -1866,6 +1925,17 @@ def _validate_stored_model_response(
     } if isinstance(modelfile, str) else set()
     if observed_blobs != {expected["blob_sha256"]}:
         raise ModelEvidenceError("Stored Ollama blob identity differs from the run model")
+    if "ollama_runtime_identity" in expected:
+        from utils.verifier.runtime import runtime_identity
+        from utils.common.artifact_io import DataContractError
+        runtime = expected["ollama_runtime_identity"]
+        try:
+            observed = runtime_identity(runtime["origin"],
+                {"version": runtime["server_version"]}, show, expected)
+        except (DataContractError, KeyError) as exc:
+            raise ModelEvidenceError("Stored Ollama runtime evidence is malformed") from exc
+        if observed != runtime:
+            raise ModelEvidenceError("Stored Ollama generation defaults differ from the run runtime")
 
 
 def validate_model_check(
@@ -1935,6 +2005,8 @@ def validate_model_check(
         "verifier_condition_id": expected_model["verifier_condition_id"],
         "verifier_protocol_id": expected_model["verifier_protocol_id"],
     }
+    if "ollama_runtime_identity" in expected_model:
+        expected_evidence = {"ollama_runtime_sha256": expected_model["ollama_runtime"]["sha256"]}
     for field, expected in expected_evidence.items():
         if evidence.get(field) != expected:
             raise ModelEvidenceError(
@@ -2007,6 +2079,13 @@ def run_stage(
     return validation
 
 
+def persisted_model_identity(model: dict[str, Any]) -> dict[str, Any]:
+    """Keep the shared runtime reference; its loaded contents stay in memory."""
+    if "ollama_runtime" in model:
+        return {key: model[key] for key in ("ollama_runtime", "verifier_environment_sha256") if key in model}
+    return {key: value for key, value in model.items() if key != "ollama_runtime_identity"}
+
+
 def _preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": preflight["run_id"],
@@ -2022,7 +2101,7 @@ def _preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
             }
             for name, value in preflight["graphs"].items()
         },
-        "model_identity": {
+        "model_identity": persisted_model_identity({
             key: preflight["model_identity"][key]
             for key in (
                 "name",
@@ -2032,6 +2111,7 @@ def _preflight_identity(preflight: dict[str, Any]) -> dict[str, Any]:
                 "verifier_environment_sha256",
                 "verifier_condition_id",
                 "verifier_protocol_id",
-            )
-        },
+            ) + tuple(key for key in ("ollama_runtime",)
+                      if key in preflight["model_identity"])
+        }),
     }

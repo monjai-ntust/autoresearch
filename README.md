@@ -5,6 +5,8 @@ verifies extracted triples with local Qwen, and reports typed strict quality.
 Separate commands run the matched encoder comparison and downstream Graph RAG.
 Start with the [code-reading guide](docs/code-reading-guide.md), then the
 [workflow contract](docs/workflow.md) or [comparison protocol](docs/encoder-comparison.md).
+See [reproducibility](docs/reproducibility.md) for the fresh-run numerical policy
+and external Ollama setup.
 
 Install the pinned environment and validate without contacting a model:
 
@@ -46,9 +48,12 @@ primitives, `resources/` contains live configurations/prompts/schemas, and
 fault fixtures. Python 3.10 or newer is required; accelerator compatibility is
 determined by the locked environment and the recorded actual runtime.
 
-The scientific behavior remains frozen: CODE-SPLIT-1, seeds 42–49, typed strict
-scoring, development-only selection, literal prompts and the five-mode RAG
-evaluator. Historical Tables 1/3 are not regenerated. Expanded Graph RAG is a
+CODE-SPLIT-1, seeds 42–49, typed strict scoring, development-only selection,
+literal prompts and five-mode answer matching are preserved. Fresh execution
+enforces strict Torch determinism; RAG uses graph-first-appearance traversal
+and an explicit generation seed. These prospective fixes can change results
+from the historical execution; no reported statistic is an execution target.
+Historical Tables 1/3 are not regenerated. Expanded Graph RAG is a
 diagnostic/oracle evaluation with all eligible CODE questions and a fresh
 `part-of` subset; it is not the paper's original ten-question Table 2. Table 4,
 zh, SciERC and CUAD experiments are outside this artifact.

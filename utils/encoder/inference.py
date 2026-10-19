@@ -51,7 +51,8 @@ def _live_inference_records(
     from utils.encoder.network import BertKGExtractor
 
     training = config.value["training"]
-    from utils.encoder.runtime import record_runtime
+    from utils.encoder.runtime import configure_numerics, record_model_runtime, record_runtime
+    configure_numerics()
     record_runtime(checkpoint_blob_path.parent.parent.parent / 'data-prepared')
     max_length = training["max_length"]
     max_span_width = training["max_span_width"]
@@ -87,6 +88,7 @@ def _live_inference_records(
             torch.nn.Linear(hidden_size, NUM_RELATIONS),
         )
     model = model.to(device)
+    record_model_runtime(checkpoint_blob_path.parent.parent.parent / 'data-prepared', model)
     state = torch.load(str(checkpoint_blob_path), map_location=device)
     if not isinstance(state, dict) or set(state) != {"encoder", "step", "metrics"}:
         raise DataContractError("fresh inference requires the authenticated encoder checkpoint")

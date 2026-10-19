@@ -20,7 +20,7 @@ from utils.common.constants import (
     WORKFLOW_ID,
 )
 from utils.common.artifact_io import DataContractError, load_json
-from utils.common.paths import resolve_tracked_path
+from utils.common.paths import discover_source_root, resolve_tracked_path
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
@@ -43,6 +43,10 @@ class PipelineConfig:
     @property
     def paths(self) -> dict[str, str]:
         return self.value["runtime_paths"]
+
+    @property
+    def source_path(self) -> str:
+        return self.path.relative_to(discover_source_root(self.path)).as_posix()
 
 
 def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineConfig:
