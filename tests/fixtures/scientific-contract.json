@@ -13,7 +13,7 @@
     "utils/encoder_comparison/network.py": "325bf46496432c3f9ebc83291568509149e3cbb13807a9d6fc6e6486d614cee9",
     "utils/evaluation/metrics.py": "49ce9c2e2cedf4de407526256bfc6ee8ea6888a7f5d589065014c8a07a31b003",
     "utils/evaluation/statistics.py": "feaf91289d3cdf71352554bb1665cbf4cd14d709e47163e63f6adbe58edaf323",
-    "utils/rag/evaluator.py": "6965de571b90fdadacf42d105ffe66a96fa7ecd356579dd4d78ce9802b548d8b"
+    "utils/rag/evaluator.py": "74f4961c835e0bb5dfb501536efa5a953853770236605c8b150e403395289f98"
   },
   "relocated_scientific_definitions": [
     {
@@ -104,7 +104,7 @@
     {
       "path": "utils/verifier/requests.py",
       "name": "_prompt_bundle",
-      "ast_sha256": "cc66f432f8a7b93df01bb08b998ddafa649a0a264474cf331fe2048eaa366fce"
+      "ast_sha256": "0744aeec9681206aa67783d473e98a8728059a0c18756698d3e7cfb308ddda7f"
     },
     {
       "path": "utils/verifier/requests.py",
@@ -172,5 +172,21 @@
         "004e1e22fc695126415a481a17763da169bfffd488dd7e5f2c70fd80a975f87a"
       ]
     }
-  ]
+  ],
+  "rag_observation": {
+    "baseline_source_commit": "c4727f5ae5af2bae467868a551fe31c2c5f6a45e",
+    "baseline_module_sha256": "6965de571b90fdadacf42d105ffe66a96fa7ecd356579dd4d78ce9802b548d8b",
+    "baseline_module_ast_sha256": "be8e0a781ebd1e0a822ca6806f4595b0b2942918794bfed4b3a5aa937d5f68d0",
+    "observer_guard_ast_sha256": [
+      "f08b0719225b27d02ef8994e837342453f2e29cf0fbb7ab974e0f1393cb131a7",
+      "572c83c5b17404520c0de190b111f7040f10cd85514408e0545b1998dc5df12d",
+      "245f05a7aaa29b2b7c8df9836ae5b925cdc8fb6508f96d1a849190707d542c9d",
+      "fc70fa5d26f37d6eddf37b5d716de60f7e8e8f686547dc353b78ba6a08f2198b",
+      "3c9e75739762e404003750451ae5d315ed9b9b2f7c2ca59a85cad88cefa90443"
+    ]
+  },
+  "cloned_resource_checks_removed": {
+    "baseline_prompt_bundle_ast_sha256": "cc66f432f8a7b93df01bb08b998ddafa649a0a264474cf331fe2048eaa366fce",
+    "change": "Remove cloned resource and compiled bundle hash gates; retain exact actual prompt/schema bundle identity."
+  }
 }

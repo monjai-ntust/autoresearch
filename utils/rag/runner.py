@@ -732,13 +732,12 @@ def _validate_verifier_stage(
     verifier_config = run_config.get("verifier")
     if not isinstance(verifier_config, dict):
         raise PhaseEError("Authenticated run config lacks verifier settings")
-    prompt_sha = verifier_config.get(f"{mode}_bundle_sha256")
+    prompt_sha = validate_sha256(
+        str(manifest.get("prompt_sha256", "")), f"{mode} producer prompt bundle"
+    )
     decoding_sha = _verifier_decoding_sha256(run_config)
-    if (
-        manifest.get("prompt_sha256") != prompt_sha
-        or manifest.get("decoding_sha256") != decoding_sha
-    ):
-        raise PhaseEError(f"{mode} verifier prompt/decoding differs from run config")
+    if manifest.get("decoding_sha256") != decoding_sha:
+        raise PhaseEError(f"{mode} verifier decoding differs from run config")
     requests_relative = f"verifier/{mode}/requests.jsonl"
     requests_hash = _manifest_hash(outputs, requests_relative, f"{mode}.outputs")
     requests = load_jsonl(

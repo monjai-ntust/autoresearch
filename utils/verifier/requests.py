@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from utils.common.config import PipelineConfig
 from utils.common.constants import PROTOCOL_ID
-from utils.common.artifact_io import DataContractError, canonical_json_bytes, iter_jsonl, load_json, sha256_file
+from utils.common.artifact_io import DataContractError, canonical_json_bytes, iter_jsonl, load_json
 from utils.common.paths import discover_source_root, resolve_tracked_path
 from utils.common.records import Candidate, EntitySpan
 
@@ -58,17 +58,6 @@ def _prompt_bundle(config: PipelineConfig, mode: str) -> PromptBundle:
     system_path = resolve_tracked_path(source_root, verifier["system_prompt"])
     instruction_path = resolve_tracked_path(source_root, verifier[f"{mode}_prompt"])
     schema_path = resolve_tracked_path(source_root, verifier[f"{mode}_response_schema"])
-    expected_files = {
-        system_path: verifier["system_prompt_sha256"],
-        instruction_path: verifier[f"{mode}_prompt_sha256"],
-        schema_path: verifier[f"{mode}_response_schema_sha256"],
-    }
-    for path, expected in expected_files.items():
-        actual = sha256_file(path)
-        if actual != expected:
-            raise DataContractError(
-                f"tracked verifier resource hash mismatch for {path.name}: {actual}"
-            )
     system = _read_utf8(system_path)
     instruction = _read_utf8(instruction_path)
     schema = load_json(schema_path)
@@ -83,8 +72,6 @@ def _prompt_bundle(config: PipelineConfig, mode: str) -> PromptBundle:
         "response_schema": schema,
     }
     digest = _sha256_value(identity)
-    if digest != verifier[f"{mode}_bundle_sha256"]:
-        raise DataContractError(f"config verifier {mode} prompt-bundle hash is stale")
     return PromptBundle(mode, system, instruction, schema, digest)
 
 def _load_sentences(path: Path) -> dict[str, PreparedSentence]:

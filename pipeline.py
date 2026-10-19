@@ -11,6 +11,10 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from utils.common.process_identity import capture_process_start
+if __name__ == "__main__":
+    capture_process_start("pipeline.py")
+
 from utils.common.artifact_io import DataContractError
 from utils.common.config import load_pipeline_config
 from utils.common.execution import exclusive_run

@@ -80,6 +80,8 @@ flowchart LR
    kernel: question order, retrieval, literal prompt, non-thinking decoding,
    normalization and answer matching. [journal.py](../utils/rag/journal.py)
    saves ordered occurrences and original answers around that kernel.
+   [requests.py](../utils/rag/requests.py) observes the actual selected context
+   and verifies the saved request without performing retrieval again.
 
 ## Records and one real trace
 
@@ -150,6 +152,9 @@ active recorded dispatch; canonical and comparison namespaces stay separate.
 Qwen weight SHA-256/byte size, model/quantization settings, Python/Ollama/Torch/
 Transformers and numerical backend settings remain visible. Historical reference
 digests, hardware and branch ancestry are not fresh admission criteria.
+Fresh source identity comes from the clean Git commit, without separate
+integrity hashes for cloned source files. Configuration snapshots and
+input/artifact/request/model hashes still bind actual same-run inputs and results.
 
 Repeat a command unchanged after failure. Complete outputs are authenticated;
 unsaved steps can run again; pure finalization requires identical existing
@@ -164,6 +169,51 @@ Missing completed journals, changed outputs or a prediction ledger without its
 original producer receipt require explicit disposition; they are never silently
 adopted or recreated. RAG continuation keeps recorded condition time across
 segments and leaves completed output bytes unchanged.
+
+### RAG request and process evidence
+
+Under `output/<run-id>/table2-code-all/`, each condition's
+`calls/<condition>/requests.json` stores each full prompt once, its question/mode
+identity, ordered retrieved triples and included triples, retrieved sentences
+and included source excerpts. Retrieved graph lists retain the evaluator's
+15-fact return cap; one-hop/two-hop include those lists and hybrid includes the
+first five one-hop facts. Text retrieval retains up to three sentences, with
+the original 200-character excerpt boundary; hybrid includes the first excerpt
+and preserves its empty source bullet when nothing is retrieved. Observation
+does not sort facts, repeat retrieval, force a seed or change decoding options.
+
+The plan hashes UTF-8 prompt bytes, canonical ordered-context JSON without a
+trailing newline, and the exact outgoing request JSON. Its common
+`request_template` retains role/model/options once. `request_bytes` reconstructs
+the original request serialization, including ASCII escapes, field order and
+spacing, from saved evidence alone. Each occurrence's `001-request.json` is
+durable before dispatch; its answer and model proof bind that request record's
+hash. Later attempts use the next attempt number and retain earlier failures
+and interrupted dispatch records. Requests reference a common
+`calls/producers/<process-id>.json` record for the actual producing process and
+same-run source/model identity. The plan's retrieval producer and a resumed
+attempt's dispatch producer can therefore differ without changing saved context.
+
+[process_identity.py](../utils/common/process_identity.py) freezes an observation
+at entry and retains the interpreter's hash-randomization/isolation flags.
+`PYTHONHASHSEED` observed in the current environment is labelled separately from
+startup evidence: changing it after Python starts does not reseed that process.
+Linux records the initial exec setting from `/proc/self/environ` when available;
+unavailable or ambiguous evidence remains explicit. Other platforms do not claim
+an original environment setting that Python cannot expose. The documented `-I`
+commands ignore `PYTHONHASHSEED`, including an inherited `0`; enabled random hash
+secrets remain unavailable. Exact selected order in the plan is the durable
+evidence even when that secret cannot be recovered.
+
+Completed historical journals may replay their validated original responses
+without adding new metadata. Their missing ordered-context or startup evidence
+stays unavailable. An unfinished historical plan lacks the evidence required
+for new dispatch and fails closed; continuation does not reconstruct past
+context or relabel a later process as its producer.
+
+Completed outputs retain their original measured times. Future fresh calls
+measure the current execution, including the added journal writes; the offline
+replay proof does not claim identical live wall time or model answers.
 
 ## Read the automatic paper reports
 
@@ -210,8 +260,12 @@ old partial workflows cannot use that recovery path.
 [test_scientific_bytes.py](../tests/test_scientific_bytes.py) checks independent
 baseline definition/optimizer-loop hashes, immutable scientific module and
 prompt/schema bytes, old parsed worker values, and raw graph/projection/question/
-prompt/result/statistical replay. Fixed Python hash seed preserves characterized
-set iteration order rather than normalizing results. Other tests cover tiny CPU
+prompt/result/statistical replay. Replay fixtures fix the Python hash seed to
+preserve characterized set iteration order; production does not reseed or
+normalize retrieval. [test_rag_requests.py](../tests/test_rag_requests.py) checks
+actual request bytes, ordered inclusion limits and unchanged answer scores;
+process and journal tests cover startup evidence, resumed producers and request
+corruption. Other tests cover tiny CPU
 tensor/RNG/restart cases, typed scoring, lineage tampering and continuation.
 AST checks parse source bytes using Python's source encoding; JSON fixtures use
 UTF-8 explicitly. The paired t-test's standard deviation, statistic and p-value

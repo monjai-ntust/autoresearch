@@ -13,6 +13,29 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class ScientificBytesTests(unittest.TestCase):
+    def test_rag_observation_leaves_the_original_scientific_ast_unchanged(self):
+        contract=json.loads((ROOT/'tests/fixtures/scientific-contract.json').read_text(encoding='utf-8'))['rag_observation']
+        tree=ast.parse((ROOT/'utils/rag/evaluator.py').read_bytes())
+        function=next(node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name=='evaluate')
+        self.assertEqual(ast.dump(function.args.kwonlyargs.pop(),include_attributes=False),
+                         ast.dump(ast.arg(arg='request_observer'),include_attributes=False))
+        self.assertEqual(ast.dump(function.args.kw_defaults.pop(),include_attributes=False),
+                         ast.dump(ast.Constant(value=None),include_attributes=False))
+        condition=ast.parse('request_observer is not None',mode='eval').body
+        hooks=[]
+        class RemoveObservations(ast.NodeTransformer):
+            def visit_If(self,node):
+                if ast.dump(node.test,include_attributes=False)==ast.dump(condition,include_attributes=False):
+                    hooks.append(hashlib.sha256(ast.dump(node,include_attributes=False).encode()).hexdigest())
+                    return None
+                return self.generic_visit(node)
+        RemoveObservations().visit(function)
+        self.assertEqual(hooks,contract['observer_guard_ast_sha256'])
+        self.assertEqual(len(hooks),5)
+        self.assertFalse(any(isinstance(node,ast.Name) and node.id=='request_observer' for node in ast.walk(tree)))
+        self.assertEqual(hashlib.sha256(ast.dump(tree,include_attributes=False).encode()).hexdigest(),
+                         contract['baseline_module_ast_sha256'])
+
     def test_scientific_definitions_and_training_loops_are_unchanged(self):
         contract=json.loads((ROOT/'tests/fixtures/scientific-contract.json').read_text(encoding='utf-8'))
         for record in contract['relocated_scientific_definitions']:

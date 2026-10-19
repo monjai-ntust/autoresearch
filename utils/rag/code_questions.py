@@ -215,8 +215,6 @@ def validate_execution_snapshot(
         != summary["method_sha256"]
     ):
         raise runner.PhaseEError("CODE question method hash changed after preflight")
-    if runner.sha256_file(runner.CONTRACT_PATH) != summary["base_contract_sha256"]:
-        raise runner.PhaseEError("Base Table-2 contract changed after preflight")
     if build_identity(summary["run_id"], source, summary) != identity:
         raise runner.PhaseEError("CODE question child identity changed after preflight")
     _run_dir, current_preflight, current_projections, _graphs = (

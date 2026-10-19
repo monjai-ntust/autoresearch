@@ -594,15 +594,6 @@ def _checkpoint_manifest(
             layout.resolve("data-prepared/development.jsonl", must_exist=True)
         ),
         "config_sha256": selection.config.sha256,
-        "trainer_sha256": sha256_file(
-            layout.source_root / "utils/encoder_comparison/trainer.py"
-        ),
-        "data_adapter_sha256": sha256_file(
-            layout.source_root / "utils/encoder_comparison/data.py"
-        ),
-        "model_helper_sha256": sha256_file(
-            layout.source_root / "utils/encoder_comparison/network.py"
-        ),
         "model_cache_manifest": CACHE_MANIFEST_RELATIVE,
         "model_cache_manifest_sha256": cache_identity["cache_manifest_sha256"],
         "model_cache_tree_sha256": cache_identity["cache_tree_sha256"],

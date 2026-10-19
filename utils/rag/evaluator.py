@@ -169,6 +169,7 @@ def evaluate(
     ollama_model: str,
     llm_call: Callable[[str, str, str], str] = call_llm,
     question_panel: list[dict[str, Any]] | None = None,
+    request_observer=None,
 ) -> dict[str, Any]:
     """Run the frozen five-mode transform over authenticated in-memory inputs."""
     questions = generate_questions(records) if question_panel is None else question_panel
@@ -181,12 +182,21 @@ def evaluate(
     t0 = time.time()
     for q in questions:
         prompt1 = f"Answer in 1-2 words. {q['question']}"
+        if request_observer is not None:
+            request_observer(question=q.copy(), mode="llm_only", prompt=prompt1,
+                             retrieved_triples=[], included_triples=[],
+                             retrieved_sentences=[], source_excerpts=[])
         ans1 = llm_call(ollama_url, ollama_model, prompt1)
 
         retrieved_sents = retrieve_sentences(records, q["head"] + " " + q["tail"])
         context2 = "\n".join(f"- {s[:200]}" for s in retrieved_sents)
         prompt2 = (f"Based on these scientific sentences:\n{context2}\n\n"
                    f"Answer in 1-2 words: {q['question']}")
+        if request_observer is not None:
+            request_observer(question=q.copy(), mode="text_retrieval", prompt=prompt2,
+                             retrieved_triples=[], included_triples=[],
+                             retrieved_sentences=list(retrieved_sents),
+                             source_excerpts=[s[:200] for s in retrieved_sents])
         ans2 = llm_call(ollama_url, ollama_model, prompt2)
 
         kg_1hop = retrieve_from_kg(kg, q["head"], hops=1)
@@ -195,6 +205,10 @@ def evaluate(
         context3 = "\n".join(f"- {t}" for t in kg_1hop)
         prompt3 = (f"Based on this knowledge graph:\n{context3}\n\n"
                    f"Answer in 1-2 words: {q['question']}")
+        if request_observer is not None:
+            request_observer(question=q.copy(), mode="kg_1hop", prompt=prompt3,
+                             retrieved_triples=list(kg_1hop), included_triples=list(kg_1hop),
+                             retrieved_sentences=[], source_excerpts=[])
         ans3 = llm_call(ollama_url, ollama_model, prompt3)
 
         kg_2hop = retrieve_from_kg(kg, q["head"], hops=2)
@@ -203,6 +217,10 @@ def evaluate(
         context4 = "\n".join(f"- {t}" for t in kg_2hop)
         prompt4 = (f"Based on this knowledge graph:\n{context4}\n\n"
                    f"Answer in 1-2 words: {q['question']}")
+        if request_observer is not None:
+            request_observer(question=q.copy(), mode="kg_2hop", prompt=prompt4,
+                             retrieved_triples=list(kg_2hop), included_triples=list(kg_2hop),
+                             retrieved_sentences=[], source_excerpts=[])
         ans4 = llm_call(ollama_url, ollama_model, prompt4)
 
         top_sent = retrieved_sents[0][:200] if retrieved_sents else ""
@@ -210,6 +228,10 @@ def evaluate(
         context5 += f"\n\nSource text:\n- {top_sent}"
         prompt5 = (f"Based on this evidence:\n{context5}\n\n"
                    f"Answer in 1-2 words: {q['question']}")
+        if request_observer is not None:
+            request_observer(question=q.copy(), mode="hybrid", prompt=prompt5,
+                             retrieved_triples=list(kg_1hop), included_triples=list(kg_1hop[:5]),
+                             retrieved_sentences=list(retrieved_sents), source_excerpts=[top_sent])
         ans5 = llm_call(ollama_url, ollama_model, prompt5)
 
         answers = [ans1, ans2, ans3, ans4, ans5]

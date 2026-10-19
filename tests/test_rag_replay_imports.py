@@ -221,6 +221,37 @@ class RagReplayImportTests(unittest.TestCase):
                             responses_path=run_dir / f"{prefix}/responses.jsonl",
                             verdicts_path=run_dir / artifacts[f"{mode}_verdicts"],
                         )
+                        # Actual producer/request identities remain authoritative
+                        # when an unused cloned-config digest is absent or stale.
+                        decoration = f"{mode}_bundle_sha256"
+                        for pin in (None, "d" * 64):
+                            with self.subTest(mode=mode, config_decoration=pin):
+                                if pin is None:
+                                    config["verifier"].pop(decoration)
+                                else:
+                                    config["verifier"][decoration] = pin
+                                self.assertEqual(validate()[0], manifest)
+                        config["verifier"][decoration] = "c" * 64
+
+                        # Refresh only the synthetic producer hashes so rejection
+                        # exercises prompt identity, rather than a stale file hash.
+                        for relative, original in ((f"{prefix}/requests.jsonl", request),
+                                                   (artifacts[f"{mode}_verdicts"], verdict)):
+                            with self.subTest(mode=mode, changed_prompt=relative):
+                                atomic_write_jsonl(run_dir / relative,
+                                                   [{**original, "prompt_sha256": "d" * 64}])
+                                outputs[relative] = runner.sha256_file(run_dir / relative)
+                                atomic_write_json(run_dir / artifacts[f"{mode}_verifier_manifest"], manifest)
+                                ledger.clear()
+                                replay.reset_mock()
+                                with self.assertRaisesRegex(runner.PhaseEError, "request/verdict lineage"):
+                                    validate()
+                                replay.assert_not_called()
+                                atomic_write_jsonl(run_dir / relative, [original])
+                                outputs[relative] = runner.sha256_file(run_dir / relative)
+                                atomic_write_json(run_dir / artifacts[f"{mode}_verifier_manifest"], manifest)
+                                ledger.clear()
+                        self.assertEqual(validate()[0], manifest)
                         for error_class in REPLAY_ERRORS:
                             error = error_class("invalid replay")
                             replay.side_effect = error

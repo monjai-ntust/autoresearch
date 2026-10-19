@@ -10,6 +10,7 @@ from unittest import mock
 from utils.common import config as config_module
 from utils.common.artifact_io import DataContractError
 from utils.verifier.verifier import _environment_manifest
+from utils.verifier.requests import _prompt_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,6 +50,31 @@ class CheckoutRequirementsTests(unittest.TestCase):
         value['training_seeds'] = [42]
         with self.assertRaisesRegex(DataContractError, 'training_seeds'):
             self.load(value)
+
+    def test_cloned_resource_hash_decorations_do_not_gate_actual_prompt_identity(self):
+        original = self.load(self.original())
+        value = self.original()
+        for field in list(value['verifier']):
+            if field.endswith(('_prompt_sha256', '_response_schema_sha256', '_bundle_sha256')):
+                value['verifier'].pop(field)
+        loaded = self.load(value)
+        for mode in ('simple', 'corrective'):
+            with self.subTest(mode=mode), mock.patch(
+                    'utils.common.artifact_io.sha256_file', side_effect=AssertionError('cloned file hashing')):
+                actual = _prompt_bundle(loaded, mode)
+            self.assertEqual(actual, _prompt_bundle(original, mode))
+
+    def test_comparison_uses_semantic_config_without_a_cloned_file_hash_pin(self):
+        from utils.encoder_comparison import config as comparison
+        path = ROOT / 'resources/configs/encoder-comparison.json'
+        value = json.loads(path.read_text(encoding='utf-8'))
+        value['canonical_pipeline_config'].pop('sha256')
+        actual_hash = comparison.sha256_file
+        with mock.patch.object(comparison, 'load_json', return_value=value), \
+             mock.patch.object(comparison, 'sha256_file', wraps=actual_hash) as hashes:
+            loaded = comparison.load_comparison_config(ROOT)
+        self.assertEqual(loaded.pipeline.value, self.original())
+        hashes.assert_called_once_with(path)
 
     def test_entrypoints_disable_bytecode_without_a_required_cli_flag(self):
         for script in ('pipeline.py', 'encoder_comparison.py', 'rag.py'):
