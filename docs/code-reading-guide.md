@@ -229,6 +229,22 @@ final-test values do not select a model or change an experiment. Corpus reports
 include split/country/span/relation distributions and alignment eligibility;
 emitted unique triples remain separate from candidate count and graph counts.
 
+The matrix report applies the four predeclared paired-seed comparisons from
+the comparison configuration. [comparison_statistics.py](../utils/evaluation/comparison_statistics.py)
+uses the existing exact two-sided Wilcoxon test and Holm adjustment, plus the
+approved 10,000 shared PCG64 seed draws and linear-percentile 95% intervals.
+Missing arms or seed values withhold the complete contrast family. Reports
+authenticate each arm identity and identical split/gold hashes. These intervals
+describe training-seed variation on the fixed test set; recorded sentence-like
+source IDs do not establish independent regulation-document clusters.
+
+Canonical reports also retain the development-only threshold trace. Saved
+candidate confidence and original emitted keys supply the joint selected-cutoff
+plus simple-verifier row, percentage-point changes and the descriptive 0.5
+cutoff sensitivity rows. Strict keys collapse after filtering and all gold
+denominators remain. These views change neither the four-condition scientific
+scorer and its significance family nor the chosen operating point.
+
 Training reports sum recorded final-invocation seconds per seed into wall hours
 and separately expose original finished process timings, including failed
 attempts and earlier invocations where retained. These views overlap and must
@@ -240,11 +256,17 @@ as a cache hit on resume. RAG reports full and `part-of` correct/total/hit rates
 for every mode/condition, canonical versus projected graph scale and retained
 condition wall time. Gold is a nondeployable oracle; these diagnostics are not
 the paper's original ten-question Table 2.
+RAG reports recount frozen answer-hit flags and record paired one-hop/hybrid
+gains/losses and the union of one-hop/two-hop hits lost by hybrid. Pairing keeps
+the exact question and reference answer; differing fact budgets prevent an
+isolated causal interpretation of added text.
 
 Disk weight bytes are not resident/peak memory. Unmeasured GPU utilization,
 energy/money, per-call RAG timing/tokens, isolated graph construction timing and
-unimplemented comparison inferential analysis remain unavailable. Reports
+underlying-document uncertainty remain unavailable. Reports
 neither import historical estimates nor launch a new measurement experiment.
+Completed reports remain immutable: new report content cannot overwrite a
+previous receipt or alter any completed scientific output.
 
 ## Verification and its boundary
 

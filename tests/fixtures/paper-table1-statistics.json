@@ -1,0 +1,519 @@
+{
+  "provenance": {
+    "source": "project-state/results/output-archive/runs/paper-tables-comparison-review-20261012/table1-analysis.json",
+    "sha256": "531cc8bd8bc0833c001915203361be776a3cf0bde583d723edb9c46bc0f80e6e",
+    "scope": "Retained 32-seed count/statistic characterization; no model or parent repository required by tests."
+  },
+  "protocol": {
+    "primary_endpoint": "per_seed_CODE_STRICT_1_test_f1",
+    "primary_effect": "mean_of_eight_paired_seed_f1_differences",
+    "paired_test": "two_sided_exact_wilcoxon_signed_rank",
+    "multiplicity": "holm",
+    "alpha": 0.05,
+    "paired_seed_bootstrap_replicates": 10000,
+    "hierarchical_seed_document_bootstrap_replicates": 10000,
+    "bootstrap_seed": 20260919,
+    "confidence_level": 0.95,
+    "minimum_meaningful_absolute_f1": 0.01,
+    "reported_per_arm": [
+      "per_seed_f1",
+      "mean_f1",
+      "sample_sd_f1",
+      "best_seed_f1",
+      "pooled_tp",
+      "pooled_fp",
+      "pooled_fn",
+      "pooled_precision",
+      "pooled_recall",
+      "pooled_f1"
+    ],
+    "paired_contrasts": [
+      [
+        "deberta-base-common",
+        "bert-base-common"
+      ],
+      [
+        "deberta-large-common",
+        "bert-base-common"
+      ],
+      [
+        "deberta-large-common",
+        "deberta-base-common"
+      ],
+      [
+        "deberta-large-a20-a21-a12",
+        "deberta-large-common"
+      ]
+    ],
+    "missing_run_policy": "retain every outcome; do not replace a failed seed; an arm missing any seed is incomplete and excluded from confirmatory contrasts",
+    "historical_statistics_role": "provenance_only"
+  },
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49
+  ],
+  "members": {
+    "bert-base-common": {
+      "quality": {
+        "per_seed": {
+          "42": {
+            "counts": {
+              "tp": 242,
+              "fp": 196,
+              "fn": 344
+            },
+            "f1": {
+              "value": 0.47265625
+            }
+          },
+          "43": {
+            "counts": {
+              "tp": 234,
+              "fp": 230,
+              "fn": 352
+            },
+            "f1": {
+              "value": 0.44571428571428573
+            }
+          },
+          "44": {
+            "counts": {
+              "tp": 237,
+              "fp": 227,
+              "fn": 349
+            },
+            "f1": {
+              "value": 0.4514285714285714
+            }
+          },
+          "45": {
+            "counts": {
+              "tp": 239,
+              "fp": 209,
+              "fn": 347
+            },
+            "f1": {
+              "value": 0.4622823984526112
+            }
+          },
+          "46": {
+            "counts": {
+              "tp": 237,
+              "fp": 230,
+              "fn": 349
+            },
+            "f1": {
+              "value": 0.45014245014245013
+            }
+          },
+          "47": {
+            "counts": {
+              "tp": 237,
+              "fp": 212,
+              "fn": 349
+            },
+            "f1": {
+              "value": 0.4579710144927536
+            }
+          },
+          "48": {
+            "counts": {
+              "tp": 238,
+              "fp": 203,
+              "fn": 348
+            },
+            "f1": {
+              "value": 0.4634858812074002
+            }
+          },
+          "49": {
+            "counts": {
+              "tp": 237,
+              "fp": 243,
+              "fn": 349
+            },
+            "f1": {
+              "value": 0.4446529080675422
+            }
+          }
+        }
+      }
+    },
+    "deberta-base-common": {
+      "quality": {
+        "per_seed": {
+          "42": {
+            "counts": {
+              "tp": 257,
+              "fp": 223,
+              "fn": 329
+            },
+            "f1": {
+              "value": 0.4821763602251407
+            }
+          },
+          "43": {
+            "counts": {
+              "tp": 246,
+              "fp": 202,
+              "fn": 340
+            },
+            "f1": {
+              "value": 0.4758220502901354
+            }
+          },
+          "44": {
+            "counts": {
+              "tp": 256,
+              "fp": 201,
+              "fn": 330
+            },
+            "f1": {
+              "value": 0.49089165867689355
+            }
+          },
+          "45": {
+            "counts": {
+              "tp": 258,
+              "fp": 230,
+              "fn": 328
+            },
+            "f1": {
+              "value": 0.48044692737430167
+            }
+          },
+          "46": {
+            "counts": {
+              "tp": 261,
+              "fp": 215,
+              "fn": 325
+            },
+            "f1": {
+              "value": 0.4915254237288136
+            }
+          },
+          "47": {
+            "counts": {
+              "tp": 256,
+              "fp": 227,
+              "fn": 330
+            },
+            "f1": {
+              "value": 0.47895229186155286
+            }
+          },
+          "48": {
+            "counts": {
+              "tp": 265,
+              "fp": 214,
+              "fn": 321
+            },
+            "f1": {
+              "value": 0.49765258215962443
+            }
+          },
+          "49": {
+            "counts": {
+              "tp": 267,
+              "fp": 229,
+              "fn": 319
+            },
+            "f1": {
+              "value": 0.49353049907578556
+            }
+          }
+        }
+      }
+    },
+    "deberta-large-common": {
+      "quality": {
+        "per_seed": {
+          "42": {
+            "counts": {
+              "tp": 285,
+              "fp": 194,
+              "fn": 301
+            },
+            "f1": {
+              "value": 0.5352112676056338
+            }
+          },
+          "43": {
+            "counts": {
+              "tp": 278,
+              "fp": 222,
+              "fn": 308
+            },
+            "f1": {
+              "value": 0.5119705340699816
+            }
+          },
+          "44": {
+            "counts": {
+              "tp": 268,
+              "fp": 220,
+              "fn": 318
+            },
+            "f1": {
+              "value": 0.49906890130353815
+            }
+          },
+          "45": {
+            "counts": {
+              "tp": 270,
+              "fp": 205,
+              "fn": 316
+            },
+            "f1": {
+              "value": 0.5089538171536286
+            }
+          },
+          "46": {
+            "counts": {
+              "tp": 279,
+              "fp": 201,
+              "fn": 307
+            },
+            "f1": {
+              "value": 0.5234521575984991
+            }
+          },
+          "47": {
+            "counts": {
+              "tp": 275,
+              "fp": 209,
+              "fn": 311
+            },
+            "f1": {
+              "value": 0.514018691588785
+            }
+          },
+          "48": {
+            "counts": {
+              "tp": 273,
+              "fp": 230,
+              "fn": 313
+            },
+            "f1": {
+              "value": 0.5013774104683195
+            }
+          },
+          "49": {
+            "counts": {
+              "tp": 262,
+              "fp": 216,
+              "fn": 324
+            },
+            "f1": {
+              "value": 0.4924812030075188
+            }
+          }
+        }
+      }
+    },
+    "deberta-large-a20-a21-a12": {
+      "quality": {
+        "per_seed": {
+          "42": {
+            "counts": {
+              "tp": 262,
+              "fp": 175,
+              "fn": 324
+            },
+            "f1": {
+              "value": 0.512218963831867
+            }
+          },
+          "43": {
+            "counts": {
+              "tp": 264,
+              "fp": 181,
+              "fn": 322
+            },
+            "f1": {
+              "value": 0.5121241513094084
+            }
+          },
+          "44": {
+            "counts": {
+              "tp": 271,
+              "fp": 186,
+              "fn": 315
+            },
+            "f1": {
+              "value": 0.5196548418024928
+            }
+          },
+          "45": {
+            "counts": {
+              "tp": 265,
+              "fp": 190,
+              "fn": 321
+            },
+            "f1": {
+              "value": 0.5091258405379443
+            }
+          },
+          "46": {
+            "counts": {
+              "tp": 265,
+              "fp": 215,
+              "fn": 321
+            },
+            "f1": {
+              "value": 0.4971857410881801
+            }
+          },
+          "47": {
+            "counts": {
+              "tp": 275,
+              "fp": 159,
+              "fn": 311
+            },
+            "f1": {
+              "value": 0.5392156862745098
+            }
+          },
+          "48": {
+            "counts": {
+              "tp": 285,
+              "fp": 180,
+              "fn": 301
+            },
+            "f1": {
+              "value": 0.5423406279733587
+            }
+          },
+          "49": {
+            "counts": {
+              "tp": 270,
+              "fp": 168,
+              "fn": 316
+            },
+            "f1": {
+              "value": 0.52734375
+            }
+          }
+        }
+      }
+    }
+  },
+  "expected_contrasts": [
+    {
+      "arm": "deberta-base-common",
+      "reference": "bert-base-common",
+      "per_seed_differences": [
+        0.00952011022514071,
+        0.030107764575849683,
+        0.03946308724832215,
+        0.01816452892169046,
+        0.04138297358636345,
+        0.020981277368799234,
+        0.03416670095222424,
+        0.04887759100824335
+      ],
+      "mean_difference": 0.03033300423582916,
+      "raw_p": 0.0078125,
+      "holm_p": 0.03125,
+      "seed_bootstrap_95ci": [
+        0.02169369177668673,
+        0.03858455881488659
+      ],
+      "significant_at_0_05": true,
+      "mean_reaches_0_01_effect": true
+    },
+    {
+      "arm": "deberta-large-common",
+      "reference": "bert-base-common",
+      "per_seed_differences": [
+        0.06255501760563376,
+        0.06625624835569588,
+        0.04764032987496675,
+        0.04667141870101743,
+        0.07330970745604892,
+        0.05604767709603137,
+        0.03789152926091932,
+        0.04782829493997659
+      ],
+      "mean_difference": 0.05477502791128625,
+      "raw_p": 0.0078125,
+      "holm_p": 0.03125,
+      "seed_bootstrap_95ci": [
+        0.04713248734174408,
+        0.06265789567057124
+      ],
+      "significant_at_0_05": true,
+      "mean_reaches_0_01_effect": true
+    },
+    {
+      "arm": "deberta-large-common",
+      "reference": "deberta-base-common",
+      "per_seed_differences": [
+        0.053034907380493046,
+        0.0361484837798462,
+        0.008177242626644599,
+        0.02850688977932697,
+        0.031926733869685475,
+        0.035066399727232134,
+        0.003724828308695083,
+        -0.0010492960682667585
+      ],
+      "mean_difference": 0.024442023675457093,
+      "raw_p": 0.015625,
+      "holm_p": 0.03125,
+      "seed_bootstrap_95ci": [
+        0.012104872237560236,
+        0.036663099462783
+      ],
+      "significant_at_0_05": true,
+      "mean_reaches_0_01_effect": true
+    },
+    {
+      "arm": "deberta-large-a20-a21-a12",
+      "reference": "deberta-large-common",
+      "per_seed_differences": [
+        -0.02299230377376671,
+        0.00015361723942675098,
+        0.020585940498954625,
+        0.000172023384315656,
+        -0.02626641651031897,
+        0.025196994685724783,
+        0.04096321750503917,
+        0.0348625469924812
+      ],
+      "mean_difference": 0.009084452502732064,
+      "raw_p": 0.3125,
+      "holm_p": 0.3125,
+      "seed_bootstrap_95ci": [
+        -0.007882891980475362,
+        0.025308519197904764
+      ],
+      "significant_at_0_05": false,
+      "mean_reaches_0_01_effect": false
+    }
+  ],
+  "expected_per_arm": {
+    "bert-base-common": [
+      0.45004417853190287,
+      0.46246381363298317
+    ],
+    "deberta-base-common": [
+      0.48127196311364223,
+      0.49157776500850014
+    ],
+    "deberta-large-common": [
+      0.5022372297552458,
+      0.5201968850838088
+    ],
+    "deberta-large-a20-a21-a12": [
+      0.5099482213436233,
+      0.5302633623583355
+    ]
+  }
+}

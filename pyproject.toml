@@ -5,6 +5,7 @@ description = "Research artifact for low-resource joint entity and relation extr
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "numpy>=2.2.6",
     "requests>=2.32.0",
     "safetensors>=0.4.5",
     "sentencepiece>=0.2.2",

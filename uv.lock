@@ -305,6 +305,8 @@ name = "low-resource-kg-artifact"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "requests" },
     { name = "safetensors" },
     { name = "sentencepiece" },
@@ -314,6 +316,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "numpy", specifier = ">=2.2.6" },
     { name = "requests", specifier = ">=2.32.0" },
     { name = "safetensors", specifier = ">=0.4.5" },
     { name = "sentencepiece", specifier = ">=0.2.2" },
