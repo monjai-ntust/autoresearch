@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 from transformers import AutoModel
 
+from utils.encoder.cache import configure_model_loading
+
 
 class TextAdapter(nn.Module):
     """Expose the backbone's shared word embeddings as ``inputs_embeds``."""
@@ -38,6 +40,7 @@ class BertBackbone(nn.Module):
             kwargs["cache_dir"] = model_cache_dir
         if model_local_files_only:
             kwargs["local_files_only"] = True
+        configure_model_loading()
         self.bert = AutoModel.from_pretrained(model_name, **kwargs)
 
     @property

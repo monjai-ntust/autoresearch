@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import subprocess
 import tempfile
@@ -17,11 +18,14 @@ from utils.encoder.cache import (
     write_cache_manifest,
 )
 from utils.encoder.model import (
+    _load_checkpoint_manifest,
+    _validate_checkpoint_run_identity,
     canonical_trainer_arguments,
     generate_candidates,
     plan_training,
     validate_prediction_artifacts,
 )
+from stages import encoder as encoder_stage
 from stages.encoder import _validate_training_stage
 from utils.common.artifact_io import (
     DataContractError,
@@ -705,6 +709,42 @@ class ModelTrainTests(unittest.TestCase):
                 ),
                 manifest,
             )
+
+            # Consume the actual fresh writer's compact checkpoint manifest.
+            # Its model identity comes from configuration; cache binding still
+            # authenticates those configured model bytes before generation.
+            config = deepcopy(self.config)
+            config.value["training_seeds"] = [42]
+            candidates = layout.resolve("predictions/dev/development-candidates.jsonl")
+            atomic_write_bytes(candidates, b"")
+            atomic_write_json(layout.resolve("predictions/dev/candidate-index.json"), {})
+
+            def validate_generation_inputs(current_layout, current_config, **kwargs):
+                checkpoint = _load_checkpoint_manifest(checkpoint_manifest, current_config)
+                _validate_checkpoint_run_identity(current_layout, current_config, checkpoint)
+
+            with (
+                mock.patch.object(encoder_stage, "_resume_generation_stage", side_effect=validate_generation_inputs) as generate,
+                mock.patch.object(encoder_stage, "_validate_candidate_assembly"),
+            ):
+                identity, _hardware, actual_candidates = encoder_stage.train_and_generate_development(layout, config)
+                self.assertEqual(identity, {
+                    "base_model": config.value["training"]["base_model"],
+                    "base_model_revision": config.value["training"]["base_model_revision"],
+                })
+                self.assertEqual(actual_candidates, candidates)
+                generate.assert_called_once_with(layout, config, seed=42, split="development")
+
+                model_blob = layout.resolve("inputs/huggingface/models--fixture/blobs/model.bin")
+                original_blob = model_blob.read_bytes()
+                atomic_write_bytes(model_blob, b"changed model bytes")
+                with self.assertRaisesRegex(DataContractError, "inventory drifted"):
+                    encoder_stage.train_and_generate_development(layout, config)
+                atomic_write_bytes(model_blob, original_blob)
+                config.value["training"]["base_model"] = "different-model"
+                with self.assertRaisesRegex(DataContractError, "model/revision differs"):
+                    encoder_stage.train_and_generate_development(layout, config)
+
             atomic_write_bytes(
                 layout.resolve("checkpoints/seed-42/checkpoint.pt"), b"tampered"
             )
@@ -712,6 +752,65 @@ class ModelTrainTests(unittest.TestCase):
                 _validate_training_stage(
                     layout, self.config, 42, execution_mode="live"
                 )
+
+    def test_completed_worker_can_finalize_after_exact_cache_restoration_without_retraining(self):
+        with _temporary_output_directory() as temporary:
+            layout = RunLayout(Path(temporary), "train-completed-cache-drift")
+            layout.create()
+            _prepare_run_identities(layout, compatibility=False)
+            cache_manifest_path = layout.resolve(HF_CACHE_MANIFEST_RELATIVE, must_exist=True)
+            cache_manifest_path.unlink()
+            addition = layout.resolve("inputs/huggingface/unexpected-generated-file")
+            durable = {}
+
+            def completed(command, *, cwd, check):
+                args = canonical_trainer_arguments(layout, self.config, 42)
+                write_cache_manifest(layout,
+                    model=self.config.value["training"]["base_model"],
+                    revision=self.config.value["training"]["base_model_revision"])
+                from utils.encoder.runtime import restart_identity
+                atomic_write_bytes(Path(args.save_best_to), b"selected checkpoint")
+                atomic_write_bytes(Path(args.save_last_to), b"completed restart")
+                atomic_write_bytes(Path(args.progress_log), b"BEST DEV fixture\n")
+                atomic_write_json(Path(args.run_summary_out), {
+                    "status": "completed", "seed": 42, "test_evaluated": False,
+                    "completed_steps": self.config.value["training"]["max_steps"],
+                    "selected_step": 100, "selected_metrics": {"ner_f1": 0.5, "triple_f1": 0.4},
+                    "run_identity": restart_identity(layout.resolve("data-prepared")),
+                    "elapsed_seconds": 123.25, "resumed_from": None,
+                })
+                for path in (Path(args.save_best_to), Path(args.save_last_to),
+                             Path(args.progress_log), Path(args.run_summary_out), cache_manifest_path):
+                    durable[path] = path.read_bytes()
+                atomic_write_bytes(addition, b"synthetic unexpected cache addition")
+
+            worker = mock.Mock(side_effect=completed)
+            with self.assertRaisesRegex(DataContractError, "differs from its frozen manifest"):
+                plan_training(layout, self.config, execution_mode="live", training_seed=42,
+                              command_runner=worker)
+            worker.assert_called_once()
+            self.assertFalse(layout.resolve("manifests/model-train-live-seed-42.json").exists())
+            self.assertFalse(layout.resolve("checkpoints/seed-42/checkpoint-manifest.json").exists())
+            for path, original in durable.items():
+                self.assertEqual(path.read_bytes(), original)
+
+            never_train = mock.Mock(side_effect=AssertionError("completed worker must not run again"))
+            with self.assertRaisesRegex(DataContractError, "inventory drifted"):
+                plan_training(layout, self.config, execution_mode="live", training_seed=42,
+                              command_runner=never_train)
+            never_train.assert_not_called()
+
+            # Restore only our synthetic addition. The frozen inventory and
+            # all completed scientific outputs are retained byte for byte.
+            addition.unlink()
+            manifest = plan_training(layout, self.config, execution_mode="live", training_seed=42,
+                                     command_runner=never_train)
+            never_train.assert_not_called()
+            self.assertEqual(manifest["status"], "completed")
+            self.assertFalse(manifest["resume"]["resumed"])
+            for path, original in durable.items():
+                self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(_validate_training_stage(layout, self.config, 42, execution_mode="live"), manifest)
 
     def test_train_refuses_to_overwrite(self):
         with _temporary_output_directory() as temporary:

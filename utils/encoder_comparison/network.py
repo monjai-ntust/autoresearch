@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 from transformers import AutoModel
 
+from utils.encoder.cache import configure_model_loading
+
 
 HISTORICAL_SOURCE_COMMIT = "9feafa4029e65ab48ecfb2f452f4b0fabbff0826"
 HISTORICAL_NETWORK_BLOB = "d05678f00097cb11176dacef6fade0b1b3f557de"
@@ -46,6 +48,7 @@ class BertBackbone(nn.Module):
         expected_hidden_size: int,
     ):
         super().__init__()
+        configure_model_loading()
         self.bert = AutoModel.from_pretrained(
             model_name,
             revision=model_revision,

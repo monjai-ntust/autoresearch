@@ -51,6 +51,58 @@ and parameter dtypes. These identities are checked on continuation and bound
 to restart state. They describe the executing environment, without admitting
 or rejecting it because of historical hardware or model digests.
 
+## Stable pretrained cache
+
+Both backbone loaders set `DISABLE_SAFETENSORS_CONVERSION=1` immediately before
+loading the model. The locked Transformers resolver can otherwise start a
+background conversion/download after returning the original binary weights,
+including with `use_safetensors=False` or `local_files_only=True`. Disabling that
+optional work preserves the pinned model-loading arguments and selected input
+weights. See the [official setting](https://huggingface.co/docs/transformers/en/reference/environment_variables).
+The source fixes this policy, so it adds no runtime metadata field.
+Removing background work can change measured cost. It preserves model-loading
+arguments and training logic; exact external trajectories/statistics still need
+validation rather than a promise of identical outcomes.
+
+The cache is frozen before resumable training state is saved. Every tracked
+cache entry remains authenticated: new, removed or changed files cause failure.
+Failures include a bounded list of differing paths. The manifest is never
+regenerated to accept drift, and converted-weight directories are not excluded.
+
+If an earlier run fails this check after `BEST DEV`, preserve its unchanged run
+ID, original cache manifest, checkpoint, restart, summary and logs. The completed
+summary can support metadata finalization without training again, but only after
+the actual inventory change is classified and the original cache identity is
+verified. The reported message alone does not establish auxiliary-only changes.
+An existing run also binds its producing source; pulling a repair into that
+checkout does not authorize changing its recorded source identity.
+
+On the original producing checkout, this read-only Linux command prints the
+actual inventory differences without loading a model, downloading or writing:
+
+```bash
+RUN_ID=your-existing-run-id uv run --frozen --no-sync python -I -B - <<'PY'
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+from utils.common.paths import RunLayout
+from utils.encoder.cache import CACHE_RELATIVE, MANIFEST_RELATIVE, _cache_files
+layout = RunLayout(Path.cwd(), os.environ['RUN_ID'])
+layout.require_existing()
+manifest = json.loads(layout.resolve(MANIFEST_RELATIVE, must_exist=True).read_text())
+before = {item['path']: item for item in manifest['files']}
+after = {item['path']: item for item in _cache_files(layout.resolve(CACHE_RELATIVE, must_exist=True))}
+print(json.dumps({
+    'run_id': layout.run_id,
+    'added': sorted(after.keys() - before.keys()),
+    'removed': sorted(before.keys() - after.keys()),
+    'changed': sorted(path for path in before.keys() & after.keys() if before[path] != after[path]),
+}, indent=2))
+PY
+```
+
+Retain that diff with the external failure handoff before any cache restoration.
+
 ## RAG order and requests
 
 Both breadth-first frontiers are lists. Matching start nodes follow first

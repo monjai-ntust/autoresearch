@@ -42,16 +42,10 @@ def train_and_generate_development(
         training = _validate_training_stage(
             layout, config, seed, execution_mode="live"
         )
-        checkpoint_identity = _load_manifest(
-            layout.resolve(
-                f"checkpoints/seed-{seed}/checkpoint-manifest.json", must_exist=True
-            ),
-            "checkpoint manifest",
-        )
         encoder_identities.append(
             {
-                "base_model": checkpoint_identity["base_model"],
-                "base_model_revision": checkpoint_identity["base_model_revision"],
+                "base_model": config.value["training"]["base_model"],
+                "base_model_revision": config.value["training"]["base_model_revision"],
             }
         )
         if not training_hardware and isinstance(training.get("environment"), dict):

@@ -1354,7 +1354,7 @@ def validate_parent_lineage(
                 checkpoint_manifest_relative=checkpoint_manifest_relative,
                 checkpoint_manifest_sha256=checkpoint_manifest_hashes[seed],
                 checkpoint_sha256=checkpoint_digest,
-                max_span_width=checkpoint_manifest["max_span_width"],
+                max_span_width=training_config["max_span_width"],
                 prepared_relative=paths[prepared_key],
                 prepared_sha256=ledger[paths[prepared_key]]["sha256"],
                 expected_sentence_count=split[count_key],

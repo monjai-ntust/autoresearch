@@ -13,6 +13,12 @@ from unittest import mock
 
 import pipeline
 from utils.rag import runner
+from utils.common.artifact_io import atomic_write_bytes, atomic_write_json, atomic_write_jsonl
+from utils.common.config import load_pipeline_config
+from utils.common.paths import RunLayout
+from utils.encoder.cache import write_cache_manifest
+from utils.encoder.model import plan_training
+from utils.encoder.runtime import restart_identity
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -324,6 +330,136 @@ class Table2RunnerTests(unittest.TestCase):
         self.assertEqual(config["protocol_id"], CONTRACT["pipeline"]["protocol_id"])
         with self.assertRaisesRegex(runner.PhaseEError, "not bound"):
             runner._load_authenticated_run_config(checkout, {**full, "config": "resources/configs/another.json"}, CONTRACT)
+
+    def test_fresh_compact_checkpoint_reaches_candidate_preflight_with_authenticated_span_bound(self):
+        (ROOT / "output").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=ROOT / "output") as temporary:
+            layout = RunLayout(Path(temporary), "compact-parent")
+            layout.create()
+            config = load_pipeline_config(ROOT, "resources/configs/pipeline.json")
+            pipeline = CONTRACT["pipeline"]
+            paths = pipeline["artifacts"]
+            commit = runner.run_git("rev-parse", "HEAD").stdout.strip()
+
+            def write(relative, value):
+                path = layout.resolve(relative)
+                if isinstance(value, bytes):
+                    atomic_write_bytes(path, value)
+                else:
+                    atomic_write_json(path, value)
+                return path
+
+            checkout = {
+                "schema_version": "phase-b-checkout-manifest-2.0", "lifecycle_version": 1,
+                "status": "pass", "run_id": layout.run_id,
+                **{key: pipeline[key] for key in ("protocol_id", "workflow_id", "matcher_id")},
+                "source": {"commit": commit, "worktree_clean": True,
+                           "config": {"path": config.source_path}},
+            }
+            write(paths["checkout_manifest"], checkout)
+            full = {"schema_version": "pipeline-run-2", "run_id": layout.run_id,
+                    "source_commit": commit, "config": config.source_path}
+            write(paths["full_run_manifest"], full)
+            archive = write("inputs/downloads/fixture.zip", b"synthetic immutable archive")
+            acquisition = write("manifests/02-input-acquisition-manifest.json", {
+                "schema_version": "phase-b-input-acquisition-manifest-1.0",
+                "dataset_id": pipeline["dataset_id"],
+                "archive": {"path": layout.relative_identity(archive), "sha256": runner.sha256_file(archive)},
+            })
+            split = {"seed": config.value["split"]["seed"],
+                     **{name: config.value["split"][f"{name}_sentences"]
+                        for name in ("train", "development", "test")}}
+            artifacts = []
+            for name in ("train", "development", "test", "development-gold", "test-gold"):
+                count = split[name.removesuffix("-gold")]
+                path = layout.resolve(f"data-prepared/{name}.jsonl")
+                atomic_write_jsonl(path, [{} for _ in range(count)])
+                artifacts.append({"path": path.name, "sha256": runner.sha256_file(path)})
+            split_path = write(paths["split_manifest"], {
+                "split_id": "CODE-SPLIT-1", "seed": split["seed"],
+                **{f"{name}_count": split[name] for name in ("train", "development", "test")},
+                **{f"{name}_ids": [f"{name}-{index}" for index in range(split[name])]
+                   for name in ("train", "development", "test")},
+            })
+            artifacts.append({"path": split_path.name, "sha256": runner.sha256_file(split_path)})
+            write(paths["preparation_manifest"], {
+                "schema_version": "phase-b-data-preparation-manifest-2.0",
+                "protocol_id": pipeline["protocol_id"], "dataset_id": pipeline["dataset_id"],
+                "byte_identical_independent_materializations": True,
+                "acquisition_manifest_sha256": runner.sha256_file(acquisition),
+                "archive_sha256": runner.sha256_file(archive), "split": split, "artifacts": artifacts,
+                "annotation_bundle_sha256": "a" * 64, "dataset_tree_sha256": "b" * 64,
+            })
+            index = write(paths["development_candidate_index"], {})
+            threshold_contract = config.value["threshold_selection"]
+            write(paths["threshold_selection"], {
+                **threshold_contract, "selected_threshold": max(threshold_contract["grid"]),
+                "used_test_labels": False, "split_manifest_sha256": runner.sha256_file(split_path),
+                "development_gold_sha256": runner.sha256_file(layout.resolve(paths["development_gold"])),
+                "development_candidate_index_sha256": runner.sha256_file(index),
+                "per_threshold": [{"threshold": value, "mean_per_seed_development_strict_triple_f1": 0.4}
+                                  for value in threshold_contract["grid"]],
+            })
+            for key in ("candidates", "simple_verdicts", "corrective_verdicts", "sentence_outcomes", "metrics"):
+                write(paths[key], b"{}\n")
+            write(paths["score_manifest"], {
+                "schema_version": "phase-b-score-manifest-1.0", "run_id": layout.run_id,
+                **{key: pipeline[key] for key in ("protocol_id", "workflow_id", "matcher_id")},
+                "nonpublication_smoke": False,
+                "inputs": {paths[key]: runner.sha256_file(layout.resolve(paths[key]))
+                           for key in ("private_gold", "threshold_selection", "candidates", "simple_verdicts", "corrective_verdicts")},
+                "outputs": {paths[key]: runner.sha256_file(layout.resolve(paths[key]))
+                            for key in ("sentence_outcomes", "metrics")},
+            })
+            write("inputs/huggingface/models--fixture/blobs/model.bin", b"synthetic pinned model")
+            write_cache_manifest(layout, model=config.value["training"]["base_model"],
+                                 revision=config.value["training"]["base_model_revision"])
+            for relative in ("manifests/encoder-runtime.json", "manifests/encoder-model-runtime.json"):
+                write(relative, {})
+            seed = pipeline["training_seeds"][0]
+            write(f"checkpoints/seed-{seed}/checkpoint.pt", b"selected checkpoint")
+            write(f"checkpoints/seed-{seed}/restart-state.pt", b"completed restart")
+            write(f"logs/model-train-seed-{seed}.log", b"completed training fixture\n")
+            write(f"checkpoints/seed-{seed}/training-summary.json", {
+                "status": "completed", "seed": seed, "test_evaluated": False,
+                "completed_steps": config.value["training"]["max_steps"], "selected_step": 100,
+                "selected_metrics": {"ner_f1": 0.5, "triple_f1": 0.4},
+                "run_identity": restart_identity(layout.resolve("data-prepared")),
+            })
+            never_train = mock.Mock(side_effect=AssertionError("preflight must not invoke a model"))
+            plan_training(layout, config, execution_mode="live", training_seed=seed, command_runner=never_train)
+            never_train.assert_not_called()
+            checkpoint_path = layout.resolve(paths["checkpoint_manifest"].format(seed=seed))
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertNotIn("max_span_width", checkpoint)
+            self.assertNotIn("base_model", checkpoint)
+
+            class CandidatePreflightReached(Exception):
+                pass
+
+            with mock.patch.object(runner, "_validate_candidate_generation", side_effect=CandidatePreflightReached) as generate:
+                with self.assertRaises(CandidatePreflightReached):
+                    runner.validate_parent_lineage(layout.run_root, layout.run_id, CONTRACT)
+                self.assertEqual(generate.call_args.kwargs["max_span_width"], config.value["training"]["max_span_width"])
+
+            # Historical copied bounds remain checked against authenticated
+            # source configuration before any candidate validation occurs.
+            config_sha = runner.sha256_bytes(runner._git_file_bytes(commit, config.source_path))
+            checkout["source"]["config"]["sha256"] = config_sha
+            write(paths["checkout_manifest"], checkout)
+            write(paths["full_run_manifest"], {**full, "schema_version": "pipeline-run-1",
+                **{key: pipeline[key] for key in ("protocol_id", "workflow_id", "training_seeds")},
+                "config_sha256": config_sha})
+            write(layout.relative_identity(checkpoint_path), {
+                **checkpoint, "config_sha256": config_sha,
+                **{key: config.value["training"][key] for key in
+                   ("base_model", "base_model_revision", "context_between_spans")},
+                "max_span_width": config.value["training"]["max_span_width"] + 1,
+            })
+            with mock.patch.object(runner, "_validate_candidate_generation") as generate:
+                with self.assertRaisesRegex(runner.PhaseEError, "transitively bound"):
+                    runner.validate_parent_lineage(layout.run_root, layout.run_id, CONTRACT)
+                generate.assert_not_called()
 
     def test_saved_configuration_needs_no_producer_git_history(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "output") as temporary:

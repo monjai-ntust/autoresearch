@@ -50,6 +50,38 @@ class HuggingFaceCacheTests(unittest.TestCase):
         with self.assertRaisesRegex(DataContractError, "inventory drifted"):
             verify_cache_manifest(self.layout, model=MODEL, revision=REVISION)
 
+    def test_failure_names_added_removed_and_changed_paths_without_refreezing(self):
+        cache = self.layout.resolve("inputs/huggingface/models--fixture")
+        atomic_write_bytes(cache / "blobs/model.bin", b"model bytes\n")
+        atomic_write_bytes(cache / "snapshots/revision/config.json", b"original config\n")
+        write_cache_manifest(self.layout, model=MODEL, revision=REVISION)
+        manifest_path = self.layout.resolve("manifests/huggingface-model-cache.json")
+        original_manifest = manifest_path.read_bytes()
+        atomic_write_bytes(cache / "blobs/model.bin", b"changed model bytes\n")
+        (cache / "snapshots/revision/config.json").unlink()
+        atomic_write_bytes(cache / "refs/pr/1", b"converted-revision\n")
+        for validate in (write_cache_manifest, verify_cache_manifest):
+            with self.subTest(validate=validate.__name__), self.assertRaises(DataContractError) as raised:
+                validate(self.layout, model=MODEL, revision=REVISION)
+            message = str(raised.exception)
+            self.assertIn("added: 'models--fixture/refs/pr/1'", message)
+            self.assertIn("removed: 'models--fixture/snapshots/revision/config.json'", message)
+            self.assertIn("changed: 'models--fixture/blobs/model.bin'", message)
+            self.assertEqual(manifest_path.read_bytes(), original_manifest)
+
+    def test_inventory_diagnostic_is_bounded_for_many_added_files(self):
+        cache = self.layout.resolve("inputs/huggingface/models--fixture")
+        atomic_write_bytes(cache / "blobs/model.bin", b"model bytes\n")
+        write_cache_manifest(self.layout, model=MODEL, revision=REVISION)
+        for index in range(20):
+            atomic_write_bytes(cache / f"refs/pr/{index:02}", b"converted-revision\n")
+        with self.assertRaises(DataContractError) as raised:
+            verify_cache_manifest(self.layout, model=MODEL, revision=REVISION)
+        message = str(raised.exception)
+        self.assertIn("(20 total)", message)
+        self.assertIn("refs/pr/04", message)
+        self.assertNotIn("refs/pr/05", message)
+
 
 if __name__ == "__main__":
     unittest.main()
