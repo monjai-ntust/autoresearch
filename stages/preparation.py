@@ -42,6 +42,8 @@ def run(
 def initialize(layout: RunLayout, config: PipelineConfig) -> None:
     doctor_path = layout.resolve("manifests/00-checkout-manifest.json")
     if doctor_path.is_file():
+        from utils.preparation.checkout import continue_checkout
+        continue_checkout(layout, config)
         _validate_existing_checkout(layout, config)
     else:
         manifest, passed = run_doctor(layout, config)

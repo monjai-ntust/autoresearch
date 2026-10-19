@@ -197,7 +197,6 @@ def _environment_manifest(
         "execution_mode": execution_mode,
         "created_at_utc": _utc_now(),
         "python": {
-            "expected": config.value["environment"]["python"],
             "observed": platform.python_version(),
             "implementation": platform.python_implementation(),
         },
@@ -208,7 +207,6 @@ def _environment_manifest(
         },
         "hardware": hardware,
         "software": {
-            "expected_uv": config.value["environment"]["uv"],
             "uv_version_command": _command_output(["uv", "--version"]),
             "packages": packages,
         },

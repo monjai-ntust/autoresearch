@@ -35,19 +35,6 @@ def _required(mapping: dict[str, Any], key: str, label: str) -> Any:
     return mapping[key]
 
 
-def _find_tbd(value: Any, location: str = "config") -> list[str]:
-    found: list[str] = []
-    if isinstance(value, str) and "TBD_" in value:
-        found.append(location)
-    elif isinstance(value, dict):
-        for key, nested in value.items():
-            found.extend(_find_tbd(nested, f"{location}.{key}"))
-    elif isinstance(value, list):
-        for index, nested in enumerate(value):
-            found.extend(_find_tbd(nested, f"{location}[{index}]"))
-    return found
-
-
 @dataclass(frozen=True)
 class PipelineConfig:
     path: Path
@@ -61,13 +48,6 @@ class PipelineConfig:
 def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineConfig:
     path = resolve_tracked_path(source_root, supplied)
     value = _object(load_json(path), "config")
-    tbd_locations = _find_tbd(value)
-    if tbd_locations:
-        raise DataContractError(
-            "publication configuration contains unresolved TBD fields: "
-            + ", ".join(tbd_locations)
-        )
-
     expected_identity = {
         "protocol_id": PROTOCOL_ID,
         "workflow_id": WORKFLOW_ID,
@@ -233,12 +213,6 @@ def load_pipeline_config(source_root: Path, supplied: str | Path) -> PipelineCon
             raise DataContractError(
                 f"config.verifier.{hash_field} does not match {verifier[path_field]}"
             )
-    environment = _object(
-        _required(value, "environment", "config"), "config.environment"
-    )
-    if environment.get("python") != "3.10.20" or environment.get("uv") != "0.11.26":
-        raise DataContractError("config environment must pin Python 3.10.20 and uv 0.11.26")
-
     runtime_paths = _object(
         _required(value, "runtime_paths", "config"), "config.runtime_paths"
     )

@@ -13,6 +13,9 @@ wheels/
 # Pipeline output root
 /output/
 
+# Default detached-launch console log at the checkout root
+/nohup.out
+
 # Model checkpoints and adapter weights
 checkpoints/
 *.pt

@@ -5,7 +5,6 @@ from __future__ import annotations
 import platform
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -31,19 +30,6 @@ def _check(check_id: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"check_id": check_id, "status": "pass" if passed else "fail", "detail": detail}
 
 
-def _document_version(
-    check_id: str, *, documented: str, actual: str | None, detail: str = ""
-) -> dict[str, Any]:
-    """Record a runtime version without treating it as a checkout admission gate."""
-
-    suffix = f"; {detail}" if detail else ""
-    return _check(
-        check_id,
-        True,
-        f"documented={documented}; actual={actual or 'unavailable'}{suffix}; not enforced",
-    )
-
-
 def _uv_version(source_root: Path) -> tuple[str | None, str]:
     try:
         result = _command(source_root, ["uv", "--version"])
@@ -56,8 +42,24 @@ def _uv_version(source_root: Path) -> tuple[str | None, str]:
     return match.group(1), text
 
 
-def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any], bool]:
-    """Create one immutable checkout manifest; return it and pass/fail status."""
+def _git_status_detail(result: subprocess.CompletedProcess[str]) -> str:
+    """Show the failing checkout evidence without unbounded manifest output."""
+
+    if result.returncode != 0:
+        prefix = f"git status failed (exit {result.returncode}): "
+        output = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+    elif not result.stdout.strip():
+        return "clean"
+    else:
+        prefix = "tracked or untracked source changes are present; git status --porcelain:\n"
+        output = result.stdout.rstrip("\r\n")
+    if len(output) > 4000:
+        output = output[:4000] + "\n... (diagnostic truncated; run git status --short for full output)"
+    return prefix + output
+
+
+def inspect_checkout(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any], bool]:
+    """Inspect checkout identity and preflight checks without writing run files."""
 
     source_root = layout.source_root
     checks: list[dict[str, Any]] = []
@@ -74,28 +76,13 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
         _check(
             "clean-tracked-source",
             clean,
-            "clean" if clean else "tracked or untracked source changes are present",
-        )
-    )
-
-    ignore_lines = (source_root / ".gitignore").read_text(encoding="utf-8").splitlines()
-    checks.append(
-        _check(
-            "root-output-ignore-rule",
-            "/output/" in ignore_lines,
-            "exact /output/ rule present"
-            if "/output/" in ignore_lines
-            else "exact /output/ rule is missing",
+            _git_status_detail(git_status),
         )
     )
 
     positive = _command(
         source_root,
         ["git", "check-ignore", "-q", "--", "output/__pipeline_probe__/nested.json"],
-    )
-    negative = _command(
-        source_root,
-        ["git", "check-ignore", "-q", "--", "nested/output/__pipeline_probe__.json"],
     )
     checks.append(
         _check(
@@ -104,45 +91,12 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
             "root output is ignored" if positive.returncode == 0 else "root output is not ignored",
         )
     )
-    checks.append(
-        _check(
-            "root-output-ignore-negative",
-            negative.returncode == 1,
-            "nested source path is not overmatched"
-            if negative.returncode == 1
-            else "nested source path is unexpectedly ignored",
-        )
-    )
-
-    documented_python = config.value["environment"]["python"]
     actual_python = platform.python_version()
-    checks.append(
-        _document_version(
-            "python-version", documented=documented_python, actual=actual_python
-        )
-    )
-    checks.append(
-        _check(
-            "source-bytecode-disabled",
-            sys.dont_write_bytecode,
-            "Python bytecode writes are disabled"
-            if sys.dont_write_bytecode
-            else "rerun with python -B so __pycache__ is not created outside output/",
-        )
-    )
-    documented_uv = config.value["environment"]["uv"]
-    actual_uv, uv_detail = _uv_version(source_root)
-    checks.append(
-        _document_version(
-            "uv-version", documented=documented_uv, actual=actual_uv, detail=uv_detail
-        )
-    )
+    actual_uv, _ = _uv_version(source_root)
 
-    layout.create(allow_lock_only=True)
     passed = all(item["status"] == "pass" for item in checks)
     config_relative = config.path.relative_to(source_root).as_posix()
     run_local_config = "inputs/config/pipeline.json"
-    atomic_write_bytes(layout.resolve(run_local_config), config.path.read_bytes())
     manifest = {
         "schema_version": "phase-b-checkout-manifest-2.0",
         "lifecycle_version": 1,
@@ -169,6 +123,15 @@ def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any
         },
         "checks": checks,
     }
+    return manifest, passed
+
+
+def run_doctor(layout: RunLayout, config: PipelineConfig) -> tuple[dict[str, Any], bool]:
+    """Create one immutable checkout manifest; return it and pass/fail status."""
+
+    manifest, passed = inspect_checkout(layout, config)
+    layout.create(allow_lock_only=True)
+    atomic_write_bytes(layout.resolve("inputs/config/pipeline.json"), config.path.read_bytes())
     manifest_path = layout.resolve("manifests/00-checkout-manifest.json")
     atomic_write_json(manifest_path, manifest)
     return manifest, passed

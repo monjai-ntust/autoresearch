@@ -5,6 +5,7 @@ import argparse
 import json
 import subprocess
 import sys
+sys.dont_write_bytecode = True
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent

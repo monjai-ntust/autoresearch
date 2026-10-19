@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -295,12 +296,11 @@ class PipelineEntrypointTests(unittest.TestCase):
     def test_no_tracked_source_filename_uses_a_phase_name(self):
         ignored_roots = {".git", ".venv", ".uv-cache", "output", "__pycache__"}
         offenders = []
-        for path in SOURCE_ROOT.rglob("*"):
-            relative = path.relative_to(SOURCE_ROOT)
-            if any(part in ignored_roots for part in relative.parts):
-                continue
-            if path.is_file() and "phase_" in path.name.lower():
-                offenders.append(relative.as_posix())
+        for directory, children, files in os.walk(SOURCE_ROOT):
+            children[:] = [name for name in children if name not in ignored_roots]
+            for name in files:
+                if "phase_" in name.lower():
+                    offenders.append((Path(directory) / name).relative_to(SOURCE_ROOT).as_posix())
         self.assertEqual(offenders, [])
 
     def test_non_table_entrypoints_are_removed(self):

@@ -198,6 +198,15 @@ neither import historical estimates nor launch a new measurement experiment.
 
 ## Verification and its boundary
 
+The public entry points disable bytecode writes automatically. Checkout
+preflight retains actual runtime versions and enforces current source identity
+and ignored run output; documented version comparisons and redundant ignore
+probes are absent. [checkout.py](../utils/preparation/checkout.py) lets a fresh
+checkout-only failure continue under its original ID after preflight succeeds.
+It preserves the exact failed/passing manifest bytes, one unchanged config
+snapshot and their hash receipt before promotion. Existing scientific work and
+old partial workflows cannot use that recovery path.
+
 [test_scientific_bytes.py](../tests/test_scientific_bytes.py) checks independent
 baseline definition/optimizer-loop hashes, immutable scientific module and
 prompt/schema bytes, old parsed worker values, and raw graph/projection/question/

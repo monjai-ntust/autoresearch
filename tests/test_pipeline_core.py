@@ -11,7 +11,6 @@ from pathlib import Path
 
 from utils.test.fixtures import load_pipeline_config
 from utils.common.constants import CONDITION_IDS, PROTOCOL_ID
-from utils.common.environment import _document_version
 from utils.common.artifact_io import (
     DataContractError,
     atomic_write_json,
@@ -153,19 +152,6 @@ class PathContractTests(unittest.TestCase):
 
 
 class ConfigContractTests(unittest.TestCase):
-    def test_environment_versions_are_documented_not_enforced(self):
-        python_check = _document_version(
-            "python-version", documented="3.10.20", actual="3.12.4"
-        )
-        uv_check = _document_version(
-            "uv-version", documented="0.11.26", actual=None, detail="uv executable was not found"
-        )
-        self.assertEqual(python_check["status"], "pass")
-        self.assertIn("documented=3.10.20; actual=3.12.4; not enforced", python_check["detail"])
-        self.assertEqual(uv_check["status"], "pass")
-        self.assertIn("actual=unavailable", uv_check["detail"])
-        self.assertIn("not enforced", uv_check["detail"])
-
     def test_approved_config_and_conditions_resolve_from_source_only(self):
         config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
         self.assertEqual(config.value["training_seeds"], list(range(42, 50)))

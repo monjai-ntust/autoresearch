@@ -13,6 +13,11 @@ at the actual recorded full commit. Continuing requires that source and
 configuration identity. A fresh checkout doctor retains configuration bytes
 under `inputs/config/`; it requires no historical ancestry or reference digest.
 
+Checkout preflight checks the actual Git commit, clean source and effective
+root-output ignore rule. Actual Python/uv versions are recorded, without a
+historical version gate. The entry points disable bytecode writes themselves.
+The default root-level `nohup.out` console log is ignored by Git.
+
 Inputs are acquired into that run under immutable byte contracts. Preparation
 authenticates the archive, six annotation files, deterministic repair,
 CODE-SPLIT-1 membership and prepared tree. Encoder cache binds weights,
@@ -44,6 +49,17 @@ admission or repair actions.
 Repeat the exact public command with the same ID. An operating-system lock
 prevents overlapping execution and releases on process exit; the lock file
 stays as evidence and is not deleted to recover a run.
+
+If a fresh checkout was blocked before any acquisition or scientific work,
+fix the reported source changes and repeat the same command with the same ID.
+The failed manifest and unchanged configuration bytes are retained alongside a
+new passing manifest under `manifests/checkout-recovery/`, with a hash-bound
+receipt written before the active manifest is replaced. The new manifest
+records the actual current source commit. An interrupted promotion can finish
+from that evidence; missing or changed proof fails closed. This path accepts
+only fresh lifecycle-1 checkout-only failures, including retired administrative
+checks. It cannot replace a passing checkout, rebind existing downstream work
+or migrate an old partial workflow.
 
 Completed producer receipts and input/output hashes are validated before reuse.
 Training loads full restart state at the last saved step, preserving optimizer,
