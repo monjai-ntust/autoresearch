@@ -16,14 +16,16 @@ uv run --frozen --no-sync python -I -B rag.py validate
 uv run --frozen --no-sync python -B -m unittest discover -s tests -v
 ```
 
-Run from a clean Git checkout. Choose fresh descriptive IDs; repeat the same
-command to continue validated durable progress in that namespace.
+Run from the root of a clean Git checkout after `uv sync --frozen`.
+`uv run --frozen --no-sync` selects the project environment without requiring
+manual activation. Choose fresh descriptive IDs; repeat the same command to
+continue validated durable progress in that namespace.
 
 | Workflow | Command | Automatically written reports |
 |---|---|---|
-| Canonical encoder and verifier | `python -I -B pipeline.py run --run-id research-001` | `output/research-001/metrics/`, including `paper-report/paper-statistics.{json,tsv,md}` |
-| Four-arm Table-1 comparison | `python -I -B encoder_comparison.py run --matrix-id comparison-001` | Each arm's `reports/comparison/` and the matrix's `reports/matrix/` |
-| Expanded same-run Graph RAG | `python -I -B rag.py run --run-id research-001` | `output/research-001/table2-code-all/`, including `reports/paper-statistics.{json,tsv,md}` |
+| Canonical encoder and verifier | `uv run --frozen --no-sync python -I -B pipeline.py run --run-id research-001` | `output/research-001/metrics/`, including `paper-report/paper-statistics.{json,tsv,md}` |
+| Four-arm Table-1 comparison | `uv run --frozen --no-sync python -I -B encoder_comparison.py run --matrix-id comparison-001` | Each arm's `reports/comparison/` and the matrix's `reports/matrix/` |
+| Expanded same-run Graph RAG | `uv run --frozen --no-sync python -I -B rag.py run --run-id research-001` | `output/research-001/table2-code-all/`, including `reports/paper-statistics.{json,tsv,md}` |
 
 Canonical and RAG commands accept `--ollama-url http://localhost:11434`.
 The canonical command also accepts `--model-blob-source /absolute/path/to/blob`
