@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import itertools
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,12 +16,19 @@ from utils.common.artifact_io import DataContractError, atomic_write_json, atomi
 from utils.common.config import load_pipeline_config
 from utils.common.paths import RunLayout
 from utils.rag import runner
-from utils.verifier.runtime import bind_runtime, load_runtime, runtime_identity
+from utils.verifier.runtime import bind_runtime, load_runtime, runtime_identity, runtime_matches
 from utils.verifier.verifier import HttpResult, _environment_manifest, _verify_live_model, run_verifier
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ORIGIN = "http://localhost:11434"
+PARAMETER_BLOCKS = (
+    'stop                           "<|im_start|>"\nstop                           "<|im_end|>"',
+    "temperature                    0.6",
+    "top_k                          20",
+    "top_p                          0.95",
+    "repeat_penalty                 1",
+)
 
 
 class OllamaRuntimeTests(unittest.TestCase):
@@ -127,6 +136,7 @@ class OllamaRuntimeTests(unittest.TestCase):
 
     def test_live_fixture_seals_minimal_runtime_and_blocks_later_stage_drift(self):
         from tests.test_verifier import _candidate, _sentence, _write_inputs
+        self.show["parameters"] = "\n".join(PARAMETER_BLOCKS)
         atomic_write_json(self.layout.resolve("manifests/00-checkout-manifest.json"), {"source": {"commit": "c" * 40}})
         sentences, candidates = _write_inputs(self.layout)
         warm_sentences = self.layout.resolve("data-prepared/development.jsonl")
@@ -139,7 +149,10 @@ class OllamaRuntimeTests(unittest.TestCase):
             if not url.endswith("/api/chat"):
                 return self.transport(method, url, payload, timeout)
             generated.append(payload)
-            body = {"message": {"role": "assistant", "content": '{"action":"KEEP","reason_code":"SUPPORTED"}'},
+            content = {"action": "KEEP", "reason_code": "SUPPORTED"}
+            if "corrected" in payload["format"]["properties"]:
+                content["corrected"] = None
+            body = {"message": {"role": "assistant", "content": json.dumps(content)},
                     "done_reason": "stop"}
             return HttpResult(200, body, hashlib.sha256(b"fixture reply").hexdigest())
 
@@ -168,6 +181,19 @@ class OllamaRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(DataContractError, "runtime drift"):
             run_verifier(mode="corrective", **arguments)
         self.assertEqual(len(generated), 2)
+        preserved = {relative: self.layout.resolve(relative).read_bytes() for relative in (
+            "runtime/ollama.json", "verifier/simple/requests.jsonl",
+            "verifier/simple/responses.jsonl", "verifier/simple/verdicts.jsonl",
+            "verifier/simple/warmup-response.jsonl", "verifier/simple/environment-manifest.json",
+        )}
+        self.version["version"] = "0.fixture.server"
+        self.show["parameters"] = "\n".join(
+            (PARAMETER_BLOCKS[-1], *PARAMETER_BLOCKS[:-1]))
+        with mock.patch("subprocess.run", side_effect=AssertionError("local CLI invoked")):
+            run_verifier(mode="corrective", **arguments)
+        self.assertEqual(len(generated), 4)
+        for relative, original in preserved.items():
+            self.assertEqual(self.layout.resolve(relative).read_bytes(), original, relative)
 
     def test_same_tag_and_weights_cannot_hide_server_or_generation_default_drift(self):
         for field in ("version", "template", "parameters", "system", "model_info"):
@@ -181,6 +207,91 @@ class OllamaRuntimeTests(unittest.TestCase):
                     self.verify()
                 target[field] = old
                 self.assertEqual(self.layout.resolve(evidence["ollama_runtime"]["path"]).read_bytes(), original)
+
+    def test_parameter_name_permutations_preserve_raw_runtime_bytes_and_reference(self):
+        self.show["parameters"] = "\n".join(PARAMETER_BLOCKS)
+        evidence = self.verify()
+        reference = evidence["ollama_runtime"]
+        path = self.layout.resolve(reference["path"])
+        original = path.read_bytes()
+        for blocks in itertools.permutations(PARAMETER_BLOCKS):
+            with self.subTest(blocks=blocks):
+                self.show["parameters"] = "\n".join(blocks)
+                self.assertEqual(self.verify()["ollama_runtime"], reference)
+                self.assertEqual(path.read_bytes(), original)
+        # The user's reported rotation is one of these 120 permutations.
+        self.assertEqual(load_runtime(self.layout.run_root, reference)[
+            "generation_defaults"]["parameters"], "\n".join(PARAMETER_BLOCKS))
+
+    def test_parameter_values_counts_and_per_name_order_still_reject_drift(self):
+        parameters = "\n".join(PARAMETER_BLOCKS)
+        self.show["parameters"] = parameters
+        reference = self.verify()["ollama_runtime"]
+        path = self.layout.resolve(reference["path"])
+        original = path.read_bytes()
+        lines = parameters.splitlines()
+        variants = {
+            "value": parameters.replace("0.6", "0.7"),
+            "stop_order": "\n".join([lines[1], lines[0], *lines[2:]]),
+            "stop_content": parameters.replace("<|im_start|>", "<|different|>"),
+            "missing_stop": "\n".join(lines[1:]),
+            "duplicate_stop": parameters + "\n" + lines[0],
+            "added_parameter": parameters + "\nseed 42",
+            "missing_parameter": "\n".join(lines[:-1]),
+            "quoted_space": parameters.replace('"<|im_end|>"', '"<|im_end|> "'),
+            "duplicate_scalar": parameters + "\ntemperature 0.6",
+        }
+        for label, changed in variants.items():
+            with self.subTest(label=label):
+                self.show["parameters"] = changed
+                with self.assertRaisesRegex(DataContractError, "runtime drift"):
+                    self.verify()
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_runtime_comparison_does_not_mutate_or_conflate_raw_value_syntax(self):
+        self.show["parameters"] = "\n".join(PARAMETER_BLOCKS)
+        recorded = runtime_identity(ORIGIN, self.version, self.show, self.model)
+        observed = copy.deepcopy(recorded)
+        observed["generation_defaults"]["parameters"] = "\n".join(
+            (PARAMETER_BLOCKS[-1], *PARAMETER_BLOCKS[:-1]))
+        originals = copy.deepcopy((recorded, observed))
+        self.assertTrue(runtime_matches(recorded, observed))
+        self.assertEqual((recorded, observed), originals)
+        for text in ('stop "a b"', 'stop "a  b"', "temperature 0.60"):
+            with self.subTest(text=text):
+                changed = copy.deepcopy(observed)
+                changed["generation_defaults"]["parameters"] = text
+                self.assertFalse(runtime_matches(recorded, changed))
+        missing = copy.deepcopy(recorded)
+        del missing["generation_defaults"]["parameters"]
+        self.assertFalse(runtime_matches(recorded, missing))
+        added = copy.deepcopy(recorded)
+        added["unrecognized_runtime_field"] = True
+        self.assertFalse(runtime_matches(recorded, added))
+
+    def test_unknown_parameter_display_syntax_requires_exact_equality(self):
+        for text in ("temperature", "temperature 0.6\n\nstop x", "bad-key 1\nstop x"):
+            with self.subTest(text=text):
+                self.show["parameters"] = text
+                recorded = runtime_identity(ORIGIN, self.version, self.show, self.model)
+                self.assertTrue(runtime_matches(recorded, copy.deepcopy(recorded)))
+                changed = copy.deepcopy(recorded)
+                changed["generation_defaults"]["parameters"] = "\n".join(
+                    reversed(text.splitlines())) + "\n"
+                self.assertFalse(runtime_matches(recorded, changed))
+
+    def test_ordering_equivalence_cannot_hide_foreign_runtime_run_id(self):
+        self.show["parameters"] = "\n".join(PARAMETER_BLOCKS)
+        reference = self.verify()["ollama_runtime"]
+        path = self.layout.resolve(reference["path"])
+        document = load_json(path)
+        document["run_id"] = "foreign-run"
+        atomic_write_json(path, document)
+        original = path.read_bytes()
+        self.show["parameters"] = "\n".join(reversed(PARAMETER_BLOCKS))
+        with self.assertRaisesRegex(DataContractError, "runtime drift"):
+            self.verify()
+        self.assertEqual(path.read_bytes(), original)
 
     def test_missing_server_version_fails_without_recording_placeholders(self):
         self.version.clear()
@@ -231,6 +342,32 @@ class OllamaRuntimeTests(unittest.TestCase):
             self.version["version"] = "server-changed-on-resume"
             with self.assertRaisesRegex(runner.PhaseEError, "runtime differs"):
                 runner.fetch_matching_model(ORIGIN, expected)
+
+    def test_live_and_stored_rag_accept_display_order_without_rewriting_runtime(self):
+        self.show["parameters"] = "\n".join(PARAMETER_BLOCKS)
+        expected = self.expected_rag_model()
+        reference = expected["ollama_runtime"]
+        path = self.layout.resolve(reference["path"])
+        original = path.read_bytes()
+        self.show["parameters"] = "\n".join(
+            (PARAMETER_BLOCKS[-1], *PARAMETER_BLOCKS[:-1]))
+        with mock.patch.object(runner, "fetch_ollama_json", side_effect=self.rag_fetch):
+            for check_runtime in (True, False):
+                evidence, tags_bytes, show_bytes = runner.fetch_matching_model(
+                    ORIGIN, expected, check_runtime=check_runtime)
+                self.assertEqual(evidence["ollama_runtime_sha256"], reference["sha256"])
+                runner._validate_stored_model_response(
+                    json.loads(tags_bytes), json.loads(show_bytes), expected)
+                self.assertEqual(path.read_bytes(), original)
+        self.show["parameters"] = self.show["parameters"].replace("0.6", "0.7")
+        with mock.patch.object(runner, "fetch_ollama_json", side_effect=self.rag_fetch):
+            with self.assertRaisesRegex(runner.PhaseEError, "runtime differs"):
+                runner.fetch_matching_model(ORIGIN, expected)
+        with self.assertRaisesRegex(runner.ModelEvidenceError, "generation defaults differ"):
+            runner._validate_stored_model_response(
+                {"models": [{"name": self.model["name"], "digest": self.model["tag_digest"]}]},
+                self.show, expected)
+        self.assertEqual(path.read_bytes(), original)
 
     def test_per_answer_checks_reuse_stage_version_but_still_check_template(self):
         expected = self.expected_rag_model()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,31 @@ from utils.common.artifact_io import (
 
 
 RUNTIME_PATH = "runtime/ollama.json"
+
+
+def _comparison_identity(identity: Any) -> Any:
+    """Ignore parameter-name display order, retaining each name's ordered values."""
+    if not isinstance(identity, dict):
+        return identity
+    defaults = identity.get("generation_defaults")
+    if not isinstance(defaults, dict) or not isinstance(defaults.get("parameters"), str):
+        return identity
+    groups: dict[str, list[str]] = {}
+    for line in defaults["parameters"].splitlines():
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2 or re.fullmatch(r"[a-z][a-z0-9_]*", parts[0]) is None:
+            # Unknown display syntax must still compare exactly.
+            return identity
+        name, value = parts
+        groups.setdefault(name, []).append(value)
+    return {**identity, "generation_defaults": {**defaults, "parameters": tuple(
+        (name, tuple(values)) for name, values in sorted(groups.items())
+    )}}
+
+
+def runtime_matches(recorded: Any, observed: Any) -> bool:
+    """Compare runtime settings without changing raw hash-bound observations."""
+    return _comparison_identity(recorded) == _comparison_identity(observed)
 
 
 def runtime_identity(origin: str, version: dict[str, Any],
@@ -42,7 +68,7 @@ def bind_runtime(layout, identity: dict[str, Any]) -> dict[str, str]:
     if path.exists():
         document = load_json(path)
         if (not isinstance(document, dict) or document.get("run_id") != layout.run_id
-                or document.get("identity") != identity):
+                or not runtime_matches(document.get("identity"), identity)):
             raise DataContractError("same-run Ollama server/model runtime drift")
     else:
         atomic_write_json(path, {"run_id": layout.run_id, "identity": identity})

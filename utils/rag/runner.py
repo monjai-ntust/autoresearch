@@ -1716,7 +1716,7 @@ def fetch_matching_model(
         raise PhaseEError("Ollama blob identity differs from the same-run verifier")
     runtime_evidence = {}
     if "ollama_runtime_identity" in expected:
-        from utils.verifier.runtime import runtime_identity
+        from utils.verifier.runtime import runtime_identity, runtime_matches
         from utils.common.artifact_io import DataContractError
         stored_runtime = expected["ollama_runtime_identity"]
         if check_runtime:
@@ -1730,7 +1730,7 @@ def fetch_matching_model(
             observed_runtime = runtime_identity(origin, version, show, expected)
         except DataContractError as exc:
             raise PhaseEError(str(exc)) from exc
-        if observed_runtime != stored_runtime:
+        if not runtime_matches(stored_runtime, observed_runtime):
             raise PhaseEError("Ollama server/model runtime differs from the same-run verifier")
         runtime_evidence = {"ollama_runtime_sha256": expected["ollama_runtime"]["sha256"]}
     evidence = {"tags_response_sha256": tags_hash, "show_response_sha256": show_hash}
@@ -1926,7 +1926,7 @@ def _validate_stored_model_response(
     if observed_blobs != {expected["blob_sha256"]}:
         raise ModelEvidenceError("Stored Ollama blob identity differs from the run model")
     if "ollama_runtime_identity" in expected:
-        from utils.verifier.runtime import runtime_identity
+        from utils.verifier.runtime import runtime_identity, runtime_matches
         from utils.common.artifact_io import DataContractError
         runtime = expected["ollama_runtime_identity"]
         try:
@@ -1934,7 +1934,7 @@ def _validate_stored_model_response(
                 {"version": runtime["server_version"]}, show, expected)
         except (DataContractError, KeyError) as exc:
             raise ModelEvidenceError("Stored Ollama runtime evidence is malformed") from exc
-        if observed != runtime:
+        if not runtime_matches(runtime, observed):
             raise ModelEvidenceError("Stored Ollama generation defaults differ from the run runtime")
 
 

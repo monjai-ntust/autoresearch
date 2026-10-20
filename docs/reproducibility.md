@@ -146,7 +146,16 @@ client or choose them to reproduce a table. See the
 The first live verifier capture saves `runtime/ollama.json` once for the run:
 actual `/api/version`, stable generation-relevant model template/defaults and
 verified weight identity. RAG and later verifier dispatches reject changes to
-that identity. The public API does not expose the server launch environment or
+that identity. Ollama's parameter display may enumerate distinct names in a
+different order on successive metadata requests. Runtime comparisons group
+those names, preserving exact value text, duplicate counts and the order of
+values within each name (including `stop`). Raw observations and their hashes
+remain unchanged; malformed parameter text still compares exactly. This
+comparison fix changes no generation setting, request, training or scoring.
+It does not permit a source update inside an existing run: the original clean
+source commit remains bound by that run's checkout manifest.
+
+The public API does not expose the server launch environment or
 numerical library/kernel policy; no placeholder observations are logged. The version
 string also does not prove an executable/build digest. A restart with the same
 version/model but different unexposed settings requires external launch evidence.
