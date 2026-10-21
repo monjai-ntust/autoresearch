@@ -198,7 +198,7 @@
   },
   "execution_limits": {
     "maximum_total_gpu_hours": 48,
-    "minimum_free_storage_bytes_before_full_run": 200000000000,
+    "minimum_free_storage_bytes_before_full_run": 180000000000,
     "stop_on_first_nonrecoverable_arm_failure": true,
     "final_test_access": "only after all four arms pass smoke validation and all development runs are complete or dispositioned"
   },

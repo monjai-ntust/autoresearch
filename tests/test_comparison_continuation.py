@@ -75,7 +75,7 @@ class ComparisonContinuationTests(unittest.TestCase):
         with (
             mock.patch.object(comparison_matrix, "matrix_identity", return_value=identity),
             mock.patch.object(comparison_matrix, "checked_process") as dispatch,
-            mock.patch.object(comparison_matrix.shutil, "disk_usage", return_value=SimpleNamespace(free=2e11)),
+            mock.patch("utils.common.storage.shutil.disk_usage", return_value=SimpleNamespace(free=2e11)),
             mock.patch.object(stage, "prepare"),
             mock.patch.object(stage, "run_smoke", side_effect=model_stage),
             mock.patch.object(stage, "run_training", side_effect=model_stage),

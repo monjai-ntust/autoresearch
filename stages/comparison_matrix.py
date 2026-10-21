@@ -1,12 +1,12 @@
 """The four-arm smoke/development/test barriers for fresh comparisons."""
 from __future__ import annotations
 
-import shutil
 import subprocess
 
 from utils.common.artifact_io import DataContractError, load_json, sha256_file
 from utils.common.execution import bind_json, checked_process, exclusive_run
 from utils.common.paths import RunLayout
+from utils.common.storage import warn_storage
 from utils.encoder_comparison.config import ComparisonConfig, validate_selection
 
 MATRIX_RECEIPT = "manifests/comparison-matrix.json"
@@ -89,9 +89,10 @@ def run_matrix(layout: RunLayout, config: ComparisonConfig) -> int:
             checked_process(layout, command, label="comparison-smoke")
 
         def execute(command, **kwargs):
-            required = config.value["execution_limits"]["minimum_free_storage_bytes_before_full_run"]
-            if shutil.disk_usage(layout.run_root).free < required:
-                raise DataContractError(f"comparison full execution requires {required} free bytes")
+            budget = config.value["execution_limits"]["minimum_free_storage_bytes_before_full_run"]
+            roots = [layout.run_root, *(RunLayout(layout.source_root, run_id).run_root
+                for run_id in identity["members"].values())]
+            warn_storage(layout.run_root, budget=budget, roots=roots, label="encoder_comparison")
             checked_process(layout, command, label="comparison-full",
                 limit_seconds=config.value["execution_limits"]["maximum_total_gpu_hours"]*3600)
         for arm, run_id in identity["members"].items():

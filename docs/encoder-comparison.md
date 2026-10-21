@@ -45,8 +45,21 @@ inspects test outcomes. Preparation may materialize the fixed held-out split.
 The coordinator and private workers enforce identical gates. Matrix membership,
 actual clean source/configuration identity and model hashes cannot change.
 
-Each full training/inference invocation requires 200,000,000,000 free storage
-bytes. The matrix enforces the frozen cumulative 48-hour full-execution bound
+Before each full training/inference invocation, the storage check warns if free
+space is below the remaining estimate: max(0, 180,000,000,000 bytes minus existing
+matrix/member output). This is a 180 GB decimal total comparison budget, including
+model caches, smoke artifacts and all 32 seeds' checkpoints/restart states; it is
+an estimate, not a storage cap. Files on the checked filesystem count once by
+device/inode, using allocated bytes where available and file lengths otherwise.
+Symlinks, other filesystems and unrelated output runs receive no credit. Low
+space or an unavailable estimate prints a warning and execution continues.
+The entry points have separate decimal budgets: `pipeline.py` uses 100 GB for
+its selected run excluding `table2-code-all/`; `encoder_comparison.py` uses
+180 GB for its matrix and four members; `rag.py` uses 1 GB (or four times the
+projected input size when larger) for the selected run's `table2-code-all/` only.
+The pipeline budget covers its encoder/verifier inputs and retained checkpoints;
+RAG consumes those existing models rather than reserving their storage again.
+The matrix enforces the frozen cumulative 48-hour full-execution bound
 using elapsed accelerator-job wall time. Failed and resumed invocations are
 charged; abandoned starts without finishes are conservatively charged through
 reinvocation. This is a policy bound, not measured GPU utilization. Exhaustion

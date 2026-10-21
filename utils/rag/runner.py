@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from utils.common.artifact_io import DataContractError
 from utils.common.constants import PROTOCOL_ID
+from utils.common.storage import warn_storage
 from utils.encoder.cache import MANIFEST_RELATIVE as HF_CACHE_MANIFEST_RELATIVE
 from utils.rag import evaluator
 from utils.rag.graph import build_table_graphs, canonical_json, project_graph
@@ -32,6 +33,7 @@ CONTRACT_PATH = ROOT / "resources/contracts/table2.json"
 RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 MODEL_BLOB_RE = re.compile(r"sha256[-:]([0-9a-f]{64})", re.IGNORECASE)
+STORAGE_BUDGET_BYTES = 1_000_000_000
 
 
 class PhaseEError(RuntimeError):
@@ -1542,20 +1544,20 @@ def project_evaluator_records(
     return projected, canonical_jsonl_bytes(projected), summary
 
 
-def validate_environment(required_bytes: int) -> dict[str, Any]:
+def validate_environment(required_bytes: int, run_dir: Path | None = None) -> dict[str, Any]:
     if sys.version_info < (3, 10):
         raise PhaseEError("Phase E requires Python 3.10 or newer")
     curl = shutil.which("curl")
     if not curl:
         raise PhaseEError("curl is required by the frozen evaluator")
-    storage = shutil.disk_usage(ROOT)
-    required_free = max(100 * 1024 * 1024, required_bytes * 4)
-    if storage.free < required_free:
-        raise PhaseEError("Insufficient free storage for Phase E outputs")
+    filesystem = run_dir if run_dir is not None else ROOT
+    roots = [run_dir / "table2-code-all"] if run_dir is not None else []
+    free, required_free = warn_storage(filesystem,
+        budget=max(STORAGE_BUDGET_BYTES, required_bytes * 4), roots=roots, label="rag")
     return {
         "python": platform.python_version(),
         "curl": str(Path(curl).resolve()),
-        "free_bytes": storage.free,
+        "free_bytes": free,
         "required_free_bytes": required_free,
     }
 
@@ -1617,7 +1619,7 @@ def preflight_same_run(
             "relations": len(snapshot["relations"]),
             "triples": len(snapshot["triples"]),
         }
-    environment = validate_environment(sum(len(content) for content in projections.values()))
+    environment = validate_environment(sum(len(content) for content in projections.values()), run_dir)
     summary = {
         "run_id": run_id,
         "run_dir": str(run_dir),

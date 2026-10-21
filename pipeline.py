@@ -17,6 +17,7 @@ from utils.common.execution import exclusive_run
 from utils.common.paths import PathContractError, RunLayout, discover_source_root
 
 DEFAULT_CONFIG = "resources/configs/pipeline.json"
+STORAGE_BUDGET_BYTES = 100_000_000_000
 
 
 def _run_full_pipeline(layout, config, *, ollama_url, model_blob_source) -> int:
@@ -24,7 +25,10 @@ def _run_full_pipeline(layout, config, *, ollama_url, model_blob_source) -> int:
     from stages.evaluation import run as evaluate
     from stages.preparation import run as prepare
     from stages.verifier import prepare_development_gate, run_pilot, run_test
+    from utils.common.storage import warn_storage
 
+    warn_storage(layout.run_root, budget=STORAGE_BUDGET_BYTES, roots=[layout.run_root],
+        label="pipeline", excluded=(layout.resolve("table2-code-all"),))
     prepare(layout, config)
     encoder, hardware, development = train_and_generate_development(layout, config)
     threshold, pilot = prepare_development_gate(layout, config, development)

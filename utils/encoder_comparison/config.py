@@ -127,7 +127,7 @@ EXPECTED_STATISTICAL_PROTOCOL = {
 }
 EXPECTED_EXECUTION_LIMITS = {
     "maximum_total_gpu_hours": 48,
-    "minimum_free_storage_bytes_before_full_run": 200000000000,
+    "minimum_free_storage_bytes_before_full_run": 180000000000,
     "stop_on_first_nonrecoverable_arm_failure": True,
     "final_test_access": (
         "only after all four arms pass smoke validation and all development runs "
