@@ -64,6 +64,7 @@ def _live_inference_records(
         revision=model_revision,
         cache_dir=str(model_cache_dir),
         local_files_only=True,
+        add_prefix_space=True,
     )
     model = BertKGExtractor(
         base_model,

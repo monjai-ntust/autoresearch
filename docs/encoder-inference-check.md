@@ -1,8 +1,18 @@
 # External checkpoint inference check
 
-This is a user-authorized experiment on existing `research-1022` pipeline
-checkpoints. `comparison-1020` is left untouched. Production inference is
-unchanged; replacement requires review of the external results.
+This is a user-authorized experiment on existing pipeline checkpoints; the
+initial example used `research-1022`, and the completed external test selected
+`research-1020`. `comparison-1020` is left untouched. After reviewing the result,
+the user authorized the production tokenizer correction on 28 October 2026.
+Canonical prediction now explicitly uses `add_prefix_space=True`, matching
+training and comparison prediction. The standalone tool retains its additional
+meta-loading, numerical-policy and independent-repeat checks.
+
+Comparison training and both development/test prediction already share
+`utils/encoder_comparison/trainer.py::_tokenizer`, which explicitly sets
+`add_prefix_space=True` for both DeBERTa profiles. Regression coverage exercises
+the real worker arguments for all four comparison arms and checks those settings
+at the tokenizer factory. BERT keeps its existing WordPiece tokenizer settings.
 
 Copy **only** `check_encoder_inference.py` beside `pipeline.py` in the existing
 external source checkout. Keep that checkout and its run bindings; a pull is
@@ -92,8 +102,14 @@ PyTorch describes both these limits and the strict algorithm option in its
 The meta/strict-assignment loading pattern follows its
 [checkpoint loading recipe](https://docs.pytorch.org/tutorials/recipes/recipes/module_load_state_dict_tips.html).
 
-Return the complete testing directory, including failures if any. Review exact
-repeat hashes, original input/runtime identity, per-seed changes and the measured
-F1 before deciding whether to replace production inference. Score recovery and
-live CUDA equality are external validation; local tests use synthetic fixtures
-and do not execute pretrained models.
+Return the complete testing directory, including failures if any. The completed
+`inference-test-1027-uv` reports mean F1 0.5199012003522201, sample SD
+0.015508657649720559 and best 0.5423406279733587, matching the earlier recipe's
+eight per-seed count/metric sets. Reported checkpoint hashes also match both
+retained canonical runs. This external result exercised the combined diagnostic
+variant; it does not isolate a prefix-only effect or prove a fresh production
+CUDA run after the source correction. Local tests compare native production and
+the diagnostic variant with synthetic weights, including fresh-process equality;
+they do not execute pretrained models. Existing run/source bindings and completed
+products remain immutable when updating code: use the original checkout for an
+old-run diagnostic and a fresh run for the corrected production workflow.

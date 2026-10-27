@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 import copy
+import contextlib
 import importlib.util
 import json
 import os
@@ -80,7 +81,7 @@ class InferenceCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'float32'):
             check.strict_load(model, {k: v.to(torch.float16) for k, v in model.state_dict().items()}, torch.device('cpu'))
 
-    def test_existing_live_loop_prefix_override_and_runtime_writes_are_scoped(self):
+    def _live_fixture(self, *, corrected=True, split='test'):
         import transformers
         from utils.encoder import network, runtime
         from utils.encoder.inference import _live_inference_records
@@ -106,45 +107,117 @@ class InferenceCheckTests(unittest.TestCase):
             frozen = checkpoint.read_bytes()
             config = SimpleNamespace(value={'training': {'max_length': 128, 'max_span_width': 2,
                 'base_model_revision': 'fixture', 'context_between_spans': True}})
-            sentence = PreparedSentence('x', 'x', 'test', 'a b', 'a b', ('a', 'b'))
+            sentence = PreparedSentence('x', 'x', split, 'a b', 'a b', ('a', 'b'))
             expected_class = network.BertKGExtractor
             kwargs_seen = []
             paths = []
 
             def tokenizer(*args, **kwargs):
                 kwargs_seen.append(kwargs)
+                self.assertIs(kwargs.get('add_prefix_space'), True)
                 return lambda *a, **kw: TinyEncoding(input_ids=[1, 2, 3, 2], attention_mask=[1]*4)
 
             before = torch.get_rng_state().clone()
             with (mock.patch.object(transformers.AutoConfig, 'from_pretrained', return_value=SimpleNamespace(model_type='deberta')),
                   mock.patch.object(transformers.AutoTokenizer, 'from_pretrained', side_effect=tokenizer),
                   mock.patch.object(transformers.AutoModel, 'from_config', side_effect=lambda *a, **kw: TinyBackbone()),
+                  mock.patch.object(network, 'AutoModel', SimpleNamespace(from_pretrained=lambda *a, **kw: TinyBackbone())),
                   mock.patch.object(runtime, 'configure_numerics'),
                   mock.patch.object(runtime, 'record_runtime', side_effect=lambda p: paths.append(p)),
                   mock.patch.object(runtime, 'record_model_runtime', side_effect=lambda p, m: paths.append(p))):
-                with check.corrected_dependencies(config, base / 'snapshot', base / 'testing'), torch.inference_mode():
+                dependencies = (check.corrected_dependencies(config, base / 'snapshot', base / 'testing')
+                                if corrected else contextlib.nullcontext())
+                execution = torch.inference_mode() if corrected else contextlib.nullcontext()
+                with dependencies, execution:
                     records = _live_inference_records(config, SimpleNamespace(training_seed=42), {'x': sentence},
                         checkpoint, 'fixture', 'cpu', base / 'cache')
             self.assertTrue(kwargs_seen[0]['add_prefix_space'])
             self.assertTrue(kwargs_seen[0]['local_files_only'])
             self.assertTrue(records[0]['predicted_relations'])
-            self.assertTrue(all(p == base / 'testing/data-prepared' for p in paths))
+            expected_runtime = base / ('testing/data-prepared' if corrected else 'original/data-prepared')
+            self.assertTrue(all(p == expected_runtime for p in paths))
             self.assertEqual(frozen, checkpoint.read_bytes())
             self.assertEqual(network.BertKGExtractor, expected_class)
-            self.assertTrue(torch.equal(before, torch.get_rng_state()))
+            if corrected:
+                self.assertTrue(torch.equal(before, torch.get_rng_state()))
             if os.environ.get('INFERENCE_FIXTURE_RESULT'):
                 Path(os.environ['INFERENCE_FIXTURE_RESULT']).write_bytes(check.encode(records))
+            return check.encode(records)
+
+    def test_existing_live_loop_prefix_override_and_runtime_writes_are_scoped(self):
+        self._live_fixture(corrected=os.environ.get('INFERENCE_FIXTURE_MODE') != 'production')
+
+    def test_production_matches_verified_variant_for_both_splits_and_initialization_states(self):
+        expected = self._live_fixture(corrected=True)
+        for split in ('development', 'test'):
+            for initialization_seed in (1, 987654):
+                with self.subTest(split=split, initialization_seed=initialization_seed):
+                    torch.manual_seed(initialization_seed)
+                    self.assertEqual(self._live_fixture(corrected=False, split=split), expected)
+
+    def test_comparison_training_and_both_prediction_splits_keep_profile_tokenization(self):
+        from stages.encoder_comparison import trainer_arguments
+        from utils.common.paths import RunLayout
+        from utils.encoder.cache import MANIFEST_RELATIVE
+        from utils.encoder_comparison import trainer
+        from utils.encoder_comparison.config import DEFAULT_CONFIG, load_comparison_config
+
+        class TokenizerConsumed(Exception):
+            pass
+
+        config = load_comparison_config(ROOT, DEFAULT_CONFIG)
+        (ROOT / 'output').mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=ROOT / 'output') as temporary:
+            layout = RunLayout(ROOT, Path(temporary).name)
+            prepared = layout.resolve('data-prepared')
+            prepared.mkdir()
+            for split in ('development', 'test'):
+                (prepared / (split + '.jsonl')).write_bytes(b'')
+            cache_manifest = layout.resolve(MANIFEST_RELATIVE)
+            cache_manifest.parent.mkdir()
+            cache_manifest.write_bytes(b'{}')
+            for arm in config.arms:
+                selection = config.select_arm(arm)
+                for mode, split in (('train', None), ('predict', 'development'), ('predict', 'test')):
+                    with self.subTest(arm=arm, mode=mode, split=split):
+                        args = trainer_arguments(layout, selection, 42, mode=mode, split=split)
+                        tokenized = object()
+                        with (mock.patch.object(trainer, 'configure_numerics'),
+                              mock.patch.object(trainer, 'record_runtime'),
+                              mock.patch.object(trainer.random, 'seed'),
+                              mock.patch.object(trainer.torch.cuda, 'is_available', return_value=False),
+                              mock.patch.object(trainer.AutoTokenizer, 'from_pretrained', return_value=tokenized) as factory,
+                              mock.patch.object(trainer.code_accord, 'build_dataloaders', side_effect=TokenizerConsumed) as loader,
+                              mock.patch.object(trainer, '_model', side_effect=TokenizerConsumed) as model):
+                            with self.assertRaises(TokenizerConsumed):
+                                getattr(trainer, mode)(args)
+                        expected = {'revision': selection.profile.revision,
+                            'cache_dir': args.model_cache_dir, 'local_files_only': True}
+                        if selection.profile.profile_id in ('deberta-base-v1', 'deberta-large-v1'):
+                            expected['add_prefix_space'] = True
+                        factory.assert_called_once_with(selection.profile.model, **expected)
+                        if mode == 'train':
+                            self.assertIs(loader.call_args.args[0], tokenized)
+                            model.assert_not_called()
+                        else:
+                            loader.assert_not_called()
+                            model.assert_called_once()
 
     def test_independent_processes_agree_on_real_live_loop_with_synthetic_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             paths = [Path(temporary) / name for name in ('one.json', 'two.json')]
-            for path in paths:
-                result = subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()),
-                    'InferenceCheckTests.test_existing_live_loop_prefix_override_and_runtime_writes_are_scoped'],
-                    env={**os.environ, 'INFERENCE_FIXTURE_RESULT': str(path), 'PYTHONHASHSEED': '0'},
-                    capture_output=True, text=True, timeout=180)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(paths[0].read_bytes(), paths[1].read_bytes())
+            outputs = []
+            for mode in ('verified', 'production'):
+                for path in paths:
+                    result = subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()),
+                        'InferenceCheckTests.test_existing_live_loop_prefix_override_and_runtime_writes_are_scoped'],
+                        env={**os.environ, 'INFERENCE_FIXTURE_RESULT': str(path), 'PYTHONHASHSEED': '0',
+                             'INFERENCE_FIXTURE_MODE': mode},
+                        capture_output=True, text=True, timeout=180)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(paths[0].read_bytes(), paths[1].read_bytes())
+                outputs.append(paths[0].read_bytes())
+            self.assertEqual(*outputs)
 
     def test_repeat_tamper_and_runtime_difference_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -53,6 +53,10 @@ flowchart LR
    explicit. [model.py](../utils/encoder/model.py) owns input/checkpoint/candidate
    contracts, [inference.py](../utils/encoder/inference.py) runs the model, and
    [candidates.py](../utils/encoder/candidates.py) converts the raw ledger.
+   Development and test prediction explicitly use `add_prefix_space=True` for
+   pre-split words, matching canonical training and comparison prediction.
+   Comparison training and both prediction splits share their own `_tokenizer`:
+   both DeBERTa profiles set this flag; BERT retains its WordPiece settings.
    Greedy non-overlapping span selection and the confidence product
    `min(head_probability, tail_probability) * relation_probability` are preserved.
 4. [threshold.py](../utils/verifier/threshold.py) selects from development data.
