@@ -65,6 +65,11 @@ flowchart LR
    [pilot.py](../utils/verifier/pilot.py) authenticates independent development
    captures. [interpretation.py](../utils/verifier/interpretation.py) validates
    response actions and maps corrected spans back to source tokens.
+   The pilot admits source-valid correction emissions and rejected corrections
+   with no emitted triple. Ambiguous, out-of-source and unchanged corrections
+   retain their rejection statuses; malformed responses, inconsistent emissions,
+   repeat mismatches and invalid lineage still block execution. Audit revision
+   1.1 records this admission rule and the original response distributions.
    [verifier.py](../utils/verifier/verifier.py) owns transport, original attempts,
    timings and durable response continuation.
 5. [scoring.py](../utils/evaluation/scoring.py) compares typed strict tuples and

@@ -18,7 +18,12 @@ from utils.common.artifact_io import (
     sha256_file,
 )
 from utils.common.paths import RunLayout, discover_source_root
-from utils.verifier.pilot import PilotInputs, _load_capture_index, run_verifier_pilot
+from utils.verifier.pilot import (
+    PilotInputs,
+    _correction_emission_is_safe,
+    _load_capture_index,
+    run_verifier_pilot,
+)
 from utils.common.records import StrictTriple, candidate_id_for
 from utils.verifier.verifier import _verdict_from_response, run_verifier
 from utils.verifier.requests import _load_candidates, _load_sentences
@@ -101,7 +106,10 @@ class VerifierPilotTests(unittest.TestCase):
     def setUpClass(cls):
         cls.config = load_pipeline_config(SOURCE_ROOT, "resources/configs/pipeline.json")
 
-    def _fixture(self, root: str, *, mismatch: bool = False) -> tuple[RunLayout, PilotInputs]:
+    def _fixture(
+        self, root: str, *, mismatch: bool = False, repeated_tail: bool = False,
+        correction: dict | None = None,
+    ) -> tuple[RunLayout, PilotInputs]:
         layout = RunLayout(Path(root), "pilot")
         layout.create()
         sentences = layout.resolve("data-prepared/development.jsonl")
@@ -128,6 +136,12 @@ class VerifierPilotTests(unittest.TestCase):
             "entities": [],
             "relations": [],
         }
+        if repeated_tail:
+            sentence.update(
+                content="Door shall be fire rated beside fire rated.",
+                processed_content="Door shall be fire rated beside fire rated .",
+                words=["Door", "shall", "be", "fire", "rated", "beside", "fire", "rated", "."],
+            )
         candidate_records = sorted(
             [_candidate("necessity"), _candidate("selection")],
             key=lambda item: (
@@ -330,7 +344,7 @@ class VerifierPilotTests(unittest.TestCase):
                             {
                                 "action": "CORRECT",
                                 "reason_code": "WRONG_RELATION",
-                                "corrected": {
+                                "corrected": correction if correction is not None else {
                                     "head_text": "Door",
                                     "head_type": "Object",
                                     "relation": "necessity",
@@ -363,12 +377,13 @@ class VerifierPilotTests(unittest.TestCase):
                     for request in request_paths[mode]
                     if request["candidate_id"] == warmup_candidate_id
                 )
-                warmup_content = next(
-                    attempt["raw_response"]["message"]["content"]
-                    for response in responses
-                    if response["candidate_id"] == warmup_candidate_id
-                    for attempt in response["attempts"]
-                )
+                # Keep the independent warm-up valid when a scored response is
+                # deliberately malformed to exercise the pilot's schema gate.
+                warmup_content = '{"action":"KEEP","reason_code":"SUPPORTED"}'
+                if mode == "corrective":
+                    warmup_content = (
+                        '{"action":"KEEP","reason_code":"SUPPORTED","corrected":null}'
+                    )
                 warmup_response = _response(
                     warmup_request, warmup_content, repeat=repeat + 2
                 )
@@ -673,6 +688,88 @@ class VerifierPilotTests(unittest.TestCase):
             self.assertEqual(audit["go_no_go_status"], "blocked_synthetic_fixture")
             self.assertEqual(audit["determinism"]["simple"]["mismatch_count"], 1)
             self.assertTrue(audit["material_protocol_review_required"])
+
+    def test_rejected_corrections_do_not_block_safe_pilot_emissions(self):
+        cases = (
+            ("ambiguous", {"repeated_tail": True}),
+            ("out_of_source", {"correction": {
+                "head_text": "Window", "head_type": "Object",
+                "relation": "necessity", "tail_text": "fire rated", "tail_type": "Quality",
+            }}),
+            ("schema_invalid", {"correction": {
+                "head_text": "Door", "head_type": "Object",
+                "relation": "selection", "tail_text": "fire rated", "tail_type": "Quality",
+            }}),
+        )
+        for rejected_status, options in cases:
+            with self.subTest(status=rejected_status), _temporary_output_directory() as temporary:
+                layout, inputs = self._fixture(temporary, **options)
+                audit = run_verifier_pilot(
+                    layout, self.config, inputs, evidence_class="synthetic-fixture"
+                )
+                self.assertEqual(audit["pilot_status"], "pass")
+                self.assertEqual(audit["schema_version"], "phase-b-verifier-pilot-audit-1.1")
+                self.assertEqual(audit["correction_policy"], "source-valid-or-rejected-1")
+                self.assertEqual(audit["go_no_go_status"], "blocked_synthetic_fixture")
+                self.assertFalse(audit["publication_execution_admitted"])
+                checks = {row["check_id"]: row for row in audit["checks"]}
+                self.assertEqual(checks["correction-emission-safety"]["status"], "pass")
+                for repeat in (1, 2):
+                    records = [json.loads(s) for s in layout.resolve(
+                        f"verifier/pilot/corrective-repeat-{repeat}/corrective/verdicts.jsonl"
+                    ).read_text(encoding="utf-8").splitlines()]
+                    rejected = next(v for v in records if v["action"] == "CORRECT")
+                    self.assertEqual(rejected["response_status"], "valid_response")
+                    self.assertEqual(rejected["correction_validation_status"], rejected_status)
+                    self.assertIsNone(rejected["corrected"])
+                    diagnostic = audit["corrective_outcome_diagnostics"][repeat - 1]
+                    self.assertEqual(diagnostic["correction_attempted"], 1)
+                    self.assertEqual(diagnostic["correction_source_valid"], 0)
+                    self.assertEqual(diagnostic["original_invalid_to_final_invalid"], 1)
+                    self.assertEqual(
+                        audit["distributions"]["corrective"][f"repeat_{repeat}"]
+                        ["correction_validation_status"][rejected_status], 1
+                    )
+
+    def test_schema_failure_still_blocks_pilot(self):
+        with _temporary_output_directory() as temporary:
+            layout, inputs = self._fixture(temporary, correction={
+                "head_text": "Door", "head_type": "Object",
+                "relation": "invented", "tail_text": "fire rated", "tail_type": "Quality",
+            })
+            audit = run_verifier_pilot(
+                layout, self.config, inputs, evidence_class="synthetic-fixture"
+            )
+            self.assertEqual(audit["pilot_status"], "fail")
+            self.assertTrue(audit["material_protocol_review_required"])
+            checks = {row["check_id"]: row for row in audit["checks"]}
+            self.assertEqual(checks["response-schema"]["status"], "fail")
+
+    def test_rejected_correction_does_not_hide_repeat_mismatch(self):
+        with _temporary_output_directory() as temporary:
+            layout, inputs = self._fixture(temporary, mismatch=True, repeated_tail=True)
+            audit = run_verifier_pilot(
+                layout, self.config, inputs, evidence_class="synthetic-fixture"
+            )
+            self.assertEqual(audit["pilot_status"], "fail")
+            self.assertTrue(audit["material_protocol_review_required"])
+            self.assertEqual(audit["determinism"]["simple"]["mismatch_count"], 1)
+            checks = {row["check_id"]: row for row in audit["checks"]}
+            self.assertEqual(checks["correction-emission-safety"]["status"], "pass")
+
+    def test_correction_emission_check_rejects_inconsistent_contracts(self):
+        for status, corrected in (
+            ("valid", None), ("ambiguous", {"unexpected": "emission"}),
+            ("out_of_source", {"unexpected": "emission"}),
+            ("schema_invalid", {"unexpected": "emission"}),
+            ("direction_invalid", {"unexpected": "emission"}),
+            ("unknown", None), ("not_applicable", None),
+        ):
+            with self.subTest(status=status, corrected=corrected):
+                self.assertFalse(_correction_emission_is_safe({
+                    "action": "CORRECT", "correction_validation_status": status,
+                    "corrected": corrected,
+                }))
 
     def test_indexed_candidate_file_hash_tampering_is_rejected(self):
         with _temporary_output_directory() as temporary:

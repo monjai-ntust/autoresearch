@@ -460,6 +460,19 @@ def _normalized(verdict: dict[str, Any]) -> dict[str, Any]:
     return {field: verdict[field] for field in _NORMALIZED_FIELDS}
 
 
+def _correction_emission_is_safe(verdict: dict[str, Any]) -> bool:
+    """Admit source-valid corrections or explicit rejection without a triple."""
+
+    if verdict["action"] != "CORRECT":
+        return True
+    status = verdict["correction_validation_status"]
+    if status == "valid":
+        return verdict["corrected"] is not None
+    return status in {
+        "ambiguous", "out_of_source", "schema_invalid", "direction_invalid"
+    } and verdict["corrected"] is None
+
+
 def _distribution(verdicts: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     response_status = Counter(item["response_status"] for item in verdicts)
     action = Counter(item["action"] or "null" for item in verdicts)
@@ -1317,9 +1330,8 @@ def _run_verifier_pilot(
         for repeat in all_repeats
         for response in repeat.responses.values()
     )
-    correction_grounded = all(
-        verdict["action"] != "CORRECT"
-        or verdict["correction_validation_status"] == "valid"
+    correction_emissions_safe = all(
+        _correction_emission_is_safe(verdict)
         for repeat in repeats["corrective"]
         for verdict in repeat.verdicts
     )
@@ -1393,9 +1405,9 @@ def _run_verifier_pilot(
             "both determinism calls are independently observed",
         ),
         _check(
-            "source-grounded-corrections",
-            correction_grounded,
-            "every CORRECT action maps to one exact source-token triple",
+            "correction-emission-safety",
+            correction_emissions_safe,
+            "valid corrections emit source-token triples; rejected corrections emit none",
         ),
         _check(
             "simple-two-call-determinism",
@@ -1493,7 +1505,8 @@ def _run_verifier_pilot(
         *([audit_checkout_path] if audit_checkout_path is not None else []),
     ]
     audit = {
-        "schema_version": "phase-b-verifier-pilot-audit-1.0",
+        "schema_version": "phase-b-verifier-pilot-audit-1.1",
+        "correction_policy": "source-valid-or-rejected-1",
         "run_id": layout.run_id,
         "protocol_id": PROTOCOL_ID,
         "workflow_id": WORKFLOW_ID,
